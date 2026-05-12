@@ -28,6 +28,18 @@ export default function Home() {
 
   const topStock = stocks[0];
 
+  const getMomentumScore = (stock: Stock) => {
+    const isBullish = stock.change >= 0;
+
+    return Math.min(
+      99,
+      Math.max(
+        52,
+        Math.round(60 + Math.abs(stock.change) * 6 + (isBullish ? 8 : -2))
+      )
+    );
+  };
+
   const fetchStocks = async () => {
     try {
       const tickersToFetch = [...new Set([...defaultTickers, ...watchlist])];
@@ -172,9 +184,14 @@ export default function Home() {
       <div className="relative z-10">
         <header className="sticky top-0 z-40 border-b border-orange-500/20 bg-black/75 backdrop-blur-2xl">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
-            <div className="flex items-center gap-4">
+            <motion.div
+              className="flex items-center gap-4"
+              initial={{ opacity: 0, x: -18 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5 }}
+            >
               <img src="/logo.png" alt="HT Labs" className="h-12 w-auto" />
-            </div>
+            </motion.div>
 
             <nav className="hidden items-center gap-8 text-sm font-semibold text-zinc-400 md:flex">
               <a className="text-orange-500" href="#home">
@@ -191,16 +208,18 @@ export default function Home() {
               </a>
             </nav>
 
-            <button
+            <motion.button
               onClick={() =>
                 document
                   .getElementById("scanner")
                   ?.scrollIntoView({ behavior: "smooth" })
               }
-              className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white shadow-[0_0_30px_rgba(255,106,0,0.35)] transition hover:scale-[1.02]"
+              className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white shadow-[0_0_30px_rgba(255,106,0,0.35)] transition"
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
             >
               Start Scanning →
-            </button>
+            </motion.button>
           </div>
         </header>
 
@@ -233,27 +252,31 @@ export default function Home() {
             </p>
 
             <div className="mt-8 flex flex-col gap-4 sm:flex-row">
-              <button
+              <motion.button
                 onClick={() =>
                   document
                     .getElementById("scanner")
                     ?.scrollIntoView({ behavior: "smooth" })
                 }
-                className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-7 py-4 text-sm font-black text-white shadow-[0_0_35px_rgba(255,106,0,0.35)] transition hover:scale-[1.02]"
+                className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-7 py-4 text-sm font-black text-white shadow-[0_0_35px_rgba(255,106,0,0.35)] transition"
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
               >
                 Run AI Scan →
-              </button>
+              </motion.button>
 
-              <button
+              <motion.button
                 onClick={() =>
                   document
                     .getElementById("watchlist")
                     ?.scrollIntoView({ behavior: "smooth" })
                 }
                 className="rounded-2xl border border-orange-500/30 bg-white/[0.03] px-7 py-4 text-sm font-black text-white transition hover:border-orange-400 hover:bg-orange-500/10"
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
               >
                 View Watchlist
-              </button>
+              </motion.button>
             </div>
 
             <div className="mt-9 grid gap-4 sm:grid-cols-3">
@@ -261,8 +284,14 @@ export default function Home() {
                 ["⚡", "Real-Time Data", "Live market updates"],
                 ["🧠", "AI-Powered", "Smarter analysis"],
                 ["🛡️", "Built for Traders", "Speed. Edge. Accuracy."],
-              ].map((item) => (
-                <div key={item[1]} className="flex items-start gap-3">
+              ].map((item, index) => (
+                <motion.div
+                  key={item[1]}
+                  className="flex items-start gap-3"
+                  initial={{ opacity: 0, y: 18 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.45, delay: 0.25 + index * 0.12 }}
+                >
                   <div className="rounded-2xl bg-orange-500/10 p-3 text-xl text-orange-400">
                     {item[0]}
                   </div>
@@ -270,14 +299,14 @@ export default function Home() {
                     <p className="font-black">{item[1]}</p>
                     <p className="text-sm text-zinc-500">{item[2]}</p>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 35 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, y: 35, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.8, delay: 0.15 }}
             className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 shadow-[0_0_70px_rgba(255,106,0,0.12)] backdrop-blur-xl"
           >
@@ -311,17 +340,20 @@ export default function Home() {
                     ? `${topStock.change >= 0 ? "+" : ""}${topStock.change.toFixed(2)}%`
                     : "--",
                 ],
-              ].map((stat) => (
-                <div
+              ].map((stat, index) => (
+                <motion.div
                   key={stat[0]}
                   className="rounded-2xl border border-white/10 bg-black/40 p-4"
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.35 + index * 0.08 }}
                 >
                   <p className="text-xs text-zinc-500">{stat[0]}</p>
                   <p className="mt-2 text-2xl font-black">{stat[1]}</p>
                   <p className="mt-1 text-xs font-bold text-green-400">
                     {stat[2]}
                   </p>
-                </div>
+                </motion.div>
               ))}
             </div>
 
@@ -336,10 +368,12 @@ export default function Home() {
               <div className="flex h-40 items-end gap-2 rounded-2xl bg-gradient-to-t from-orange-500/10 to-transparent p-3">
                 {[28, 34, 48, 42, 64, 55, 72, 46, 52, 68, 61, 84].map(
                   (height, index) => (
-                    <div
+                    <motion.div
                       key={index}
                       className="flex-1 rounded-t bg-gradient-to-t from-orange-700 to-orange-400 shadow-[0_0_20px_rgba(255,106,0,0.25)]"
-                      style={{ height: `${height}%` }}
+                      initial={{ height: "8%" }}
+                      animate={{ height: `${height}%` }}
+                      transition={{ duration: 0.7, delay: 0.25 + index * 0.04 }}
                     />
                   )
                 )}
@@ -363,9 +397,12 @@ export default function Home() {
 
               <div className="space-y-3">
                 {stocks.slice(0, 5).map((stock, index) => (
-                  <div
+                  <motion.div
                     key={stock.symbol}
                     className="grid grid-cols-[32px_1fr_90px_80px] items-center gap-3 rounded-2xl bg-white/[0.03] px-3 py-3 text-sm"
+                    initial={{ opacity: 0, x: 16 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.35, delay: index * 0.05 }}
                   >
                     <span className="text-zinc-500">#{index + 1}</span>
                     <span className="font-black">{stock.symbol}</span>
@@ -380,7 +417,7 @@ export default function Home() {
                       {stock.change >= 0 ? "+" : ""}
                       {stock.change.toFixed(2)}%
                     </span>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             </div>
@@ -411,7 +448,8 @@ export default function Home() {
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: index * 0.08 }}
                 viewport={{ once: true }}
-                className="rounded-[1.75rem] border border-white/10 bg-zinc-950/70 p-5 transition hover:-translate-y-1 hover:border-orange-500/35 hover:shadow-[0_0_40px_rgba(255,106,0,0.12)]"
+                whileHover={{ y: -6, scale: 1.02 }}
+                className="rounded-[1.75rem] border border-white/10 bg-zinc-950/70 p-5 transition hover:border-orange-500/35 hover:shadow-[0_0_40px_rgba(255,106,0,0.12)]"
               >
                 <div className="mb-5 inline-flex rounded-2xl bg-orange-500/10 p-4 text-2xl text-orange-400">
                   {feature[0]}
@@ -426,7 +464,13 @@ export default function Home() {
         </section>
 
         <section id="watchlist" className="mx-auto max-w-7xl px-5 py-8">
-          <div className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl">
+          <motion.div
+            className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl"
+            initial={{ opacity: 0, y: 25 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55 }}
+            viewport={{ once: true }}
+          >
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.3em] text-orange-400">
@@ -459,7 +503,7 @@ export default function Home() {
                 ))}
               </div>
             )}
-          </div>
+          </motion.div>
         </section>
 
         <section id="scanner" className="mx-auto max-w-7xl px-5 py-8 pb-24">
@@ -488,12 +532,14 @@ export default function Home() {
                 className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-zinc-950/90 px-4 py-4 text-sm outline-none transition placeholder:text-zinc-700 focus:border-orange-500 focus:shadow-[0_0_25px_rgba(255,106,0,0.18)] md:w-80"
               />
 
-              <button
+              <motion.button
                 onClick={addTicker}
-                className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4 text-sm font-black text-white shadow-[0_0_25px_rgba(255,106,0,0.25)] transition hover:scale-[1.02]"
+                className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4 text-sm font-black text-white shadow-[0_0_25px_rgba(255,106,0,0.25)] transition"
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
               >
                 Add
-              </button>
+              </motion.button>
             </div>
           </div>
 
@@ -501,6 +547,7 @@ export default function Home() {
             {stocks.map((stock, index) => {
               const isBullish = stock.change >= 0;
               const isHot = Math.abs(stock.change) > 2;
+              const score = getMomentumScore(stock);
               const chartBars = isBullish
                 ? [22, 35, 30, 48, 44, 70, 62, 88]
                 : [88, 62, 70, 44, 48, 30, 35, 22];
@@ -512,7 +559,8 @@ export default function Home() {
                   whileInView={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.45, delay: index * 0.05 }}
                   viewport={{ once: true }}
-                  className="group relative overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/30 transition hover:-translate-y-1 hover:border-orange-500/40 hover:shadow-[0_0_45px_rgba(255,106,0,0.14)]"
+                  whileHover={{ y: -6, scale: 1.015 }}
+                  className="group relative overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/30 transition hover:border-orange-500/40 hover:shadow-[0_0_45px_rgba(255,106,0,0.14)]"
                 >
                   <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-orange-700 via-orange-400 to-orange-700" />
 
@@ -559,6 +607,10 @@ export default function Home() {
                     <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-zinc-400">
                       AI READY
                     </div>
+
+                    <div className="rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-1 text-xs font-black text-orange-300">
+                      SCORE {score}
+                    </div>
                   </div>
 
                   <div>
@@ -581,26 +633,31 @@ export default function Home() {
                   <div className="mt-6 h-24 rounded-3xl border border-white/10 bg-gradient-to-r from-orange-500/10 to-orange-900/10 p-3">
                     <div className="flex h-full items-end gap-1">
                       {chartBars.map((height, i) => (
-                        <div
+                        <motion.div
                           key={i}
                           className={`flex-1 rounded-t ${
                             isBullish ? "bg-orange-400/80" : "bg-red-400/70"
                           }`}
-                          style={{ height: `${height}%` }}
+                          initial={{ height: "10%" }}
+                          whileInView={{ height: `${height}%` }}
+                          transition={{ duration: 0.55, delay: i * 0.035 }}
+                          viewport={{ once: true }}
                         />
                       ))}
                     </div>
                   </div>
 
-                  <button
+                  <motion.button
                     onClick={() => openAiModal(stock)}
                     disabled={aiLoading}
-                    className="mt-6 w-full rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 py-4 text-sm font-black text-white shadow-lg shadow-orange-500/20 transition hover:scale-[1.01] disabled:opacity-50"
+                    className="mt-6 w-full rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 py-4 text-sm font-black text-white shadow-lg shadow-orange-500/20 transition disabled:opacity-50"
+                    whileHover={{ scale: aiLoading ? 1 : 1.02 }}
+                    whileTap={{ scale: aiLoading ? 1 : 0.97 }}
                   >
                     {aiLoading && selectedStock?.symbol === stock.symbol
                       ? "Analyzing..."
                       : "View AI Setup"}
-                  </button>
+                  </motion.button>
                 </motion.div>
               );
             })}
@@ -618,8 +675,18 @@ export default function Home() {
         </footer>
 
         {selectedStock && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 backdrop-blur-sm">
-            <div className="w-full max-w-md overflow-hidden rounded-[2rem] border border-orange-500/30 bg-zinc-950 shadow-2xl shadow-orange-500/20">
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2 }}
+          >
+            <motion.div
+              className="w-full max-w-md overflow-hidden rounded-[2rem] border border-orange-500/30 bg-zinc-950 shadow-2xl shadow-orange-500/20"
+              initial={{ opacity: 0, scale: 0.94, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+            >
               <div className="border-b border-white/10 bg-orange-500/10 p-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -665,6 +732,18 @@ export default function Home() {
                       {Number(selectedStock.change || 0).toFixed(2)}%
                     </p>
                   </div>
+                </div>
+
+                <div className="mb-4 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-4">
+                  <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
+                    Momentum Score
+                  </p>
+                  <p className="mt-2 text-4xl font-black text-orange-300">
+                    {getMomentumScore(selectedStock)}
+                  </p>
+                  <p className="mt-1 text-sm font-bold text-zinc-400">
+                    {selectedStock.change >= 0 ? "Bullish setup" : "Bearish setup"}
+                  </p>
                 </div>
 
                 <div className="rounded-3xl border border-orange-500/20 bg-orange-500/5 p-4">
@@ -713,16 +792,18 @@ export default function Home() {
                     Powered by HEADTAP AI
                   </p>
 
-                  <button
+                  <motion.button
                     onClick={() => setSelectedStock(null)}
-                    className="rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 text-sm font-black text-white transition hover:scale-[1.02]"
+                    className="rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 text-sm font-black text-white transition"
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                   >
                     Done
-                  </button>
+                  </motion.button>
                 </div>
               </div>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
         )}
       </div>
     </main>
