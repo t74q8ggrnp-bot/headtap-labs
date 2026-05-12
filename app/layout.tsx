@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "HT Labs",
   description: "AI-powered tools and landing pages by HT Labs.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({
