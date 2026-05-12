@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
+import MiniStockChart from "./components/MiniStockChart";
 
 type Stock = {
   symbol: string;
@@ -104,9 +105,7 @@ export default function Home() {
         const filtered = prev.filter((stock) => stock.symbol !== cleanTicker);
         const updated = [...filtered, newStock];
 
-        return updated.sort(
-          (a, b) => Math.abs(b.change) - Math.abs(a.change)
-        );
+        return updated.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
       });
 
       if (!watchlist.includes(cleanTicker)) {
@@ -436,11 +435,31 @@ export default function Home() {
 
           <div className="grid gap-5 md:grid-cols-5">
             {[
-              ["⚡", "Real-Time Scanning", "Scan live stocks with fast quote refreshes."],
-              ["🧠", "AI Momentum Score", "Use AI setup reads to understand bias and risk."],
-              ["🎯", "Smart Ranking", "Sort tickers by strongest absolute momentum."],
-              ["🔔", "Watchlist Ready", "Save favorite tickers locally on your device."],
-              ["🔒", "Clean & Reliable", "Simple signals, fast interface, focused workflow."],
+              [
+                "⚡",
+                "Real-Time Scanning",
+                "Scan live stocks with fast quote refreshes.",
+              ],
+              [
+                "🧠",
+                "AI Momentum Score",
+                "Use AI setup reads to understand bias and risk.",
+              ],
+              [
+                "🎯",
+                "Smart Ranking",
+                "Sort tickers by strongest absolute momentum.",
+              ],
+              [
+                "🔔",
+                "Watchlist Ready",
+                "Save favorite tickers locally on your device.",
+              ],
+              [
+                "🔒",
+                "Clean & Reliable",
+                "Simple signals, fast interface, focused workflow.",
+              ],
             ].map((feature, index) => (
               <motion.div
                 key={feature[1]}
@@ -548,9 +567,6 @@ export default function Home() {
               const isBullish = stock.change >= 0;
               const isHot = Math.abs(stock.change) > 2;
               const score = getMomentumScore(stock);
-              const chartBars = isBullish
-                ? [22, 35, 30, 48, 44, 70, 62, 88]
-                : [88, 62, 70, 44, 48, 30, 35, 22];
 
               return (
                 <motion.div
@@ -630,21 +646,12 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <div className="mt-6 h-24 rounded-3xl border border-white/10 bg-gradient-to-r from-orange-500/10 to-orange-900/10 p-3">
-                    <div className="flex h-full items-end gap-1">
-                      {chartBars.map((height, i) => (
-                        <motion.div
-                          key={i}
-                          className={`flex-1 rounded-t ${
-                            isBullish ? "bg-orange-400/80" : "bg-red-400/70"
-                          }`}
-                          initial={{ height: "10%" }}
-                          whileInView={{ height: `${height}%` }}
-                          transition={{ duration: 0.55, delay: i * 0.035 }}
-                          viewport={{ once: true }}
-                        />
-                      ))}
-                    </div>
+                  <div className="mt-6 rounded-3xl border border-white/10 bg-gradient-to-r from-orange-500/10 to-orange-900/10 p-3">
+                    <MiniStockChart
+                      symbol={stock.symbol}
+                      price={stock.price}
+                      change={stock.change}
+                    />
                   </div>
 
                   <motion.button
@@ -742,7 +749,9 @@ export default function Home() {
                     {getMomentumScore(selectedStock)}
                   </p>
                   <p className="mt-1 text-sm font-bold text-zinc-400">
-                    {selectedStock.change >= 0 ? "Bullish setup" : "Bearish setup"}
+                    {selectedStock.change >= 0
+                      ? "Bullish setup"
+                      : "Bearish setup"}
                   </p>
                 </div>
 
