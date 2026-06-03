@@ -1,7 +1,10 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
 import { motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import MiniStockChart from "./components/MiniStockChart";
 import { supabase } from "@/lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
@@ -19,6 +22,16 @@ type MarketBadge = {
 };
 
 type ScannerFilter = "all" | "hot" | "bullish" | "watchlist";
+type AllocationStyle = "short" | "swing" | "long";
+type AllocationRisk = "conservative" | "moderate" | "aggressive";
+type ExperienceLevel = "beginner" | "intermediate" | "advanced";
+type CommandMode = "command" | "capital" | "portfolio" | "signals" | "replay";
+
+type PortfolioHolding = {
+  id: string;
+  symbol: string;
+  amount: string;
+};
 
 type Catalyst = {
   symbol: string;
@@ -42,6 +55,30 @@ type NewsItem = {
   datetime?: number;
 };
 
+type NewsIntel = {
+  articles: NewsItem[];
+  newsVelocity: number;
+  catalystStrength: string;
+  narrativeSignal: string;
+  sentimentBias: string;
+  sentimentScore: number;
+  hypeScore: number;
+  sourceCount: number;
+  socialVelocity?: number;
+  redditMentions?: number;
+  xMentions?: number;
+  stocktwitsMentions?: number;
+  crowdSignal?: string;
+};
+
+type MarketScanStats = {
+  scanned: number;
+  gainers: number;
+  losers: number;
+  highVolume: number;
+  lastFullScan: Date | null;
+};
+
 const fallbackQuotes: Record<string, Stock> = {
   NVDA: { symbol: "NVDA", price: 945.75, change: 2.18 },
   PLTR: { symbol: "PLTR", price: 132.4, change: 3.84 },
@@ -62,21 +99,21 @@ const fallbackQuotes: Record<string, Stock> = {
 const catalystRadar: Catalyst[] = [
   {
     symbol: "SNAL",
-    title: "Retail Momentum Spike",
+    title: "Retail Attention Spike",
     impact: "High",
-    note: "Unusual move with high trader attention. Watch volume fade risk.",
+    note: "Small-cap attention is moving fast. HT is watching whether crowd interest becomes durable participation. Watch volume retention and pullback behavior.",
   },
   {
     symbol: "NVDA",
     title: "AI Leadership Tape",
     impact: "Medium",
-    note: "Large-cap AI strength keeps the broader tech trade supported.",
+    note: "NVDA is a bellwether for AI risk appetite. Watch whether strength spreads into AMD, SMCI, and QQQ.",
   },
   {
     symbol: "QUBT",
     title: "Speculative Quantum Watch",
     impact: "Watch",
-    note: "High beta name. Better after reclaim/hold confirmation.",
+    note: "High-beta quantum attention. Watch continuation after pullbacks instead of chasing first green candles.",
   },
 ];
 
@@ -101,6 +138,40 @@ const defaultStarterTickers = [
   "MSFT",
 ];
 
+const broadMarketUniverse = [
+  // Index / market pulse
+  "SPY", "QQQ", "IWM", "DIA", "VTI", "XLK", "XLF", "XLE", "XLI", "XLV", "XLY", "XLC", "SMH", "ARKK", "TQQQ", "SQQQ",
+
+  // Mega-cap / institutional leaders
+  "AAPL", "MSFT", "NVDA", "GOOGL", "GOOG", "META", "AMZN", "TSLA", "NFLX", "AVGO", "ORCL", "CRM", "ADBE", "NOW", "UBER", "SHOP",
+
+  // AI / semis / infrastructure
+  "AMD", "SMCI", "ARM", "MU", "TSM", "INTC", "MRVL", "ASML", "QCOM", "ON", "WDC", "DELL", "HPE", "CRWD", "PANW", "NET", "DDOG", "SNOW", "AI", "SOUN", "BBAI", "PATH", "PLTR",
+
+  // Momentum / retail attention / risk-on proxies
+  "HOOD", "MSTR", "COIN", "RIVN", "SOFI", "RDDT", "DJT", "GME", "AMC", "LCID", "CHPT", "OPEN", "AFRM", "UPST", "CVNA", "DKNG", "RBLX", "ROKU", "PINS", "BILI", "NIO", "XPEV", "LI",
+
+  // Space / quantum / speculative innovation
+  "LUNR", "RKLB", "ASTS", "IONQ", "RGTI", "QBTS", "QUBT", "LAES", "ARQQ", "ACHR", "JOBY", "EVTL", "SPCE", "KULR", "SERV", "PDYN", "RR", "BKSY",
+
+  // Small-cap / high-beta / unusual activity watch
+  "SNAL", "OTLK", "ALT", "VKTX", "IOVA", "TEM", "HIMS", "RXRX", "BEAM", "CRSP", "EDIT", "NTLA", "GERN", "TGTX", "SMMT", "NVAX", "IBRX", "ARDX", "LXRX", "CAPR", "AKBA", "MARA", "RIOT", "CLSK", "BTBT", "HUT", "BITF", "WULF",
+
+  // Financials / liquidity / market confidence
+  "JPM", "BAC", "GS", "MS", "WFC", "C", "AXP", "SCHW", "PYPL", "V", "MA",
+
+  // Consumer / rotation / earnings momentum
+  "DIS", "NKE", "SBUX", "CMG", "COST", "WMT", "TGT", "LULU", "ELF", "CELH", "CAVA", "SHAK", "RCL", "CCL", "DAL", "UAL", "AAL",
+
+  // Energy / industrial / macro momentum
+  "XOM", "CVX", "OXY", "SLB", "FCX", "NEM", "CAT", "DE", "GE", "BA", "LMT", "RTX",
+
+  // Healthcare / biotech large-cap pulse
+  "LLY", "NVO", "MRNA", "PFE", "MRK", "JNJ", "ABBV", "UNH", "ISRG", "TMDX",
+];
+
+const marketUniverse = Array.from(new Set([...defaultStarterTickers, ...broadMarketUniverse]));
+
 const scannerFilters: { label: string; value: ScannerFilter }[] = [
   { label: "All", value: "all" },
   { label: "Hot", value: "hot" },
@@ -109,7 +180,12 @@ const scannerFilters: { label: string; value: ScannerFilter }[] = [
 ];
 
 export default function Home() {
-  const initialStocks = Object.values(fallbackQuotes).filter((stock) => defaultStarterTickers.includes(stock.symbol));
+  // build: v149-auth-stability-v120-behavior
+  // V70 command center cleanup: live tape/search/auth first, top conviction as hero, capital and portfolio below, old marketing hero hidden.
+  // v106 pre-market stabilization pass: preserve identity, polish nav/search spacing, compress support metrics, and keep market-open usability stable.
+  const initialStocks = Object.values(fallbackQuotes).filter((stock) =>
+    defaultStarterTickers.includes(stock.symbol),
+  );
 
   const [stocks, setStocks] = useState<Stock[]>(initialStocks);
   const [ticker, setTicker] = useState("");
@@ -122,41 +198,273 @@ export default function Home() {
   const [isRefreshing, setIsRefreshing] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scannerFilter, setScannerFilter] = useState<ScannerFilter>("all");
-  const [marketSession, setMarketSession] = useState<"live" | "premarket" | "afterhours">("live");
+  const [marketSession, setMarketSession] = useState<
+    "live" | "premarket" | "afterhours"
+  >("live");
   const [news, setNews] = useState<Record<string, NewsItem[]>>({});
+  const [newsIntel, setNewsIntel] = useState<Record<string, NewsIntel>>({});
   const [session, setSession] = useState<Session | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
+  const [searchStatus, setSearchStatus] = useState("Search any ticker to pull it into HT instantly.");
   const [cloudSyncMessage, setCloudSyncMessage] = useState("");
+  const [signalMemoryMessage, setSignalMemoryMessage] = useState("Signal memory waiting for login.");
+  const [signalMemoryInsight, setSignalMemoryInsight] = useState<SignalMemoryInsight | null>(null);
+  const lastSignalMemoryKey = useRef("");
+  const lastOutcomeEvaluationKey = useRef("");
   const [savedSetups, setSavedSetups] = useState<string[]>([]);
-  const [traderMode, setTraderMode] = useState<"Scalper" | "Momentum" | "Swing" | "Conservative" | "Aggressive">("Momentum");
+  const [traderMode, setTraderMode] = useState<
+    "Scalper" | "Momentum" | "Swing" | "Conservative" | "Aggressive"
+  >("Momentum");
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
   const [viewedTickers, setViewedTickers] = useState<string[]>([]);
+  const [deskPulseIndex, setDeskPulseIndex] = useState(0);
+  const [terminalPulse, setTerminalPulse] = useState(0);
+  const [expandedInsight, setExpandedInsight] = useState<string | null>("why-this-matters");
+  const [hoveredInsight, setHoveredInsight] = useState<string | null>(null);
+  const [activeMode, setActiveMode] = useState<CommandMode>("command");
+  const [capitalInput, setCapitalInput] = useState("500");
+  const [allocationStyle, setAllocationStyle] = useState<AllocationStyle>("short");
+  const [allocationRisk, setAllocationRisk] = useState<AllocationRisk>("moderate");
+  const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>("beginner");
+  const [cashInput, setCashInput] = useState("180");
+  const [marketScanStats, setMarketScanStats] = useState<MarketScanStats>({
+    scanned: marketUniverse.length,
+    gainers: 0,
+    losers: 0,
+    highVolume: 0,
+    lastFullScan: null,
+  });
+  const [portfolioHoldings, setPortfolioHoldings] = useState<PortfolioHolding[]>([
+    { id: "holding-1", symbol: "SNAL", amount: "120" },
+    { id: "holding-2", symbol: "QUBT", amount: "80" },
+    { id: "holding-3", symbol: "NVDA", amount: "120" },
+  ]);
 
+  const updatePortfolioHolding = (id: string, field: "symbol" | "amount", value: string) => {
+    setPortfolioHoldings((current) =>
+      current.map((holding) =>
+        holding.id === id
+          ? { ...holding, [field]: field === "symbol" ? value.toUpperCase() : value }
+          : holding,
+      ),
+    );
+  };
 
-  const defaultTickers = defaultStarterTickers;
+  const addPortfolioHolding = () => {
+    setPortfolioHoldings((current) => [
+      ...current,
+      { id: `holding-${Date.now()}`, symbol: "", amount: "" },
+    ]);
+  };
+
+  const removePortfolioHolding = (id: string) => {
+    setPortfolioHoldings((current) => current.filter((holding) => holding.id !== id));
+  };
+
+  const defaultTickers = marketUniverse;
+
+  const clampScore = (value: number, min = 0, max = 99) => {
+    return Math.min(max, Math.max(min, Math.round(value)));
+  };
 
   const marketBadges: MarketBadge[] = [
     { symbol: "SPY", label: "Broad Market", change: fallbackQuotes.SPY.change },
-    { symbol: "QQQ", label: "Tech Strength", change: fallbackQuotes.QQQ.change },
+    {
+      symbol: "QQQ",
+      label: "Tech Strength",
+      change: fallbackQuotes.QQQ.change,
+    },
     { symbol: "DIA", label: "Blue Chips", change: fallbackQuotes.DIA.change },
   ];
 
+  const getNewsArticles = (symbol: string) => {
+    return newsIntel[symbol]?.articles || news[symbol] || [];
+  };
+
+  const getNewsVelocityScore = (stock: Stock) => {
+    const intel = newsIntel[stock.symbol];
+
+    if (intel?.newsVelocity) {
+      return clampScore(intel.newsVelocity, 20, 95);
+    }
+
+    const articles = getNewsArticles(stock.symbol);
+
+    if (articles.length >= 5) return 84;
+    if (articles.length >= 3) return 72;
+    if (articles.length >= 1) return 56;
+
+    return stock.change >= 5 ? 42 : 28;
+  };
+
+  const getCatalystStrength = (stock: Stock) => {
+    const intel = newsIntel[stock.symbol];
+    const velocity = getNewsVelocityScore(stock);
+
+    if (intel?.catalystStrength) return intel.catalystStrength;
+    if (velocity >= 80) return "Narrative acceleration";
+    if (velocity >= 65) return "Fresh catalyst activity";
+    if (velocity >= 50) return "Light news activity";
+
+    return "No fresh catalyst";
+  };
+
+  const getNarrativeSignal = (stock: Stock) => {
+    const intel = newsIntel[stock.symbol];
+    const topHeadline = getNewsArticles(stock.symbol)[0]?.headline;
+    const velocity = getNewsVelocityScore(stock);
+
+    if (intel?.narrativeSignal) return intel.narrativeSignal;
+    if (velocity >= 80) return "Narrative pressure accelerating";
+    if (topHeadline) return "Fresh headline detected";
+    if (stock.change >= 4 && getRelativeVolume(stock) >= 2.5) return "Price moving before clear headline";
+
+    return "Narrative still quiet";
+  };
+
+  const getNewsCatalystScore = (stock: Stock) => {
+    const velocity = getNewsVelocityScore(stock);
+    const articles = getNewsArticles(stock.symbol);
+    const hasHeadline = Boolean(articles[0]?.headline);
+    const rvol = getRelativeVolume(stock);
+
+    let score = hasHeadline ? velocity : 34;
+
+    if (articles.length >= 3) score += 6;
+    if (stock.change >= 4 && rvol >= 2.5 && !hasHeadline) score += 10;
+    if (stock.change < 0 && velocity < 55) score -= 6;
+
+    return clampScore(score, 25, 95);
+  };
+
+  const getNewsTextBundle = (stock: Stock) => {
+    return getNewsArticles(stock.symbol)
+      .slice(0, 5)
+      .map((article) => `${article.headline || ""} ${article.summary || ""}`)
+      .join(" ")
+      .toLowerCase();
+  };
+
+  const getNarrativeSentimentScore = (stock: Stock) => {
+    const intel = newsIntel[stock.symbol];
+
+    if (typeof intel?.sentimentScore === "number") {
+      return clampScore(intel.sentimentScore, 20, 95);
+    }
+
+    const text = getNewsTextBundle(stock);
+    const bullishWords = [
+      "surge",
+      "surges",
+      "rally",
+      "rallies",
+      "beat",
+      "beats",
+      "raises",
+      "upgrade",
+      "growth",
+      "record",
+      "breakout",
+      "strong",
+      "profit",
+      "partnership",
+      "approval",
+      "launch",
+    ];
+    const bearishWords = [
+      "fall",
+      "falls",
+      "drop",
+      "drops",
+      "miss",
+      "cuts",
+      "downgrade",
+      "loss",
+      "probe",
+      "lawsuit",
+      "warning",
+      "weak",
+      "selloff",
+      "slump",
+      "risk",
+      "concern",
+    ];
+
+    const bullishHits = bullishWords.filter((word) => text.includes(word)).length;
+    const bearishHits = bearishWords.filter((word) => text.includes(word)).length;
+    const rawScore = 55 + bullishHits * 7 - bearishHits * 8 + (stock.change >= 0 ? 4 : -4);
+
+    return clampScore(rawScore, 20, 95);
+  };
+
+  const getNarrativeSentimentBias = (stock: Stock) => {
+    const intel = newsIntel[stock.symbol];
+    const score = getNarrativeSentimentScore(stock);
+
+    if (intel?.sentimentBias) return intel.sentimentBias;
+    if (score >= 75) return "Bullish narrative pressure";
+    if (score >= 58) return "Constructive narrative";
+    if (score <= 38) return "Bearish narrative pressure";
+    if (score <= 48) return "Cautious narrative";
+
+    return "Neutral narrative";
+  };
+
+  const getRetailHypeScore = (stock: Stock) => {
+    const intel = newsIntel[stock.symbol];
+
+    if (typeof intel?.hypeScore === "number") {
+      return clampScore(intel.hypeScore, 20, 95);
+    }
+
+    const text = getNewsTextBundle(stock);
+    const hypeWords = [
+      "meme",
+      "retail",
+      "short squeeze",
+      "squeeze",
+      "reddit",
+      "wallstreetbets",
+      "stocktwits",
+      "trending",
+      "viral",
+      "options",
+      "unusual volume",
+      "speculative",
+      "crypto",
+      "ai",
+      "quantum",
+    ];
+    const hypeHits = hypeWords.filter((word) => text.includes(word)).length;
+    const attention = getAttentionScore(stock);
+    const rvol = getRelativeVolume(stock);
+
+    return clampScore(35 + hypeHits * 9 + Math.min(22, rvol * 3) + attention * 0.18, 20, 95);
+  };
+
   const tickerTape = useMemo(
-    () => (stocks.length ? stocks.slice(0, 8) : defaultTickers.slice(0, 8).map((symbol) => fallbackQuotes[symbol]).filter(Boolean)),
-    [stocks]
+    () =>
+      stocks.length
+        ? stocks.slice(0, 8)
+        : defaultTickers
+            .slice(0, 8)
+            .map((symbol) => fallbackQuotes[symbol])
+            .filter(Boolean),
+    [stocks],
   );
 
   const hotStocks = useMemo(
     () => stocks.filter((stock) => Math.abs(stock.change) > 4),
-    [stocks]
+    [stocks],
   );
 
   const bullishCount = useMemo(
     () => stocks.filter((stock) => stock.change >= 0).length,
-    [stocks]
+    [stocks],
   );
 
   const bearishCount = Math.max(0, stocks.length - bullishCount);
@@ -186,13 +494,29 @@ export default function Home() {
   }, [scannerFilter, stocks, watchlist]);
 
   const topGainers = useMemo(
-    () => [...stocks].filter((stock) => stock.change > 0).sort((a, b) => b.change - a.change).slice(0, 3),
-    [stocks]
+    () =>
+      [...stocks]
+        .filter((stock) => stock.change > 0)
+        .sort((a, b) => b.change - a.change)
+        .slice(0, 3),
+    [stocks],
   );
 
   const topLosers = useMemo(
-    () => [...stocks].filter((stock) => stock.change < 0).sort((a, b) => a.change - b.change).slice(0, 3),
-    [stocks]
+    () =>
+      [...stocks]
+        .filter((stock) => stock.change < 0)
+        .sort((a, b) => a.change - b.change)
+        .slice(0, 3),
+    [stocks],
+  );
+
+  const topMovers = useMemo(
+    () =>
+      [...stocks]
+        .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+        .slice(0, 5),
+    [stocks],
   );
 
   const getMomentumScore = (stock: Stock) => {
@@ -202,8 +526,8 @@ export default function Home() {
       99,
       Math.max(
         52,
-        Math.round(60 + Math.abs(stock.change) * 6 + (isBullish ? 8 : -2))
-      )
+        Math.round(60 + Math.abs(stock.change) * 6 + (isBullish ? 8 : -2)),
+      ),
     );
   };
 
@@ -211,7 +535,7 @@ export default function Home() {
     const move = Math.abs(stock.change);
 
     if (move >= 10) return "Extreme Volatility";
-    if (move >= 5) return "High Momentum";
+    if (move >= 5) return "High Attention Spike";
     if (move >= 2) return "Active";
     return "Normal";
   };
@@ -220,13 +544,25 @@ export default function Home() {
     const move = Math.abs(stock.change);
     const symbolBoosts: Record<string, number> = {
       SNAL: 6.8,
+      RGTI: 5.2,
+      QBTS: 5.0,
+      LUNR: 4.9,
+      IOVA: 4.7,
       QUBT: 4.4,
+      RKLB: 4.1,
+      IONQ: 3.9,
+      SOUN: 3.8,
+      ACHR: 3.6,
       MSTR: 3.2,
+      COIN: 3.0,
       PLTR: 2.6,
+      HOOD: 2.4,
       NVDA: 2.1,
     };
 
-    return Number((symbolBoosts[stock.symbol] || Math.max(0.8, 1 + move / 3)).toFixed(1));
+    return Number(
+      (symbolBoosts[stock.symbol] || Math.max(0.8, 1 + move / 3)).toFixed(1),
+    );
   };
 
   const getGapSignal = (stock: Stock) => {
@@ -253,8 +589,10 @@ export default function Home() {
   const getAttentionScore = (stock: Stock) => {
     const rvol = getRelativeVolume(stock);
     const move = Math.abs(stock.change);
-    const hasNews = Boolean(news[stock.symbol]?.[0]?.headline);
-    const isSaved = watchlist.includes(stock.symbol) || savedSetups.includes(stock.symbol);
+    const hasNews = Boolean(getNewsArticles(stock.symbol)[0]?.headline);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const isSaved =
+      watchlist.includes(stock.symbol) || savedSetups.includes(stock.symbol);
 
     let score = 45;
 
@@ -262,6 +600,8 @@ export default function Home() {
     score += Math.min(18, rvol * 3);
 
     if (hasNews) score += 8;
+    if (newsVelocity >= 75) score += 7;
+    if (newsVelocity >= 60) score += 4;
     if (isSaved) score += 5;
     if (stock.symbol === "SNAL" || stock.symbol === "QUBT") score += 6;
 
@@ -271,7 +611,7 @@ export default function Home() {
   const getAttentionTrend = (stock: Stock) => {
     const score = getAttentionScore(stock);
 
-    if (score >= 90) return "Surging";
+    if (score >= 90) return "Momentum Expanding";
     if (score >= 80) return "Accelerating";
     if (score >= 68) return "Building";
     if (stock.change < 0) return "Fading";
@@ -284,12 +624,15 @@ export default function Home() {
     const signal = getSignalQuality(stock);
     const rvol = getRelativeVolume(stock);
 
-    if (attention >= 90 && signal >= 85) return "Push-worthy: attention + signal quality aligned.";
-    if (attention >= 80 && rvol >= 3) return "Notify watchlist users if momentum holds.";
-    if (signal >= 85) return "High-quality setup; monitor for breakout trigger.";
+    if (attention >= 90 && signal >= 85)
+      return "Push-worthy: attention + signal quality aligned.";
+    if (attention >= 80 && rvol >= 3)
+      return "Notify watchlist users if momentum holds.";
+    if (signal >= 85)
+      return "High-quality pressure pocket forming; monitor for the breakout trigger before the crowd piles in.";
     if (stock.change < 0) return "No push. Wait for reclaim confirmation.";
 
-    return "Monitor only. Not notification-worthy yet.";
+    return "Monitor only. HT has not detected a crowd-pressure shift worth alerting yet.";
   };
 
   const getUrgencyLevel = (stock: Stock) => {
@@ -308,12 +651,10 @@ export default function Home() {
       .slice(0, 6);
   }, [stocks, news, watchlist, savedSetups]);
 
-
-
   const getSignalQuality = (stock: Stock) => {
     const setupScore = getSetupScore(stock);
     const rvol = getRelativeVolume(stock);
-    const hasNews = Boolean(news[stock.symbol]?.[0]?.headline);
+    const hasNews = Boolean(getNewsArticles(stock.symbol)[0]?.headline);
 
     let quality = setupScore;
 
@@ -338,14 +679,14 @@ export default function Home() {
   const getPremarketBias = (stock: Stock) => {
     const quality = getSignalQuality(stock);
 
-    if (stock.change >= 6 && quality >= 80) return "Gap-and-go candidate if volume holds.";
+    if (stock.change >= 6 && quality >= 80)
+      return "Gap-and-go candidate if volume holds.";
     if (stock.change >= 3) return "Needs opening range confirmation.";
-    if (stock.change < 0) return "Watch for reclaim before considering long bias.";
+    if (stock.change < 0)
+      return "Watch for reclaim before considering long bias.";
 
     return "Wait for volume confirmation after open.";
   };
-
-
 
   const getConfidence = (stock: Stock) => {
     const base = getMomentumScore(stock);
@@ -353,7 +694,6 @@ export default function Home() {
 
     return Math.min(98, Math.max(45, base + momentumBonus));
   };
-
 
   const getSetupScore = (stock: Stock) => {
     const move = Math.abs(stock.change);
@@ -369,7 +709,7 @@ export default function Home() {
 
     if (stock.change > 0) score += 6;
     if (confidence >= 80) score += 6;
-    if (news[stock.symbol]?.[0]?.headline) score += 5;
+    if (getNewsArticles(stock.symbol)[0]?.headline) score += 5;
 
     return Math.min(99, Math.max(35, score));
   };
@@ -406,18 +746,18 @@ export default function Home() {
 
   const getAIBias = (stock: Stock) => {
     if (stock.change >= 10) {
-      return "Bullish but extended. Best if volume sustains after a pullback.";
+      return "Bullish pressure is extended. HT wants proof that participation can absorb profit-taking before chasing.";
     }
 
     if (stock.change >= 4) {
-      return "Bullish continuation possible above intraday support.";
+      return "Crowd pressure is building, but continuation only matters if participation expands with the move.";
     }
 
     if (stock.change < 0) {
-      return "Weak structure. Needs reclaim confirmation before bullish bias.";
+      return "Weak structure. HT needs reclaim strength before calling crowd pressure back into the name.";
     }
 
-    return "Neutral setup. Wait for volume, news, or attention confirmation.";
+    return "Pre-signal watch. HT needs attention, participation, or catalyst pressure before calling it early.";
   };
 
   const getSetupGrade = (score: number) => {
@@ -443,10 +783,10 @@ export default function Home() {
 
   const getAlertMessage = (stock: Stock) => {
     const score = getSetupScore(stock);
-    const topNews = news[stock.symbol]?.[0];
+    const topNews = getNewsArticles(stock.symbol)[0];
 
     if (topNews?.headline && score >= 82) {
-      return `${stock.symbol} has a strong setup score with fresh catalyst activity. Watch for continuation confirmation.`;
+      return `${stock.symbol} has a strong pressure score with fresh catalyst activity. Wait for participation quality to confirm continuation.`;
     }
 
     if (stock.change >= 8) {
@@ -454,7 +794,7 @@ export default function Home() {
     }
 
     if (stock.change >= 4) {
-      return `${stock.symbol} momentum is building above scanner threshold. Watch volume and higher-low structure.`;
+      return `${stock.symbol} momentum is building above scanner threshold. Track participation quality, higher-low structure, and whether crowd pressure keeps expanding.`;
     }
 
     if (stock.change < 0) {
@@ -497,7 +837,7 @@ export default function Home() {
 
   const getDailyMarketMood = () => {
     if (marketPulse === "Bullish" && attentionLeaders[0]?.change >= 4) {
-      return "Momentum Risk-On";
+      return "Attention Spike Risk-On";
     }
 
     if (marketPulse === "Defensive") {
@@ -505,7 +845,7 @@ export default function Home() {
     }
 
     if (hotStocks.length >= 3) {
-      return "Selective Momentum";
+      return "Selective Attention Spike";
     }
 
     return "Mixed / Wait For Confirmation";
@@ -528,11 +868,16 @@ export default function Home() {
   };
 
   const getDailyRiskEnvironment = () => {
-    const extendedNames = stocks.filter((stock) => Math.abs(stock.change) >= 8).length;
+    const extendedNames = stocks.filter(
+      (stock) => Math.abs(stock.change) >= 8,
+    ).length;
 
-    if (extendedNames >= 3) return "High chase risk. Focus on pullbacks, reclaims, and smaller size.";
-    if (bearishCount > bullishCount) return "Defensive conditions. Avoid forcing longs until reclaim strength appears.";
-    if (hotStocks.length > 0) return "Momentum active. Respect volatility and avoid vertical candle entries.";
+    if (extendedNames >= 3)
+      return "High chase risk. Focus on pullbacks, reclaims, and smaller size.";
+    if (bearishCount > bullishCount)
+      return "Defensive conditions. Avoid forcing longs until reclaim strength appears.";
+    if (hotStocks.length > 0)
+      return "Attention Spike active. Respect volatility and avoid vertical candle entries.";
 
     return "Normal risk. Wait for signal quality and volume confirmation.";
   };
@@ -554,7 +899,15 @@ export default function Home() {
       watchlistCount: watchlist.length,
       savedCount: savedSetups.length,
     };
-  }, [stocks, news, watchlist, savedSetups, marketPulse, bullishCount, bearishCount]);
+  }, [
+    stocks,
+    news,
+    watchlist,
+    savedSetups,
+    marketPulse,
+    bullishCount,
+    bearishCount,
+  ]);
 
   const dailyActionItems = useMemo(() => {
     const leader = attentionLeaders[0] || signalLeaders[0];
@@ -571,8 +924,6 @@ export default function Home() {
         : "Add 3-5 tickers to your watchlist to unlock a better daily workflow.",
     ];
   }, [stocks, news, watchlist, savedSetups]);
-
-
 
   const getTraderMemoryProfile = () => {
     if (traderMode === "Scalper") {
@@ -591,7 +942,7 @@ export default function Home() {
       return "High-volatility tolerance with earlier speculative positioning.";
     }
 
-    return "Momentum-focused trader seeking attention and continuation setups.";
+    return "Attention Spike-focused trader seeking attention and continuation setups.";
   };
 
   const getTraderPatternInsight = () => {
@@ -660,7 +1011,7 @@ export default function Home() {
       case "Scalper":
         return "Avoid hesitation. Focus on liquidity and reaction speed.";
       case "Momentum":
-        return "Momentum strongest when attention and signal quality align.";
+        return "Attention Spike strongest when attention and signal quality align.";
       case "Swing":
         return "Wait for confirmation and avoid emotional entries.";
       case "Conservative":
@@ -681,7 +1032,7 @@ export default function Home() {
 
     if (traderMode === "Swing") {
       return signal >= 82
-        ? "Swing continuation structure looks constructive."
+        ? "Swing pressure structure is tightening beneath rising attention."
         : "Wait for cleaner multi-day confirmation.";
     }
 
@@ -695,23 +1046,26 @@ export default function Home() {
       return "High-volatility opportunity detected. Manage risk aggressively.";
     }
 
-    return "Momentum conditions are improving with trader attention.";
+    return "Attention Spike conditions are improving with trader attention.";
   };
-
 
   const getConvictionScore = (stock: Stock) => {
     const signal = getSignalQuality(stock);
     const attention = getAttentionScore(stock);
     const setup = getSetupScore(stock);
     const rvol = getRelativeVolume(stock);
-    const hasNews = Boolean(news[stock.symbol]?.[0]?.headline);
+    const hasNews = Boolean(getNewsArticles(stock.symbol)[0]?.headline);
 
-    let conviction = Math.round(signal * 0.42 + attention * 0.34 + setup * 0.24);
+    let conviction = Math.round(
+      signal * 0.42 + attention * 0.34 + setup * 0.24,
+    );
 
     if (hasNews) conviction += 4;
     if (rvol >= 3) conviction += 3;
-    if (Math.abs(stock.change) >= 12) conviction -= traderMode === "Aggressive" ? 2 : 7;
-    if (traderMode === "Conservative" && getRiskProfile(stock).includes("HIGH")) conviction -= 8;
+    if (Math.abs(stock.change) >= 12)
+      conviction -= traderMode === "Aggressive" ? 2 : 7;
+    if (traderMode === "Conservative" && getRiskProfile(stock).includes("HIGH"))
+      conviction -= 8;
     if (traderMode === "Aggressive" && attention >= 80) conviction += 4;
     if (traderMode === "Swing" && signal >= 82) conviction += 3;
 
@@ -721,8 +1075,8 @@ export default function Home() {
   const getConvictionLabel = (stock: Stock) => {
     const conviction = getConvictionScore(stock);
 
-    if (conviction >= 90) return "High Conviction";
-    if (conviction >= 82) return "Actionable Watch";
+    if (conviction >= 90) return "Top Read";
+    if (conviction >= 82) return "Pressure Building";
     if (conviction >= 72) return "Developing";
     if (conviction >= 62) return "Low Conviction";
 
@@ -735,7 +1089,7 @@ export default function Home() {
     const attention = getAttentionScore(stock);
 
     if (conviction >= 90) {
-      return `${stock.symbol} has strong alignment between signal quality, attention, setup score, and trader profile.`;
+      return `${stock.symbol} has strong alignment between signal quality, attention, pressure score, and trader profile.`;
     }
 
     if (signal >= 85 && attention < 75) {
@@ -762,18 +1116,1664 @@ export default function Home() {
 
     if (conviction >= 90) return "Focus";
     if (conviction >= 82) return "Watch Closely";
-    if (conviction >= 72) return "Wait For Trigger";
-    if (conviction >= 62) return "Monitor Only";
+    if (conviction >= 72) return "Wait For Confirmation";
+    if (conviction >= 62) return "Ignore Noise";
 
     return "Stand Down";
   };
 
-  const convictionLeaders = useMemo(() => {
-    return [...stocks]
-      .sort((a, b) => getConvictionScore(b) - getConvictionScore(a))
-      .slice(0, 6);
-  }, [stocks, news, watchlist, savedSetups, traderMode]);
+  const highBetaMomentumPockets = [
+    "RGTI",
+    "QBTS",
+    "LUNR",
+    "RKLB",
+    "IONQ",
+    "IOVA",
+    "ACHR",
+    "SOUN",
+    "ASTS",
+    "COIN",
+    "MSTR",
+    "HOOD",
+    "BBAI",
+    "AI",
+    "SERV",
+    "JOBY",
+    "OPEN",
+    "RIOT",
+    "MARA",
+  ];
 
+  const getMomentumFreshnessScore = (stock: Stock) => {
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const isStarterName = defaultStarterTickers.includes(stock.symbol);
+    const freshDiscoveryBoost = isStarterName ? 0 : 8;
+    const quietPressureBoost = rvol >= 2.5 && move < 8 ? 6 : 0;
+    const socialWatchBoost = attention >= 78 && move < 12 ? 4 : 0;
+    const stalePenalty = isStarterName && move < 4 && attention < 72 ? 7 : 0;
+
+    return Math.max(
+      0,
+      Math.round(freshDiscoveryBoost + quietPressureBoost + socialWatchBoost - stalePenalty),
+    );
+  };
+
+  const getParticipationScore = (stock: Stock) => {
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const move = Math.abs(stock.change);
+    const hasFreshNews = Boolean(getNewsArticles(stock.symbol)[0]?.headline);
+
+    return Math.min(
+      99,
+      Math.max(
+        35,
+        Math.round(attention * 0.42 + Math.min(35, rvol * 7) + Math.min(18, move * 1.25) + (hasFreshNews ? 6 : 0)),
+      ),
+    );
+  };
+
+  const getContinuationStrengthScore = (stock: Stock) => {
+    const signal = getSignalQuality(stock);
+    const participation = getParticipationScore(stock);
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const isTooExtended = move >= 18 || (move >= 12 && rvol < 3);
+    const structurePenalty = stock.change < 0 ? 12 : isTooExtended ? 9 : 0;
+
+    return Math.min(
+      99,
+      Math.max(
+        35,
+        Math.round(signal * 0.45 + participation * 0.35 + Math.min(20, rvol * 3.5) - structurePenalty),
+      ),
+    );
+  };
+
+  type PatternSignalName =
+    | "Pressure Coil"
+    | "Quiet Accumulation"
+    | "Crowd Ignition"
+    | "Continuation Stack"
+    | "Exhaustion Risk"
+    | "Reclaim Setup"
+    | "No Clean Pattern";
+
+  type PatternSignal = {
+    name: PatternSignalName;
+    score: number;
+    summary: string;
+    bias: string;
+  };
+
+  type ContenderStatus =
+    | "Confirmed Contender"
+    | "Developing Contender"
+    | "Pattern Detected / Needs Proof"
+    | "Rejected: Trap Risk"
+    | "Rejected: Weak Confirmation"
+    | "Rejected: No Clean Pattern";
+
+  type ContenderConfirmation = {
+    status: ContenderStatus;
+    score: number;
+    passed: boolean;
+    reason: string;
+  };
+
+  type TrapRiskLabel = "Healthy Momentum" | "Extended" | "High Trap Risk";
+  type QualityGateLabel = "Pass" | "Caution" | "Reject";
+
+  type MomentumFingerprint = {
+    label: string;
+    pattern: PatternSignalName;
+    attention: number;
+    signalQuality: number;
+    participation: number;
+    continuation: number;
+    entryQuality: number;
+    trapRisk: number;
+    rvol: number;
+    newsVelocity: number;
+    move: number;
+    weight: number;
+  };
+
+  type FingerprintMatch = {
+    score: number;
+    bestMatch: string;
+    matchQuality: "Strong Historical Match" | "Moderate Historical Match" | "Weak Historical Match";
+    reason: string;
+  };
+
+  type DiscoveryPhase =
+    | "Pre-Crowd Discovery"
+    | "Early Momentum"
+    | "Known Mover"
+    | "Late / Crowded"
+    | "No Discovery Edge";
+
+  type DiscoverySignal = {
+    score: number;
+    phase: DiscoveryPhase;
+    early: boolean;
+    reason: string;
+  };
+
+  type MomentumBaseline = {
+    symbol: string;
+    attention: number;
+    participation: number;
+    continuation: number;
+    discovery: number;
+    newsVelocity: number;
+    rvol: number;
+    observed: string;
+  };
+
+  type MomentumAccelerationSignal = {
+    score: number;
+    label:
+      | "Accelerating Fast"
+      | "Acceleration Building"
+      | "Stable Momentum"
+      | "Fading / Late"
+      | "No Acceleration Edge";
+    direction: "up" | "flat" | "down";
+    reason: string;
+  };
+
+
+  type SignalMemoryStatus = "tracking" | "watching" | "winner" | "strong_winner" | "neutral" | "failed" | "failed_momentum" | "fake_momentum" | "trap";
+
+  type OutcomeStatus = "tracking" | "strong_winner" | "winner" | "neutral" | "failed" | "failed_momentum" | "fake_momentum" | "trap";
+
+  type SignalMemoryRow = {
+    id: string;
+    symbol: string;
+    entry_price: number | null;
+    picked_at: string | null;
+    discovery_score: number | null;
+    acceleration_score: number | null;
+    crowd_saturation_score: number | null;
+    opportunity_window: OpportunityWindow | string | null;
+    status: SignalMemoryStatus | string | null;
+    outcome_status: OutcomeStatus | string | null;
+    max_gain: number | null;
+    max_drawdown: number | null;
+    price_1d: number | null;
+    price_3d: number | null;
+    price_5d: number | null;
+  };
+
+  type SignalMemoryInsight = {
+    tracked: number;
+    winners: number;
+    failures: number;
+    traps: number;
+    tracking: number;
+    successRate: number | null;
+    confidenceStatus: "Developing" | "Active" | "Proving";
+    confidenceLabel: string;
+    winnerDNA: string;
+    failureDNA: string;
+    summary: string;
+  };
+
+  type SignalMemoryPayload = {
+    user_id: string;
+    symbol: string;
+    picked_at: string;
+    entry_price: number;
+    change_percent: number;
+    ht_score: number;
+    final_score: number;
+    discovery_score: number;
+    acceleration_score: number;
+    fingerprint_score: number;
+    crowd_saturation_score: number;
+    opportunity_window: OpportunityWindow;
+    opportunity_window_open: boolean;
+    pattern: PatternSignalName;
+    contender_status: ContenderStatus;
+    quality_gate: QualityGateLabel;
+    trap_risk: number;
+    entry_quality: number;
+    participation: number;
+    continuation: number;
+    consumer_label: BackgroundOpportunityEngine["consumerLabel"];
+    discovery_read: string;
+    internal_reason: string;
+    status: SignalMemoryStatus;
+  };
+
+  type CrowdSaturationLevel =
+    | "Low Saturation"
+    | "Building Crowd"
+    | "Elevated Crowd"
+    | "Crowd Arrived"
+    | "Exhausted Crowd";
+
+  type CrowdSaturationSignal = {
+    score: number;
+    level: CrowdSaturationLevel;
+    crowded: boolean;
+    reason: string;
+  };
+
+  type OpportunityWindow =
+    | "EARLY WINDOW OPEN"
+    | "EARLY WINDOW BUILDING"
+    | "CONFIRMATION PHASE"
+    | "CROWD ARRIVED"
+    | "EXHAUSTION RISK";
+
+  type OpportunityWindowSignal = {
+    window: OpportunityWindow;
+    scoreImpact: number;
+    open: boolean;
+    reason: string;
+  };
+
+  type BackgroundOpportunityEngine = {
+    symbol: string;
+    finalScore: number;
+    pattern: PatternSignalName;
+    patternScore: number;
+    contenderStatus: ContenderStatus;
+    contenderScore: number;
+    fingerprintScore: number;
+    fingerprintMatch: string;
+    fingerprintQuality: FingerprintMatch["matchQuality"];
+    discoveryScore: number;
+    discoveryPhase: DiscoveryPhase;
+    accelerationScore: number;
+    accelerationLabel: MomentumAccelerationSignal["label"];
+    accelerationDirection: MomentumAccelerationSignal["direction"];
+    crowdSaturationScore: number;
+    crowdSaturationLevel: CrowdSaturationLevel;
+    opportunityWindow: OpportunityWindow;
+    opportunityWindowOpen: boolean;
+    tooLate: boolean;
+    tooLateReason: string;
+    trapRisk: number;
+    entryQuality: number;
+    participation: number;
+    continuation: number;
+    qualityGate: QualityGateLabel;
+    consumerLabel: "Top Conviction" | "Strong Watch" | "Developing" | "Trap Filtered" | "Monitor Only";
+    consumerReason: string;
+    internalReason: string;
+  };
+
+  type EmergingRadarCandidate = {
+    stock: Stock;
+    engine: BackgroundOpportunityEngine;
+    radarScore: number;
+    status: "Needs Review" | "Early Watch" | "Building Fast";
+    reason: string;
+  };
+
+  type ScoreContribution = {
+    label: string;
+    score: number;
+    weight: number;
+    contribution: number;
+  };
+
+  type PressureStack = {
+    symbol: string;
+    priceMomentum: number;
+    relativeVolume: number;
+    volumeVelocity: number;
+    attentionAcceleration: number;
+    newsCatalyst: number;
+    newsVelocity: number;
+    catalystStrength: string;
+    narrativeSignal: string;
+    sentimentBias: string;
+    sentimentScore: number;
+    hypeScore: number;
+    patternSignal: PatternSignalName;
+    patternScore: number;
+    patternSummary: string;
+    patternBias: string;
+    trapRiskScore: number;
+    trapRiskLabel: TrapRiskLabel;
+    entryQualityScore: number;
+    qualityGate: QualityGateLabel;
+    opportunityScore: number;
+    scoreBreakdown: ScoreContribution[];
+    participationQuality: number;
+    continuationStrength: number;
+    extensionRisk: number;
+    riskRewardQuality: number;
+    convictionScore: number;
+    convictionLabel: string;
+    behavioralState: string;
+    behavioralSummary: string;
+    warnings: string[];
+  };
+
+  const getExtensionRiskScore = (stock: Stock) => {
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+
+    let risk = 20;
+
+    if (move >= 3) risk += 12;
+    if (move >= 6) risk += 14;
+    if (move >= 10) risk += 18;
+    if (move >= 15) risk += 20;
+    if (rvol >= 4) risk += 10;
+    if (rvol >= 6) risk += 12;
+    if (attention >= 88) risk += 8;
+    if (stock.change < 0) risk += 10;
+
+    return clampScore(risk);
+  };
+
+  const getRiskRewardQualityScore = (stock: Stock) => {
+    const signal = getSignalQuality(stock);
+    const participation = getParticipationScore(stock);
+    const extensionRisk = getExtensionRiskScore(stock);
+
+    return clampScore(
+      signal * 0.42 + participation * 0.38 + (99 - extensionRisk) * 0.2,
+      35,
+      99,
+    );
+  };
+
+  const detectPatternSignal = (stock: Stock): PatternSignal => {
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const sentimentScore = getNarrativeSentimentScore(stock);
+    const hypeScore = getRetailHypeScore(stock);
+    const extensionRisk = getExtensionRiskScore(stock);
+    const riskRewardQuality = getRiskRewardQualityScore(stock);
+    const pressureBlend = clampScore(
+      rvol * 9 + attention * 0.22 + signal * 0.22 + newsVelocity * 0.14 + hypeScore * 0.08,
+      35,
+      99,
+    );
+
+    if (stock.change < 0 && (attention >= 70 || rvol >= 2.2) && signal >= 62) {
+      return {
+        name: "Reclaim Setup",
+        score: clampScore(pressureBlend - 5, 35, 92),
+        summary: "Weak tape is showing signs of buyer interest. HT wants reclaim strength before upgrading conviction.",
+        bias: "Wait for reclaim confirmation",
+      };
+    }
+
+    if (extensionRisk >= 78 || (move >= 12 && attention >= 82)) {
+      return {
+        name: "Exhaustion Risk",
+        score: clampScore(74 + Math.min(18, move) + Math.max(0, attention - 82) * 0.25, 55, 98),
+        summary: "The move is getting loud. HT is watching whether participation can absorb profit-taking.",
+        bias: "Protect against late-crowd chasing",
+      };
+    }
+
+    if (attention >= 84 && rvol >= 3 && stock.change > 0 && move < 12) {
+      return {
+        name: "Crowd Ignition",
+        score: clampScore(pressureBlend + 8, 60, 99),
+        summary: "Retail attention, volume, and early price lift are waking up together.",
+        bias: "Fast attention expansion",
+      };
+    }
+
+    if (continuation >= 82 && participation >= 78 && stock.change > 0 && extensionRisk < 76) {
+      return {
+        name: "Continuation Stack",
+        score: clampScore(continuation * 0.48 + participation * 0.32 + riskRewardQuality * 0.2, 55, 99),
+        summary: "Momentum is holding with participation. HT is watching whether the trend can keep stacking.",
+        bias: "Continuation behavior improving",
+      };
+    }
+
+    if (rvol >= 2.5 && move < 6 && (attention >= 68 || newsVelocity >= 62) && sentimentScore >= 50) {
+      return {
+        name: "Pressure Coil",
+        score: clampScore(pressureBlend + 6, 55, 96),
+        summary: "Volume and attention are building while price has not fully expanded yet.",
+        bias: "Breakout pressure building early",
+      };
+    }
+
+    if (move < 4 && rvol >= 1.8 && signal >= 74 && attention < 84) {
+      return {
+        name: "Quiet Accumulation",
+        score: clampScore(signal * 0.42 + participation * 0.28 + rvol * 8 + newsVelocity * 0.12, 50, 94),
+        summary: "Structure is improving quietly before the crowd fully notices.",
+        bias: "Early positioning watch",
+      };
+    }
+
+    return {
+      name: "No Clean Pattern",
+      score: clampScore(pressureBlend - 8, 35, 76),
+      summary: "No dominant momentum fingerprint yet. HT is monitoring for pressure to separate.",
+      bias: "Monitor only",
+    };
+  };
+
+  const getPatternSignal = (stock: Stock) => detectPatternSignal(stock).name;
+  const getPatternScore = (stock: Stock) => detectPatternSignal(stock).score;
+  const getPatternSummary = (stock: Stock) => detectPatternSignal(stock).summary;
+
+  const getTrapRiskScore = (stock: Stock) => {
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const signal = getSignalQuality(stock);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const hypeScore = getRetailHypeScore(stock);
+    const isHighBetaPocket = highBetaMomentumPockets.includes(stock.symbol);
+
+    let risk = 10;
+
+    // Anti-RGTI layer: momentum is valuable only if the entry is not already emotionally crowded.
+    if (move >= 4) risk += 8;
+    if (move >= 7) risk += 12;
+    if (move >= 10) risk += 18;
+    if (move >= 14) risk += 22;
+    if (move >= 20) risk += 28;
+
+    // Loud crowd + large move = possible exit liquidity.
+    if (attention >= 78 && move >= 7) risk += 10;
+    if (attention >= 88 && move >= 10) risk += 14;
+    if (attention >= 92 && move >= 14) risk += 16;
+    if (hypeScore >= 72 && move >= 7) risk += 9;
+    if (hypeScore >= 84 && move >= 10) risk += 12;
+
+    // Big RVOL after extension can be continuation, but it also needs stronger quality control.
+    if (rvol >= 4 && move >= 7) risk += 8;
+    if (rvol >= 6 && move >= 9) risk += 12;
+    if (rvol >= 8 && move >= 10) risk += 16;
+
+    // High-beta names need stricter filtering because they trap faster at the open.
+    if (isHighBetaPocket && move >= 8) risk += 8;
+    if (isHighBetaPocket && attention >= 86 && move >= 10) risk += 8;
+
+    // If structure is not keeping up with excitement, punish it hard.
+    if (continuation < 70 && move >= 6) risk += 14;
+    if (continuation < 78 && move >= 10) risk += 10;
+    if (signal < 72 && attention >= 82) risk += 10;
+
+    // Fresh catalysts help early moves, but they should not excuse chase conditions.
+    if (newsVelocity >= 70 && move < 7) risk -= 7;
+    if (continuation >= 84 && move < 8) risk -= 10;
+    if (rvol >= 2.4 && rvol < 6 && move < 6 && attention >= 62) risk -= 8;
+    if (stock.change < 0) risk += 16;
+
+    return clampScore(risk, 0, 99);
+  };
+
+  const getTrapRiskLabel = (stock: Stock) => {
+    const risk = getTrapRiskScore(stock);
+
+    if (risk >= 72) return "High Trap Risk";
+    if (risk >= 52) return "Extended";
+
+    return "Healthy Momentum";
+  };
+
+  const getTimingQualityLabel = (stock: Stock) => {
+    const move = Math.abs(stock.change);
+    const entryQuality = getEntryQualityScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+
+    if (trapRisk >= 72 || entryQuality < 45) return "High Chase Risk";
+    if (move >= 12 || trapRisk >= 58) return "Extended";
+    if (entryQuality >= 78 && move < 8 && rvol >= 2.2 && attention >= 62) return "Early / Clean";
+    if (entryQuality >= 68 && trapRisk < 45) return "Valid Watch";
+
+    return "Needs Proof";
+  };
+
+  const getEntryQualityScore = (stock: Stock) => {
+    const signal = getSignalQuality(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const pattern = detectPatternSignal(stock).name;
+
+    const earlyPressureBonus = rvol >= 2.2 && move < 7 && attention >= 62 ? 10 : 0;
+    const cleanContinuationBonus = continuation >= 82 && participation >= 78 && move < 9 ? 8 : 0;
+    const catalystSupport = newsVelocity >= 68 && move < 9 ? 5 : 0;
+    const patternBonus = pattern === "Pressure Coil" || pattern === "Quiet Accumulation" ? 8 : pattern === "Continuation Stack" ? 5 : 0;
+    const extensionPenalty = move >= 20 ? 28 : move >= 15 ? 22 : move >= 11 ? 16 : move >= 8 ? 10 : move >= 5 ? 4 : 0;
+    const fomoPenalty = attention >= 88 && move >= 8 ? 10 : attention >= 80 && move >= 10 ? 8 : 0;
+    const reclaimPenalty = stock.change < 0 ? 18 : 0;
+
+    return clampScore(
+      signal * 0.18 +
+        participation * 0.2 +
+        continuation * 0.22 +
+        (99 - trapRisk) * 0.32 +
+        Math.min(12, rvol * 1.4) +
+        earlyPressureBonus +
+        cleanContinuationBonus +
+        catalystSupport +
+        patternBonus -
+        extensionPenalty -
+        fomoPenalty -
+        reclaimPenalty,
+      0,
+      99,
+    );
+  };
+
+  const getQualityGateLabel = (stock: Stock) => {
+    const entryQuality = getEntryQualityScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const move = Math.abs(stock.change);
+    const attention = getAttentionScore(stock);
+
+    if (trapRisk >= 70 || entryQuality < 48) return "Reject";
+    if (move >= 14 && attention >= 84) return "Reject";
+    if (trapRisk >= 48 || entryQuality < 68) return "Caution";
+
+    return "Pass";
+  };
+
+  const confirmPatternContender = (stock: Stock): ContenderConfirmation => {
+    const pattern = detectPatternSignal(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const qualityGate = getQualityGateLabel(stock);
+    const move = Math.abs(stock.change);
+
+    const confirmationScore = clampScore(
+      pattern.score * 0.28 +
+        participation * 0.22 +
+        continuation * 0.2 +
+        entryQuality * 0.22 +
+        (99 - trapRisk) * 0.08,
+      0,
+      99,
+    );
+
+    if (pattern.name === "No Clean Pattern") {
+      return {
+        status: "Rejected: No Clean Pattern",
+        score: confirmationScore,
+        passed: false,
+        reason:
+          "HT detected movement, but no clean repeatable momentum pattern has separated yet.",
+      };
+    }
+
+    if (qualityGate === "Reject" || trapRisk >= 72) {
+      return {
+        status: "Rejected: Trap Risk",
+        score: confirmationScore,
+        passed: false,
+        reason:
+          "The pattern is visible, but trap risk is too high for HT to rank it as a clean contender.",
+      };
+    }
+
+    if (participation < 64 || continuation < 62 || entryQuality < 58) {
+      return {
+        status: "Rejected: Weak Confirmation",
+        score: confirmationScore,
+        passed: false,
+        reason:
+          "Pattern detected, but participation, continuation, or entry quality is not strong enough yet.",
+      };
+    }
+
+    if (
+      confirmationScore >= 82 &&
+      pattern.score >= 76 &&
+      participation >= 72 &&
+      continuation >= 70 &&
+      entryQuality >= 68 &&
+      trapRisk < 58 &&
+      qualityGate === "Pass" &&
+      stock.change >= 0
+    ) {
+      return {
+        status: "Confirmed Contender",
+        score: confirmationScore,
+        passed: true,
+        reason: `${pattern.name} confirmed with participation, continuation, and entry quality aligned.`,
+      };
+    }
+
+    if (
+      confirmationScore >= 72 &&
+      pattern.score >= 68 &&
+      trapRisk < 66 &&
+      move < 14
+    ) {
+      return {
+        status: "Developing Contender",
+        score: confirmationScore,
+        passed: true,
+        reason: `${pattern.name} is developing, but HT still wants stronger confirmation before ranking it as priority.`,
+      };
+    }
+
+    return {
+      status: "Pattern Detected / Needs Proof",
+      score: confirmationScore,
+      passed: false,
+      reason: `${pattern.name} detected, but second-layer confirmation is not strong enough yet.`,
+    };
+  };
+
+  const historicalMomentumFingerprints: MomentumFingerprint[] = [
+    {
+      label: "SNAL-style early retail ignition",
+      pattern: "Crowd Ignition",
+      attention: 88,
+      signalQuality: 84,
+      participation: 86,
+      continuation: 78,
+      entryQuality: 74,
+      trapRisk: 44,
+      rvol: 5.8,
+      newsVelocity: 58,
+      move: 7.5,
+      weight: 1.14,
+    },
+    {
+      label: "QUBT-style speculative pressure coil",
+      pattern: "Pressure Coil",
+      attention: 82,
+      signalQuality: 80,
+      participation: 78,
+      continuation: 74,
+      entryQuality: 78,
+      trapRisk: 38,
+      rvol: 4.2,
+      newsVelocity: 64,
+      move: 4.8,
+      weight: 1.12,
+    },
+    {
+      label: "RKLB/ASTS-style theme rotation",
+      pattern: "Continuation Stack",
+      attention: 76,
+      signalQuality: 86,
+      participation: 80,
+      continuation: 84,
+      entryQuality: 76,
+      trapRisk: 42,
+      rvol: 3.4,
+      newsVelocity: 68,
+      move: 5.6,
+      weight: 1.08,
+    },
+    {
+      label: "PLTR-style quiet accumulation",
+      pattern: "Quiet Accumulation",
+      attention: 68,
+      signalQuality: 82,
+      participation: 72,
+      continuation: 78,
+      entryQuality: 82,
+      trapRisk: 30,
+      rvol: 2.2,
+      newsVelocity: 52,
+      move: 2.8,
+      weight: 1.0,
+    },
+    {
+      label: "HOOD/MSTR-style risk-on momentum",
+      pattern: "Crowd Ignition",
+      attention: 86,
+      signalQuality: 78,
+      participation: 84,
+      continuation: 72,
+      entryQuality: 68,
+      trapRisk: 52,
+      rvol: 4.8,
+      newsVelocity: 62,
+      move: 8.4,
+      weight: 1.02,
+    },
+  ];
+
+  const getRangeSimilarity = (actual: number, target: number, tolerance: number) => {
+    return clampScore(100 - (Math.abs(actual - target) / tolerance) * 100, 0, 100);
+  };
+
+  const getMomentumFingerprintMatch = (stock: Stock): FingerprintMatch => {
+    const pattern = detectPatternSignal(stock);
+    const attention = getAttentionScore(stock);
+    const signalQuality = getSignalQuality(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const rvol = getRelativeVolume(stock);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const move = Math.abs(stock.change);
+
+    const rankedMatches = historicalMomentumFingerprints
+      .map((fingerprint) => {
+        const patternScore = pattern.name === fingerprint.pattern ? 100 : pattern.name === "No Clean Pattern" ? 32 : 58;
+        const score = clampScore(
+          patternScore * 0.18 +
+            getRangeSimilarity(attention, fingerprint.attention, 32) * 0.13 +
+            getRangeSimilarity(signalQuality, fingerprint.signalQuality, 28) * 0.13 +
+            getRangeSimilarity(participation, fingerprint.participation, 30) * 0.13 +
+            getRangeSimilarity(continuation, fingerprint.continuation, 30) * 0.12 +
+            getRangeSimilarity(entryQuality, fingerprint.entryQuality, 30) * 0.12 +
+            getRangeSimilarity(99 - trapRisk, 99 - fingerprint.trapRisk, 34) * 0.11 +
+            getRangeSimilarity(rvol, fingerprint.rvol, 4.5) * 0.1 +
+            getRangeSimilarity(newsVelocity, fingerprint.newsVelocity, 38) * 0.06 +
+            getRangeSimilarity(move, fingerprint.move, 9) * 0.02,
+          0,
+          99,
+        );
+
+        return {
+          label: fingerprint.label,
+          score: clampScore(score * fingerprint.weight, 0, 99),
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const best = rankedMatches[0] || { label: "No historical match", score: 0 };
+    const matchQuality =
+      best.score >= 82
+        ? "Strong Historical Match"
+        : best.score >= 68
+          ? "Moderate Historical Match"
+          : "Weak Historical Match";
+
+    return {
+      score: best.score,
+      bestMatch: best.label,
+      matchQuality,
+      reason:
+        best.score >= 82
+          ? `Current pressure resembles ${best.label}, a prior momentum-leader fingerprint.`
+          : best.score >= 68
+            ? `Some traits resemble ${best.label}, but HT still wants stronger confirmation.`
+            : "Current action does not strongly match HT's stored momentum-winner fingerprints yet.",
+    };
+  };
+
+
+  const megaCapDiscoveryPenaltySymbols = [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "GOOG",
+    "AMZN",
+    "META",
+    "NVDA",
+    "TSLA",
+    "AVGO",
+    "LLY",
+    "NVO",
+    "JPM",
+    "V",
+    "MA",
+    "COST",
+    "NFLX",
+  ];
+
+  const institutionalQualitySymbols = [
+    "CRWD",
+    "PANW",
+    "MU",
+    "NOW",
+    "ADBE",
+    "CRM",
+    "ORCL",
+    "ASML",
+    "TSM",
+    "QCOM",
+    "SHOP",
+  ];
+
+  const getDiscoverySignal = (stock: Stock): DiscoverySignal => {
+    const pattern = detectPatternSignal(stock);
+    const attention = getAttentionScore(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const rvol = getRelativeVolume(stock);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const hypeScore = getRetailHypeScore(stock);
+    const move = Math.abs(stock.change);
+    const isHighBetaPocket = highBetaMomentumPockets.includes(stock.symbol);
+    const isMegaCap = megaCapDiscoveryPenaltySymbols.includes(stock.symbol);
+    const isInstitutionalQuality = institutionalQualitySymbols.includes(stock.symbol);
+
+    const earlyPressure = rvol >= 2.2 && rvol <= 6.8 && move >= 1.2 && move < 8.5;
+    const crowdNotFullyLate = attention >= 58 && attention <= 86;
+    const qualityWithoutChase = entryQuality >= 62 && trapRisk < 58;
+    const constructivePattern =
+      pattern.name === "Pressure Coil" ||
+      pattern.name === "Quiet Accumulation" ||
+      pattern.name === "Crowd Ignition" ||
+      pattern.name === "Continuation Stack";
+
+    let score = 34;
+
+    if (constructivePattern) score += 13;
+    if (earlyPressure) score += 16;
+    if (crowdNotFullyLate) score += 12;
+    if (qualityWithoutChase) score += 14;
+    if (participation >= 70 && continuation >= 66) score += 8;
+    if (newsVelocity >= 48 && newsVelocity <= 76) score += 6;
+    if (hypeScore >= 46 && hypeScore <= 76) score += 6;
+    if (isHighBetaPocket && move < 9 && trapRisk < 62) score += 8;
+    if (!defaultStarterTickers.includes(stock.symbol) && attention >= 62 && move < 9) score += 6;
+
+    // Discovery is not the same as quality. Penalize names that are already obvious, too crowded, or too late.
+    if (move >= 9) score -= 8;
+    if (move >= 13) score -= 13;
+    if (move >= 18) score -= 20;
+    if (attention >= 90 && move >= 8) score -= 12;
+    if (hypeScore >= 86 && move >= 8) score -= 9;
+    if (trapRisk >= 62) score -= 12;
+    if (trapRisk >= 74) score -= 18;
+    if (pattern.name === "Exhaustion Risk") score -= 18;
+    if (pattern.name === "No Clean Pattern") score -= 12;
+    if (stock.change < 0) score -= 16;
+    if (isMegaCap) score -= 10;
+    if (isInstitutionalQuality && attention >= 80 && move >= 5) score -= 7;
+
+    const discoveryScore = clampScore(score, 0, 99);
+    const phase: DiscoveryPhase =
+      discoveryScore >= 82
+        ? "Pre-Crowd Discovery"
+        : discoveryScore >= 70
+          ? "Early Momentum"
+          : discoveryScore >= 56
+            ? "Known Mover"
+            : trapRisk >= 70 || move >= 13 || pattern.name === "Exhaustion Risk"
+              ? "Late / Crowded"
+              : "No Discovery Edge";
+
+    const reason =
+      phase === "Pre-Crowd Discovery"
+        ? "HT sees volume, participation, and pattern quality building before the setup becomes fully obvious."
+        : phase === "Early Momentum"
+          ? "The move is active, but the crowd does not look fully late yet."
+          : phase === "Known Mover"
+            ? "The setup has quality, but the discovery edge is not dominant."
+            : phase === "Late / Crowded"
+              ? "Momentum is visible, but chase risk is starting to outweigh the early edge."
+              : "HT does not see enough early separation to call this a discovery setup.";
+
+    return {
+      score: discoveryScore,
+      phase,
+      early: phase === "Pre-Crowd Discovery" || phase === "Early Momentum",
+      reason,
+    };
+  };
+
+  const momentumBaselines: MomentumBaseline[] = [
+    {
+      symbol: "SOUN",
+      attention: 58,
+      participation: 62,
+      continuation: 60,
+      discovery: 58,
+      newsVelocity: 42,
+      rvol: 2.2,
+      observed: "prior-watch",
+    },
+    {
+      symbol: "QUBT",
+      attention: 64,
+      participation: 66,
+      continuation: 64,
+      discovery: 62,
+      newsVelocity: 46,
+      rvol: 2.6,
+      observed: "prior-watch",
+    },
+    {
+      symbol: "SNAL",
+      attention: 66,
+      participation: 68,
+      continuation: 61,
+      discovery: 64,
+      newsVelocity: 44,
+      rvol: 2.8,
+      observed: "prior-watch",
+    },
+    {
+      symbol: "RGTI",
+      attention: 60,
+      participation: 64,
+      continuation: 62,
+      discovery: 60,
+      newsVelocity: 40,
+      rvol: 2.5,
+      observed: "prior-watch",
+    },
+    {
+      symbol: "RKLB",
+      attention: 57,
+      participation: 61,
+      continuation: 65,
+      discovery: 59,
+      newsVelocity: 45,
+      rvol: 2.0,
+      observed: "prior-watch",
+    },
+    {
+      symbol: "ASTS",
+      attention: 59,
+      participation: 63,
+      continuation: 66,
+      discovery: 60,
+      newsVelocity: 45,
+      rvol: 2.1,
+      observed: "prior-watch",
+    },
+    {
+      symbol: "IONQ",
+      attention: 61,
+      participation: 64,
+      continuation: 63,
+      discovery: 61,
+      newsVelocity: 43,
+      rvol: 2.4,
+      observed: "prior-watch",
+    },
+    {
+      symbol: "HOOD",
+      attention: 62,
+      participation: 64,
+      continuation: 62,
+      discovery: 58,
+      newsVelocity: 47,
+      rvol: 2.2,
+      observed: "prior-watch",
+    },
+  ];
+
+  const getMomentumBaseline = (stock: Stock, discovery: DiscoverySignal): MomentumBaseline => {
+    const saved = momentumBaselines.find((baseline) => baseline.symbol === stock.symbol);
+
+    if (saved) return saved;
+
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const fallbackCompression = highBetaMomentumPockets.includes(stock.symbol) ? 16 : 10;
+
+    return {
+      symbol: stock.symbol,
+      attention: clampScore(attention - Math.min(24, move * 1.35) - fallbackCompression, 30, 88),
+      participation: clampScore(participation - Math.min(22, rvol * 2.4) - 6, 30, 88),
+      continuation: clampScore(continuation - Math.min(18, move * 0.9) - 4, 30, 88),
+      discovery: clampScore(discovery.score - Math.min(22, move * 1.1) - 6, 20, 88),
+      newsVelocity: clampScore(newsVelocity - 10, 20, 88),
+      rvol: Math.max(0.8, Number((rvol - 1.1).toFixed(1))),
+      observed: "synthetic-prior",
+    };
+  };
+
+  const getMomentumAccelerationSignal = (stock: Stock, discovery: DiscoverySignal): MomentumAccelerationSignal => {
+    const baseline = getMomentumBaseline(stock, discovery);
+    const attention = getAttentionScore(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const rvol = getRelativeVolume(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const move = Math.abs(stock.change);
+    const pattern = detectPatternSignal(stock).name;
+
+    const attentionDelta = attention - baseline.attention;
+    const participationDelta = participation - baseline.participation;
+    const continuationDelta = continuation - baseline.continuation;
+    const discoveryDelta = discovery.score - baseline.discovery;
+    const newsDelta = newsVelocity - baseline.newsVelocity;
+    const rvolDelta = (rvol - baseline.rvol) * 8;
+
+    let rawScore =
+      42 +
+      attentionDelta * 0.22 +
+      participationDelta * 0.24 +
+      continuationDelta * 0.16 +
+      discoveryDelta * 0.2 +
+      newsDelta * 0.08 +
+      rvolDelta * 0.1;
+
+    if (discovery.early && attentionDelta >= 10 && participationDelta >= 8) rawScore += 8;
+    if (pattern === "Pressure Coil" || pattern === "Quiet Accumulation") rawScore += 5;
+    if (pattern === "Crowd Ignition" && move < 9) rawScore += 4;
+    if (move >= 9) rawScore -= 6;
+    if (move >= 14) rawScore -= 12;
+    if (trapRisk >= 62) rawScore -= 10;
+    if (trapRisk >= 74) rawScore -= 16;
+    if (stock.change < 0) rawScore -= 14;
+
+    const score = clampScore(rawScore, 0, 99);
+    const netDelta = attentionDelta + participationDelta + discoveryDelta;
+    const direction: MomentumAccelerationSignal["direction"] =
+      netDelta >= 18 ? "up" : netDelta <= -8 || stock.change < 0 ? "down" : "flat";
+
+    const label: MomentumAccelerationSignal["label"] =
+      score >= 82 && direction === "up"
+        ? "Accelerating Fast"
+        : score >= 70 && direction !== "down"
+          ? "Acceleration Building"
+          : score >= 56
+            ? "Stable Momentum"
+            : direction === "down"
+              ? "Fading / Late"
+              : "No Acceleration Edge";
+
+    const reason =
+      label === "Accelerating Fast"
+        ? "Attention, participation, and discovery strength are improving faster than the prior watch baseline."
+        : label === "Acceleration Building"
+          ? "Momentum is improving, but HT still wants more confirmation before treating it as a full acceleration event."
+          : label === "Stable Momentum"
+            ? "The setup is holding quality, but the acceleration edge is not dominant yet."
+            : label === "Fading / Late"
+              ? "Momentum is losing freshness or becoming too crowded for a clean early read."
+              : "HT does not see enough score expansion versus the prior watch baseline yet.";
+
+    return {
+      score,
+      label,
+      direction,
+      reason,
+    };
+  };
+
+  const getTooLateFilter = (
+    stock: Stock,
+    discovery: DiscoverySignal,
+    acceleration: MomentumAccelerationSignal,
+  ) => {
+    const pattern = detectPatternSignal(stock);
+    const move = Math.abs(stock.change);
+    const attention = getAttentionScore(stock);
+    const hypeScore = getRetailHypeScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const qualityGate = getQualityGateLabel(stock);
+    const rvol = getRelativeVolume(stock);
+
+    const blocked =
+      qualityGate === "Reject" ||
+      discovery.phase === "Late / Crowded" ||
+      acceleration.label === "Fading / Late" ||
+      pattern.name === "Exhaustion Risk" ||
+      trapRisk >= 70 ||
+      entryQuality < 48 ||
+      move >= 14 ||
+      (move >= 10 && attention >= 84) ||
+      (move >= 8 && hypeScore >= 86) ||
+      (rvol >= 6 && move >= 9 && continuation < 82);
+
+    const reason =
+      qualityGate === "Reject" || trapRisk >= 70
+        ? "Filtered because trap risk is too high for a clean early read."
+        : pattern.name === "Exhaustion Risk" || discovery.phase === "Late / Crowded"
+          ? "Filtered because momentum looks visible, crowded, or extended instead of early."
+          : acceleration.label === "Fading / Late"
+            ? "Filtered because acceleration is fading versus the prior watch baseline."
+            : move >= 14 || (move >= 10 && attention >= 84)
+              ? "Filtered because the move is already too extended relative to attention."
+              : (move >= 8 && hypeScore >= 86) || (rvol >= 6 && move >= 9 && continuation < 82)
+                ? "Filtered because hype or volume expansion looks too crowded for a clean setup."
+                : "Still eligible for Top Conviction ranking.";
+
+    return { blocked, reason };
+  };
+
+
+  const getCrowdSaturationSignal = (
+    stock: Stock,
+    discovery: DiscoverySignal,
+    acceleration: MomentumAccelerationSignal,
+  ): CrowdSaturationSignal => {
+    const pattern = detectPatternSignal(stock);
+    const move = Math.abs(stock.change);
+    const attention = getAttentionScore(stock);
+    const hypeScore = getRetailHypeScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const rvol = getRelativeVolume(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+
+    let score = 18;
+
+    // Crowd saturation is different from strength.
+    // Strong + early is good. Strong + obvious + extended is crowded.
+    if (attention >= 72) score += 10;
+    if (attention >= 84) score += 12;
+    if (attention >= 92) score += 14;
+    if (hypeScore >= 70) score += 9;
+    if (hypeScore >= 84) score += 12;
+    if (move >= 6) score += 8;
+    if (move >= 9) score += 12;
+    if (move >= 13) score += 16;
+    if (rvol >= 4.5 && move >= 6) score += 8;
+    if (rvol >= 6.5 && move >= 8) score += 11;
+    if (trapRisk >= 58) score += 10;
+    if (trapRisk >= 72) score += 16;
+    if (pattern.name === "Exhaustion Risk") score += 18;
+    if (acceleration.label === "Fading / Late") score += 12;
+
+    // Pull saturation down when pressure is building early instead of arriving late.
+    if (discovery.phase === "Pre-Crowd Discovery" && acceleration.direction === "up" && move < 8) score -= 16;
+    if (discovery.phase === "Early Momentum" && move < 8.5) score -= 10;
+    if (entryQuality >= 72 && trapRisk < 48 && move < 8) score -= 9;
+    if (continuation >= 78 && move < 9 && trapRisk < 56) score -= 5;
+
+    const saturationScore = clampScore(score, 0, 99);
+    const level: CrowdSaturationLevel =
+      saturationScore >= 84
+        ? "Exhausted Crowd"
+        : saturationScore >= 70
+          ? "Crowd Arrived"
+          : saturationScore >= 56
+            ? "Elevated Crowd"
+            : saturationScore >= 38
+              ? "Building Crowd"
+              : "Low Saturation";
+
+    const reason =
+      level === "Low Saturation"
+        ? "Crowd participation remains below saturation while the setup is still developing."
+        : level === "Building Crowd"
+          ? "Crowd attention is building, but HT does not read the setup as fully crowded yet."
+          : level === "Elevated Crowd"
+            ? "Crowd attention is elevated, so HT needs cleaner confirmation before upgrading conviction."
+            : level === "Crowd Arrived"
+              ? "The crowd appears to have arrived, reducing the before-crowd edge."
+              : "The move looks saturated or exhausted, so HT should protect users from late-chase risk.";
+
+    return {
+      score: saturationScore,
+      level,
+      crowded: level === "Crowd Arrived" || level === "Exhausted Crowd",
+      reason,
+    };
+  };
+
+  const getOpportunityWindowSignal = (
+    stock: Stock,
+    discovery: DiscoverySignal,
+    acceleration: MomentumAccelerationSignal,
+    saturation: CrowdSaturationSignal,
+  ): OpportunityWindowSignal => {
+    const pattern = detectPatternSignal(stock);
+    const move = Math.abs(stock.change);
+    const attention = getAttentionScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+
+    if (
+      saturation.level === "Exhausted Crowd" ||
+      pattern.name === "Exhaustion Risk" ||
+      trapRisk >= 74 ||
+      move >= 15
+    ) {
+      return {
+        window: "EXHAUSTION RISK",
+        scoreImpact: -25,
+        open: false,
+        reason: "Opportunity window is closed because extension, saturation, or trap risk is too elevated.",
+      };
+    }
+
+    if (
+      saturation.level === "Crowd Arrived" ||
+      (attention >= 90 && move >= 9) ||
+      (acceleration.label === "Fading / Late" && trapRisk >= 58)
+    ) {
+      return {
+        window: "CROWD ARRIVED",
+        scoreImpact: -15,
+        open: false,
+        reason: "The ticker may still matter, but HT reads the before-crowd edge as mostly gone.",
+      };
+    }
+
+    if (
+      discovery.phase === "Pre-Crowd Discovery" &&
+      acceleration.score >= 70 &&
+      saturation.score < 48 &&
+      entryQuality >= 68 &&
+      trapRisk < 52 &&
+      move < 8.5
+    ) {
+      return {
+        window: "EARLY WINDOW OPEN",
+        scoreImpact: 12,
+        open: true,
+        reason: "Early pressure, acceleration, and entry quality are aligned before crowd saturation.",
+      };
+    }
+
+    if (
+      (discovery.phase === "Pre-Crowd Discovery" || discovery.phase === "Early Momentum") &&
+      acceleration.score >= 58 &&
+      saturation.score < 62 &&
+      trapRisk < 62 &&
+      move < 10
+    ) {
+      return {
+        window: "EARLY WINDOW BUILDING",
+        scoreImpact: 8,
+        open: true,
+        reason: "The window is building, but HT still wants stronger confirmation before treating it as the cleanest read.",
+      };
+    }
+
+    if (
+      continuation >= 76 &&
+      entryQuality >= 62 &&
+      trapRisk < 66 &&
+      saturation.score < 70
+    ) {
+      return {
+        window: "CONFIRMATION PHASE",
+        scoreImpact: 3,
+        open: true,
+        reason: "The early window is not perfect, but confirmation is still strong enough to keep the setup eligible.",
+      };
+    }
+
+    return {
+      window: saturation.crowded ? "CROWD ARRIVED" : "CONFIRMATION PHASE",
+      scoreImpact: saturation.crowded ? -15 : 0,
+      open: !saturation.crowded,
+      reason: saturation.crowded
+        ? "Crowd saturation is limiting the opportunity window."
+        : "HT needs cleaner early-window evidence before upgrading this setup.",
+    };
+  };
+
+  const getBackgroundOpportunityEngine = (
+    stock: Stock,
+  ): BackgroundOpportunityEngine => {
+    const pattern = detectPatternSignal(stock);
+    const contender = confirmPatternContender(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const qualityGate = getQualityGateLabel(stock);
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const conviction = getConvictionScore(stock);
+    const move = Math.abs(stock.change);
+    const intel = newsIntel[stock.symbol];
+    const socialVelocity = clampScore(intel?.socialVelocity || 0, 0, 99);
+    const fingerprint = getMomentumFingerprintMatch(stock);
+    const discovery = getDiscoverySignal(stock);
+    const acceleration = getMomentumAccelerationSignal(stock, discovery);
+    const saturation = getCrowdSaturationSignal(stock, discovery, acceleration);
+    const opportunityWindow = getOpportunityWindowSignal(stock, discovery, acceleration, saturation);
+    const tooLateFilter = getTooLateFilter(stock, discovery, acceleration);
+
+    const contenderBoost =
+      contender.status === "Confirmed Contender"
+        ? 10
+        : contender.status === "Developing Contender"
+          ? 5
+          : contender.status.includes("Rejected")
+            ? -14
+            : -4;
+
+    const discoveryBoost =
+      discovery.phase === "Pre-Crowd Discovery"
+        ? 12
+        : discovery.phase === "Early Momentum"
+          ? 7
+          : discovery.phase === "Known Mover"
+            ? 2
+            : discovery.phase === "Late / Crowded"
+              ? -13
+              : -6;
+
+    const accelerationBoost =
+      acceleration.label === "Accelerating Fast"
+        ? 10
+        : acceleration.label === "Acceleration Building"
+          ? 6
+          : acceleration.label === "Stable Momentum"
+            ? 1
+            : acceleration.label === "Fading / Late"
+              ? -10
+              : -4;
+
+    const trapPenalty =
+      trapRisk >= 72 ? 18 : trapRisk >= 58 ? 10 : trapRisk >= 48 ? 5 : 0;
+
+    const extensionPenalty =
+      move >= 20 ? 18 : move >= 15 ? 13 : move >= 11 ? 8 : move >= 8 ? 4 : 0;
+
+    const gatePenalty =
+      qualityGate === "Reject" ? 20 : qualityGate === "Caution" ? 8 : 0;
+
+    const rawFinalScore = clampScore(
+      pattern.score * 0.15 +
+        contender.score * 0.19 +
+        entryQuality * 0.17 +
+        participation * 0.12 +
+        continuation * 0.1 +
+        signal * 0.06 +
+        attention * 0.04 +
+        conviction * 0.025 +
+        socialVelocity * 0.025 +
+        fingerprint.score * 0.07 +
+        discovery.score * 0.13 +
+        acceleration.score * 0.09 +
+        (99 - saturation.score) * 0.05 +
+        opportunityWindow.scoreImpact +
+        contenderBoost +
+        discoveryBoost +
+        accelerationBoost -
+        trapPenalty -
+        extensionPenalty -
+        gatePenalty,
+      0,
+      99,
+    );
+
+    // Hard rule: if HT considers the setup late, crowded, exhausted, or trap-heavy,
+    // it cannot appear as Top Conviction no matter how strong the raw score looks.
+    const finalScore = tooLateFilter.blocked || opportunityWindow.window === "CROWD ARRIVED" || opportunityWindow.window === "EXHAUSTION RISK"
+      ? clampScore(Math.min(rawFinalScore, opportunityWindow.window === "EXHAUSTION RISK" ? 36 : 42), 0, 99)
+      : rawFinalScore;
+
+    const consumerLabel =
+      tooLateFilter.blocked || qualityGate === "Reject" || opportunityWindow.window === "CROWD ARRIVED" || opportunityWindow.window === "EXHAUSTION RISK"
+        ? "Trap Filtered"
+        : finalScore >= 88 &&
+            contender.status === "Confirmed Contender" &&
+            fingerprint.score >= 68 &&
+            discovery.early &&
+            acceleration.score >= 62 &&
+            opportunityWindow.open &&
+            !saturation.crowded
+          ? "Top Conviction"
+          : finalScore >= 80
+            ? "Strong Watch"
+            : finalScore >= 70
+              ? "Developing"
+              : "Monitor Only";
+
+    const consumerReason =
+      consumerLabel === "Top Conviction"
+        ? `HT detected strong alignment between early discovery pressure, acceleration, controlled saturation, and an ${opportunityWindow.window.toLowerCase()} read.`
+        : consumerLabel === "Strong Watch"
+          ? "Momentum is building with enough confirmation to stay near the top of the board."
+          : consumerLabel === "Developing"
+            ? "A pattern is forming, but HT still wants stronger confirmation before calling it top conviction."
+            : consumerLabel === "Trap Filtered"
+              ? tooLateFilter.reason
+              : "HT is monitoring the ticker, but it has not earned priority status yet.";
+
+    return {
+      symbol: stock.symbol,
+      finalScore,
+      pattern: pattern.name,
+      patternScore: pattern.score,
+      contenderStatus: contender.status,
+      contenderScore: contender.score,
+      fingerprintScore: fingerprint.score,
+      fingerprintMatch: fingerprint.bestMatch,
+      fingerprintQuality: fingerprint.matchQuality,
+      discoveryScore: discovery.score,
+      discoveryPhase: discovery.phase,
+      accelerationScore: acceleration.score,
+      accelerationLabel: acceleration.label,
+      accelerationDirection: acceleration.direction,
+      crowdSaturationScore: saturation.score,
+      crowdSaturationLevel: saturation.level,
+      opportunityWindow: opportunityWindow.window,
+      opportunityWindowOpen: opportunityWindow.open,
+      tooLate: tooLateFilter.blocked || !opportunityWindow.open,
+      tooLateReason: tooLateFilter.reason,
+      trapRisk,
+      entryQuality,
+      participation,
+      continuation,
+      qualityGate,
+      consumerLabel,
+      consumerReason,
+      internalReason: `${opportunityWindow.reason} ${saturation.reason} ${tooLateFilter.reason} ${discovery.reason} ${acceleration.reason} ${contender.reason} ${fingerprint.reason}`,
+    };
+  };
+
+  const getScannerSelectionScore = (stock: Stock) => {
+    const ht = getConvictionScore(stock);
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const rvol = getRelativeVolume(stock);
+    const move = Math.abs(stock.change);
+    const freshness = getMomentumFreshnessScore(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const trapSafety = 99 - trapRisk;
+    const pattern = detectPatternSignal(stock).name;
+    const qualityGate = getQualityGateLabel(stock);
+    const cleanPatternBoost =
+      pattern === "Pressure Coil" || pattern === "Quiet Accumulation"
+        ? 8
+        : pattern === "Continuation Stack"
+          ? 5
+          : pattern === "Crowd Ignition" && entryQuality >= 70
+            ? 4
+            : 0;
+    const moveBonus = move < 8 ? Math.min(8, move * 0.75) : 0;
+    const extensionPenalty = move >= 20 ? 24 : move >= 15 ? 18 : move >= 11 ? 12 : move >= 8 ? 7 : 0;
+    const reclaimPenalty = stock.change < 0 ? 14 : 0;
+    const gatePenalty = qualityGate === "Reject" ? 26 : qualityGate === "Caution" ? 10 : 0;
+
+    return Math.round(
+      ht * 0.2 +
+        signal * 0.14 +
+        attention * 0.1 +
+        participation * 0.13 +
+        continuation * 0.13 +
+        entryQuality * 0.18 +
+        trapSafety * 0.1 +
+        Math.min(10, rvol * 1.7) +
+        Math.min(8, freshness * 0.65) +
+        moveBonus +
+        cleanPatternBoost -
+        extensionPenalty -
+        reclaimPenalty -
+        gatePenalty,
+    );
+  };
+
+  const getLiveConvictionScore = (stock: Stock) => {
+    const scannerScore = getScannerSelectionScore(stock);
+    const conviction = getConvictionScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const participation = getParticipationScore(stock);
+    const entryQuality = getEntryQualityScore(stock);
+    const trapRisk = getTrapRiskScore(stock);
+    const trapSafety = 99 - trapRisk;
+    const qualityGate = getQualityGateLabel(stock);
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const riskPenalty =
+      move >= 18 || trapRisk >= 72
+        ? 18
+        : move >= 12 || trapRisk >= 58
+          ? 12
+          : move >= 8 || attention >= 88 || rvol >= 5
+            ? 6
+            : 0;
+    const gatePenalty = qualityGate === "Reject" ? 28 : qualityGate === "Caution" ? 12 : 0;
+
+    // Public opportunity ranking score. This is intentionally stricter than raw conviction.
+    // HT should elevate the best opportunity right now, not the loudest ticker on the board.
+    return clampScore(
+      scannerScore * 0.22 +
+        conviction * 0.26 +
+        entryQuality * 0.3 +
+        trapSafety * 0.14 +
+        continuation * 0.06 +
+        participation * 0.04 -
+        riskPenalty -
+        gatePenalty,
+      20,
+      99,
+    );
+  };
+
+  const getScannerConfidenceLabel = (stock: Stock) => {
+    const score = getLiveConvictionScore(stock);
+    const gate = getQualityGateLabel(stock);
+
+    if (gate === "Reject") return "Trap Filtered";
+    if (gate === "Caution") return "Entry Caution";
+    if (score >= 92) return "HT Priority";
+    if (score >= 86) return "Strong Conviction";
+    if (score >= 78) return "Momentum Building";
+    if (stock.change < 0) return "Reclaim Watch";
+
+    return "Monitor Only";
+  };
+
+  const convictionLeaders = useMemo(() => {
+    const eligible = [...stocks]
+      .map((stock) => ({
+        stock,
+        engine: getBackgroundOpportunityEngine(stock),
+      }))
+      .filter(({ engine }) => !engine.tooLate && engine.qualityGate !== "Reject");
+
+    const ranked = eligible.length
+      ? eligible
+      : [...stocks].map((stock) => ({
+          stock,
+          engine: getBackgroundOpportunityEngine(stock),
+        }));
+
+    return ranked
+      .sort((a, b) => b.engine.finalScore - a.engine.finalScore)
+      .map((item) => item.stock)
+      .slice(0, 10);
+  }, [stocks, news, newsIntel, watchlist, savedSetups, traderMode]);
+
+  const getEmergingRadarStatus = (engine: BackgroundOpportunityEngine): EmergingRadarCandidate["status"] => {
+    if (engine.accelerationScore >= 78 || engine.discoveryScore >= 84) return "Building Fast";
+    if (engine.discoveryScore >= 72 && engine.trapRisk < 62) return "Early Watch";
+    return "Needs Review";
+  };
+
+  const getEmergingRadarReason = (stock: Stock, engine: BackgroundOpportunityEngine) => {
+    const catalyst = getCatalystStrength(stock);
+
+    if (engine.opportunityWindow === "EARLY WINDOW OPEN") {
+      return "HT noticed early discovery before full crowd saturation. Needs review before it earns Top Conviction.";
+    }
+
+    if (engine.accelerationScore >= 78 && engine.discoveryScore >= 70) {
+      return "Discovery and acceleration are rising together, but confirmation is not complete yet.";
+    }
+
+    if (engine.pattern === "Pressure Coil" || engine.pattern === "Quiet Accumulation") {
+      return `${engine.pattern} forming while the move is still early. Watch for participation expansion.`;
+    }
+
+    if (engine.fingerprintScore >= 72) {
+      return `Behavior resembles ${engine.fingerprintMatch}, but HT still wants cleaner proof.`;
+    }
+
+    if (catalyst !== "No fresh catalyst") {
+      return `${catalyst} detected. HT is watching whether attention turns into durable participation.`;
+    }
+
+    return "Unusual early pressure detected. HT is watching before it becomes a conviction call.";
+  };
+
+  const emergingRadarCandidates = useMemo<EmergingRadarCandidate[]>(() => {
+    const convictionSymbols = new Set(convictionLeaders.slice(0, 3).map((stock) => stock.symbol));
+
+    return [...stocks]
+      .map((stock) => {
+        const engine = getBackgroundOpportunityEngine(stock);
+        const move = Math.abs(stock.change);
+        const radarScore = clampScore(
+          engine.discoveryScore * 0.32 +
+            engine.accelerationScore * 0.26 +
+            engine.fingerprintScore * 0.14 +
+            engine.participation * 0.12 +
+            engine.entryQuality * 0.1 +
+            (99 - engine.trapRisk) * 0.06 +
+            (engine.opportunityWindow === "EARLY WINDOW OPEN" ? 8 : 0) +
+            (engine.opportunityWindow === "EARLY WINDOW BUILDING" ? 5 : 0) -
+            (move >= 12 ? 14 : move >= 9 ? 8 : 0) -
+            (engine.tooLate ? 24 : 0),
+          0,
+          99,
+        );
+
+        return {
+          stock,
+          engine,
+          radarScore,
+          status: getEmergingRadarStatus(engine),
+          reason: getEmergingRadarReason(stock, engine),
+        };
+      })
+      .filter(({ stock, engine, radarScore }) => {
+        if (convictionSymbols.has(stock.symbol)) return false;
+        if (engine.qualityGate === "Reject") return false;
+        if (engine.tooLate) return false;
+        if (engine.opportunityWindow === "CROWD ARRIVED" || engine.opportunityWindow === "EXHAUSTION RISK") return false;
+        if (Math.abs(stock.change) >= 14) return false;
+
+        return (
+          radarScore >= 64 ||
+          engine.discoveryScore >= 72 ||
+          engine.accelerationScore >= 72 ||
+          engine.pattern === "Pressure Coil" ||
+          engine.pattern === "Quiet Accumulation"
+        );
+      })
+      .sort((a, b) => b.radarScore - a.radarScore)
+      .slice(0, 4);
+  }, [stocks, convictionLeaders, news, newsIntel, watchlist, savedSetups, traderMode]);
 
   const priorityTarget = convictionLeaders[0];
   const secondaryTarget = convictionLeaders[1];
@@ -784,7 +2784,7 @@ export default function Home() {
     ? Math.round(
         getConvictionScore(priorityTarget) * 0.45 +
           getAttentionScore(priorityTarget) * 0.3 +
-          getSignalQuality(priorityTarget) * 0.25
+          getSignalQuality(priorityTarget) * 0.25,
       )
     : 0;
 
@@ -802,7 +2802,7 @@ export default function Home() {
       ? "Do not chase the first vertical move. Wait for pullback, reclaim, or clear continuation."
       : priorityTarget.change < 0
         ? "Risk is defensive. Wait for reclaim before treating this as a long idea."
-        : "Momentum is tradable only if volume and structure continue confirming."
+        : "Attention Spike is tradable only if volume and structure continue confirming."
     : "Scanner is warming up. Wait for the first clean priority target.";
 
   const getPriorityReason = (stock: Stock) => {
@@ -831,7 +2831,6 @@ export default function Home() {
 
     return `Ignore lower-quality noise. ${priorityTarget.symbol} currently deserves the majority of trader attention.`;
   };
-
 
   const getMarketNarrativeHeadline = () => {
     if (marketPulse === "Bullish" && hotStocks.length >= 2) {
@@ -866,11 +2865,18 @@ export default function Home() {
   };
 
   const getNarrativeShift = () => {
-    if (priorityTarget?.symbol === "SNAL" || priorityTarget?.symbol === "QUBT") {
+    if (
+      priorityTarget?.symbol === "SNAL" ||
+      priorityTarget?.symbol === "QUBT"
+    ) {
       return "Speculative momentum is leading trader attention.";
     }
 
-    if (priorityTarget?.symbol === "NVDA" || priorityTarget?.symbol === "AMD" || priorityTarget?.symbol === "SMCI") {
+    if (
+      priorityTarget?.symbol === "NVDA" ||
+      priorityTarget?.symbol === "AMD" ||
+      priorityTarget?.symbol === "SMCI"
+    ) {
       return "AI and semiconductor names remain the dominant attention pocket.";
     }
 
@@ -922,55 +2928,2769 @@ export default function Home() {
     ];
   }, [stocks, news, watchlist, savedSetups, traderMode, marketPulse]);
 
-  const getTradePlan = (stock: Stock) => {
+
+  const getInvalidationRule = (stock: Stock) => {
     if (stock.change >= 8) {
-      return "Momentum is hot. Wait for pullback/reclaim instead of chasing the biggest candle.";
+      return "Invalidates if the move loses volume, fails reclaim, or breaks the first higher-low structure.";
     }
 
     if (stock.change >= 2) {
-      return "Constructive setup. Watch volume, VWAP hold, and higher-low continuation.";
+      return "Invalidates if momentum fades below the active scanner threshold or volume dries up.";
+    }
+
+    if (stock.change < 0) {
+      return "Invalidates bullish bias until price reclaims strength with confirmation.";
+    }
+
+    return "Invalidates if no attention, volume, or catalyst confirmation appears.";
+  };
+
+  const getBestTraderFit = (stock: Stock) => {
+    const move = Math.abs(stock.change);
+
+    if (move >= 10) return "Best for aggressive momentum traders only.";
+    if (move >= 4) return "Best for active momentum traders watching confirmation.";
+    if (stock.change < 0) return "Best for patient traders waiting for reclaim confirmation.";
+
+    return "Best for watchlist builders, not immediate chasing.";
+  };
+
+  const getConfirmationTrigger = (stock: Stock) => {
+    if (stock.change >= 8) return "Pullback hold, reclaim, or clean continuation after volume confirms.";
+    if (stock.change >= 2) return "Higher-low structure with volume staying elevated.";
+    if (stock.change < 0) return "Reclaim above weakness with improving signal quality.";
+
+    return "Fresh volume, catalyst, or attention expansion.";
+  };
+
+  const liveDeskFeed = useMemo(() => {
+    const leader = priorityTarget || attentionLeaders[0] || topStock;
+    const secondary = secondaryTarget || signalLeaders[1];
+    const riskName = dangerTarget;
+
+    return [
+      {
+        tag: "Priority",
+        tone: "text-orange-300",
+        message: leader
+          ? `${leader.symbol} is leading the live board with ${getConvictionScore(leader)}/99 conviction and ${getAttentionScore(leader)} attention.`
+          : "Scanner is waiting for the first clean priority target.",
+      },
+      {
+        tag: "Alert",
+        tone: "text-green-300",
+        message: leader
+          ? getNotificationTrigger(leader)
+          : "No notification-worthy setup yet.",
+      },
+      {
+        tag: "Risk",
+        tone: "text-red-300",
+        message: riskName
+          ? `${riskName.symbol} is the weakest name on the board. Avoid forcing long bias until reclaim improves.`
+          : getDailyRiskEnvironment(),
+      },
+      {
+        tag: "Rotation",
+        tone: "text-zinc-300",
+        message: secondary
+          ? `${secondary.symbol} is the secondary watch if attention rotates away from ${leader?.symbol || "the current leader"}.`
+          : getNarrativeShift(),
+      },
+    ];
+  }, [stocks, news, watchlist, savedSetups, traderMode, marketPulse]);
+
+
+  const getHTSignalLanguage = (stock: Stock) => {
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const conviction = getConvictionScore(stock);
+    const rvol = getRelativeVolume(stock);
+
+    if (attention >= 90 && conviction >= 86) {
+      return "Attention pressure is outrunning the rest of the board. HT is flagging this before the crowd fully crowds in.";
+    }
+
+    if (signal >= 88 && attention >= 76) {
+      return "Signal quality and participation are starting to align. This is the kind of pressure shift traders usually notice late.";
+    }
+
+    if (rvol >= 3 && stock.change >= 3) {
+      return "Participation quality is expanding beneath the move. Attention Spike is real only if this pressure keeps building.";
+    }
+
+    if (stock.change < 0) {
+      return "Weak tape. HT is not calling this early until reclaim strength proves participation is returning.";
+    }
+
+    return "Attention Spike structure is forming, but HT is waiting for stronger attention pressure before calling it a true Top Conviction.";
+  };
+
+  const getCrowdPhase = (stock: Stock) => {
+    const attention = getAttentionScore(stock);
+    const conviction = getConvictionScore(stock);
+
+    if (attention >= 90 && conviction >= 88) return "Crowd Waking Up";
+    if (attention >= 80) return "Attention Building";
+    if (conviction >= 82) return "Quiet Accumulation";
+    if (stock.change < 0) return "Crowd Fading";
+
+    return "Pre-Signal Watch";
+  };
+
+  const getFirstSignalStatus = (stock: Stock) => {
+    const conviction = getConvictionScore(stock);
+    const attention = getAttentionScore(stock);
+
+    if (conviction >= 88 && attention >= 84) return "TOP READ LIVE";
+    if (conviction >= 80 || attention >= 80) return "PRESSURE FORMING";
+    if (stock.change < 0) return "NO LONG SIGNAL";
+
+    return "WAITING FOR CONFIRMATION";
+  };
+
+  const getBeforeCrowdScore = (stock: Stock) => {
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const rvol = getRelativeVolume(stock);
+    const extensionPenalty = Math.abs(stock.change) >= 12 ? 8 : 0;
+
+    return Math.min(
+      99,
+      Math.max(38, Math.round(signal * 0.42 + attention * 0.4 + rvol * 4 - extensionPenalty)),
+    );
+  };
+
+  const firstSignal = useMemo(() => {
+    const leader = priorityTarget || attentionLeaders[0] || signalLeaders[0] || topStock;
+
+    if (!leader) return null;
+
+    return {
+      stock: leader,
+      status: getFirstSignalStatus(leader),
+      language: getHTSignalLanguage(leader),
+      crowdPhase: getCrowdPhase(leader),
+      beforeCrowdScore: getBeforeCrowdScore(leader),
+      timestamp: mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live",
+    };
+  }, [priorityTarget, attentionLeaders, signalLeaders, topStock, lastUpdated, news, traderMode]);
+
+  const firstSignalProofLoop = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget;
+    const second = secondaryTarget || convictionLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+
+    return [
+      {
+        label: "Top Conviction",
+        value: leader ? `${leader.symbol} pressure detected` : "Scanning",
+        note: leader ? `${getBeforeCrowdScore(leader)}/99 before-crowd score` : "Waiting for a clean read",
+      },
+      {
+        label: "Attention Shift",
+        value: heat ? `${heat.symbol} heat rising` : "No shift yet",
+        note: heat ? `${getAttentionScore(heat)} attention / ${getCrowdPhase(heat)}` : "Crowd still quiet",
+      },
+      {
+        label: "Proof Loop",
+        value: leader ? `HT spotted ${leader.symbol}` : "No trigger",
+        note: leader ? "Track whether pressure expands after the signal." : "Top Conviction will log here.",
+      },
+      {
+        label: "Next Watch",
+        value: second ? second.symbol : "--",
+        note: second ? `${getConvictionScore(second)}/99 conviction if rotation hits.` : "No secondary setup yet.",
+      },
+    ];
+  }, [firstSignal, priorityTarget, secondaryTarget, convictionLeaders, attentionLeaders, topMovers, news, traderMode]);
+
+
+  const signalHistory = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    const second = secondaryTarget || convictionLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+    const defensive = dangerTarget || topLosers[0];
+
+    return [
+      {
+        symbol: leader?.symbol || "--",
+        event: "HT Top Conviction™",
+        result: leader ? `${leader.change >= 0 ? "+" : ""}${leader.change.toFixed(2)}% live move` : "Scanning",
+        status: leader && getBeforeCrowdScore(leader) >= 82 ? "Confirmed Pressure" : "Tracking",
+        note: leader
+          ? `Detected at ${firstSignal?.timestamp || "Live"} with ${leader ? getBeforeCrowdScore(leader) : 0}/99 before-crowd pressure.`
+          : "No clean pressure pocket yet.",
+      },
+      {
+        symbol: heat?.symbol || "--",
+        event: "Attention Shift",
+        result: heat ? `${getAttentionScore(heat)}/99 attention` : "No shift",
+        status: heat && getAttentionScore(heat) >= 80 ? "Crowd Waking" : "Watching",
+        note: heat
+          ? `${getCrowdPhase(heat)} — HT is watching if attention expands into participation.`
+          : "Crowd behavior has not separated yet.",
+      },
+      {
+        symbol: second?.symbol || "--",
+        event: "Rotation Watch",
+        result: second ? `${getConvictionScore(second)}/99 conviction` : "No rotation",
+        status: second && getConvictionScore(second) >= 82 ? "Prime Watch" : "Secondary",
+        note: second
+          ? "If the Top Conviction fades, this is the next pressure pocket HT is monitoring."
+          : "No secondary conviction cluster yet.",
+      },
+      {
+        symbol: defensive?.symbol || "--",
+        event: "Risk Filter",
+        result: defensive ? `${defensive.change.toFixed(2)}% weak tape` : "No danger",
+        status: defensive ? "Avoid Chase" : "Clean Tape",
+        note: defensive
+          ? "HT is filtering weaker names so the trader does not confuse movement with opportunity."
+          : "No major downside pressure pocket detected.",
+      },
+    ];
+  }, [firstSignal, priorityTarget, secondaryTarget, convictionLeaders, attentionLeaders, topMovers, topLosers, dangerTarget, news, traderMode]);
+
+  const proofMetrics = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget;
+    const bestScore = leader ? getBeforeCrowdScore(leader) : 0;
+    const strongSignals = stocks.filter((stock) => getBeforeCrowdScore(stock) >= 78).length;
+    const avgPressure = stocks.length
+      ? Math.round(stocks.reduce((total, stock) => total + getBeforeCrowdScore(stock), 0) / stocks.length)
+      : 0;
+
+    return [
+      ["Signals Today", strongSignals || 0, "pressure pockets"],
+      ["Flow Accuracy", "Sim", "proof layer"],
+      ["Best Signal", leader?.symbol || "--", bestScore ? `${bestScore}/99` : "Scanning"],
+      ["Avg Pressure", avgPressure || "--", "board-wide"],
+      ["Crowd Status", leader ? getCrowdPhase(leader) : "Scanning", "live read"],
+    ];
+  }, [stocks, firstSignal, priorityTarget, news, traderMode]);
+
+  const buildPressureStack = (stock: Stock): PressureStack => {
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const participation = getParticipationScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const hasNews = Boolean(getNewsArticles(stock.symbol)[0]?.headline);
+    const newsVelocity = getNewsVelocityScore(stock);
+    const newsCatalyst = getNewsCatalystScore(stock);
+    const catalystStrength = getCatalystStrength(stock);
+    const narrativeSignal = getNarrativeSignal(stock);
+    const sentimentScore = getNarrativeSentimentScore(stock);
+    const sentimentBias = getNarrativeSentimentBias(stock);
+    const hypeScore = getRetailHypeScore(stock);
+    const pattern = detectPatternSignal(stock);
+
+    const priceMomentum = clampScore(45 + move * 4 + (stock.change >= 0 ? 8 : -10), 35, 99);
+    const relativeVolume = clampScore(rvol * 14, 25, 99);
+    const volumeVelocity = clampScore(relativeVolume * 0.7 + attention * 0.3, 25, 99);
+    const attentionAcceleration = clampScore(attention * 0.58 + newsVelocity * 0.24 + hypeScore * 0.18, 25, 99);
+    const extensionRisk = getExtensionRiskScore(stock);
+    const riskRewardQuality = getRiskRewardQualityScore(stock);
+    const trapRiskScore = getTrapRiskScore(stock);
+    const trapRiskLabel = getTrapRiskLabel(stock) as TrapRiskLabel;
+    const entryQualityScore = getEntryQualityScore(stock);
+    const qualityGate = getQualityGateLabel(stock) as QualityGateLabel;
+
+    const earlyPressureBonus =
+      rvol >= 2.5 && move < 8 && attention >= 68 ? 7 : 0;
+
+    const narrativeEarlyBonus =
+      newsVelocity >= 68 && sentimentScore >= 58 && move < 10 ? 5 : 0;
+
+    const patternEarlyBonus =
+      pattern.name === "Pressure Coil" || pattern.name === "Quiet Accumulation"
+        ? 8
+        : pattern.name === "Crowd Ignition"
+          ? 6
+          : pattern.name === "Continuation Stack"
+            ? 5
+            : pattern.name === "Exhaustion Risk"
+              ? -7
+              : pattern.name === "Reclaim Setup"
+                ? stock.change < 0 ? -3 : 4
+                : 0;
+
+    const lateChasePenalty =
+      move >= 18 ? 14 : move >= 12 ? 9 : move >= 8 && extensionRisk >= 72 ? 5 : 0;
+
+    const reclaimPenalty = stock.change < 0 ? 14 : 0;
+
+    const convictionScore = clampScore(
+      priceMomentum * 0.12 +
+        relativeVolume * 0.11 +
+        volumeVelocity * 0.1 +
+        attentionAcceleration * 0.12 +
+        newsCatalyst * 0.06 +
+        newsVelocity * 0.05 +
+        sentimentScore * 0.04 +
+        hypeScore * 0.035 +
+        pattern.score * 0.12 +
+        participation * 0.095 +
+        continuation * 0.12 +
+        riskRewardQuality * 0.12 +
+        earlyPressureBonus +
+        narrativeEarlyBonus +
+        patternEarlyBonus -
+        lateChasePenalty -
+        reclaimPenalty,
+      35,
+      99,
+    );
+
+    const trapSafety = 99 - trapRiskScore;
+    const opportunityScore = clampScore(
+      convictionScore * 0.42 +
+        entryQualityScore * 0.38 +
+        trapSafety * 0.2 -
+        (qualityGate === "Reject" ? 24 : qualityGate === "Caution" ? 10 : 0),
+      20,
+      99,
+    );
+
+    const scoreBreakdown: ScoreContribution[] = [
+      { label: "Momentum", score: priceMomentum, weight: 12, contribution: Math.round(priceMomentum * 0.12) },
+      { label: "Relative Volume", score: relativeVolume, weight: 11, contribution: Math.round(relativeVolume * 0.11) },
+      { label: "Volume Velocity", score: volumeVelocity, weight: 10, contribution: Math.round(volumeVelocity * 0.1) },
+      { label: "Attention", score: attentionAcceleration, weight: 12, contribution: Math.round(attentionAcceleration * 0.12) },
+      { label: "News", score: newsVelocity, weight: 5, contribution: Math.round(newsVelocity * 0.05) },
+      { label: "Pattern", score: pattern.score, weight: 12, contribution: Math.round(pattern.score * 0.12) },
+      { label: "Participation", score: participation, weight: 10, contribution: Math.round(participation * 0.095) },
+      { label: "Continuation", score: continuation, weight: 12, contribution: Math.round(continuation * 0.12) },
+      { label: "Risk/Reward", score: riskRewardQuality, weight: 12, contribution: Math.round(riskRewardQuality * 0.12) },
+      { label: "Entry Quality", score: entryQualityScore, weight: 32, contribution: Math.round(entryQualityScore * 0.32) },
+      { label: "Trap Safety", score: trapSafety, weight: 16, contribution: Math.round(trapSafety * 0.16) },
+    ];
+
+    const convictionLabel =
+      convictionScore >= 92
+        ? "HT Priority"
+        : convictionScore >= 86
+          ? "Strong Conviction"
+          : convictionScore >= 78
+            ? "Pressure Building"
+            : stock.change < 0
+              ? "Reclaim Watch"
+              : "Monitor Only";
+
+    const behavioralState =
+      pattern.name === "Pressure Coil"
+        ? "Pressure coil forming"
+        : pattern.name === "Quiet Accumulation"
+          ? "Quiet accumulation detected"
+          : pattern.name === "Crowd Ignition"
+            ? "Crowd ignition forming"
+            : pattern.name === "Continuation Stack"
+              ? "Continuation stack strengthening"
+              : stock.change < 0
+                ? "Pressure fading"
+                : pattern.name === "Exhaustion Risk" || extensionRisk >= 78
+                  ? "Potential exhaustion forming"
+                  : hypeScore >= 78 && move < 10
+          ? "Retail narrative heating up"
+          : newsVelocity >= 78 && move < 10
+            ? "Narrative pressure accelerating"
+            : sentimentScore <= 42 && newsVelocity >= 60
+              ? "Cautious catalyst pressure"
+              : convictionScore >= 90
+              ? "Breakout pressure building"
+              : attention >= 84
+                ? "Retail attention accelerating"
+                : rvol >= 3 && move < 8
+                  ? "Volume conviction strengthening"
+                  : "Early pressure forming";
+
+    const warnings: string[] = [];
+
+    if (extensionRisk >= 78) warnings.push("Extension risk is elevated. Avoid emotional chasing.");
+    if (stock.change < 0) warnings.push("Weak tape. Wait for reclaim strength.");
+    if (attention >= 88 && signal < 76) warnings.push("Crowd attention is high, but setup quality still needs confirmation.");
+    if (rvol >= 3 && attention < 75) warnings.push("Volume is expanding before full crowd confirmation.");
+    if (newsVelocity >= 78 && move < 8) warnings.push("Narrative is heating up before price fully expands.");
+    if (hypeScore >= 80 && extensionRisk >= 70) warnings.push("Retail hype is hot. Protect against late-crowd reversals.");
+    if (sentimentScore <= 42 && newsVelocity >= 60) warnings.push("News flow is active, but sentiment is cautious. Demand cleaner confirmation.");
+    if (trapRiskLabel === "High Trap Risk") warnings.push("High trap risk. HT should not treat this as a clean entry even if conviction is high.");
+    if (qualityGate === "Reject") warnings.push("Quality gate rejected this as a primary momentum opportunity.");
+    if (entryQualityScore < 55 && convictionScore >= 80) warnings.push("Conviction is high, but entry quality is weak. Important ticker does not equal clean trade.");
+    if (pattern.name === "Pressure Coil") warnings.push("Pressure coil detected. Watch for breakout confirmation before the crowd reacts.");
+    if (pattern.name === "Quiet Accumulation") warnings.push("Quiet accumulation detected. This may still need patience before ignition.");
+    if (pattern.name === "Crowd Ignition") warnings.push("Crowd ignition is forming. Manage speed and avoid late emotional entries.");
+
+    const behavioralSummary =
+      convictionScore >= 88
+        ? `${stock.symbol} is showing layered pressure, but HT is validating entry quality and trap risk before calling it a clean opportunity.`
+        : stock.change < 0
+          ? `${stock.symbol} is not clean yet. HT wants reclaim strength before upgrading conviction.`
+          : `${stock.symbol} is developing with a ${pattern.name} read. HT is watching whether pressure becomes real participation.`;
+
+    return {
+      symbol: stock.symbol,
+      priceMomentum,
+      relativeVolume,
+      volumeVelocity,
+      attentionAcceleration,
+      newsCatalyst,
+      newsVelocity,
+      catalystStrength,
+      narrativeSignal,
+      sentimentBias,
+      sentimentScore,
+      hypeScore,
+      patternSignal: pattern.name,
+      patternScore: pattern.score,
+      patternSummary: pattern.summary,
+      patternBias: pattern.bias,
+      trapRiskScore,
+      trapRiskLabel,
+      entryQualityScore,
+      qualityGate,
+      opportunityScore,
+      scoreBreakdown,
+      participationQuality: participation,
+      continuationStrength: continuation,
+      extensionRisk,
+      riskRewardQuality,
+      convictionScore,
+      convictionLabel,
+      behavioralState,
+      behavioralSummary,
+      warnings,
+    };
+  };
+
+  const getHTScore = (stock: Stock) => {
+    return buildPressureStack(stock).convictionScore;
+  };
+
+  const getHTOpportunityScore = (stock: Stock) => {
+    return buildPressureStack(stock).opportunityScore;
+  };
+
+  const getBehaviorNarrative = (stock: Stock) => {
+    const stack = buildPressureStack(stock);
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const extensionRisk = getExtensionRiskScore(stock);
+
+    const base = {
+      patternScore: stack.patternScore,
+      convictionScore: stack.convictionScore,
+      behaviorLabel: stack.behavioralState,
+      operatorDirective: "Let the evidence lead. HT is prioritizing pressure quality over emotional price chasing.",
+    };
+
+    if (stack.patternSignal === "Crowd Ignition") {
+      return {
+        ...base,
+        patternTitle: "CROWD IGNITION",
+        behaviorRead: "Retail attention is accelerating while volume participation expands across the active board.",
+        pressureSummary: "HT is detecting narrative pressure building before the crowd fully confirms the move. The setup is no longer just green — attention, participation, and market behavior are starting to stack together.",
+        continuationOutlook: continuation >= 82
+          ? "Continuation probability is improving while volume expansion stays intact. Watch whether buyers defend the first pullback instead of chasing vertical candles."
+          : "Continuation is possible, but HT still needs cleaner follow-through after the first pressure burst.",
+        riskState: extensionRisk >= 72 ? "Fast tape / elevated chase risk" : "Moderate aggression",
+        operatorDirective: "Treat this like an early crowd-expansion read. Speed matters, but discipline matters more.",
+      };
+    }
+
+    if (stack.patternSignal === "Exhaustion Risk") {
+      return {
+        ...base,
+        patternTitle: "PARABOLIC EXTENSION",
+        behaviorRead: "Price expansion is beginning to outrun healthy continuation structure.",
+        pressureSummary: "Late-stage participation is increasing while extension risk rises. The move can keep running, but HT is warning that emotional entries are now easier to punish.",
+        continuationOutlook: "Continuation is still possible, but risk/reward quality is weakening. Favor pullbacks, reclaims, and protected profit windows over late-chase entries.",
+        riskState: "Aggressive / elevated volatility",
+        operatorDirective: "Protect capital first. If the crowd is late, HT does not want the user becoming exit liquidity.",
+      };
+    }
+
+    if (stack.patternSignal === "Quiet Accumulation") {
+      return {
+        ...base,
+        patternTitle: "SMART MONEY ACCUMULATION",
+        behaviorRead: "Relative volume is increasing while price remains controlled.",
+        pressureSummary: "HT is detecting stealth participation before broader retail expansion. This is the kind of setup that can look quiet before the tape starts reacting.",
+        continuationOutlook: "Early-stage breakout pressure may be forming. Confirmation improves if volume keeps rising without price overextending.",
+        riskState: "Controlled / constructive",
+        operatorDirective: "Patience setup. The edge is watching pressure build before the obvious breakout candle.",
+      };
+    }
+
+    if (stack.patternSignal === "Pressure Coil") {
+      return {
+        ...base,
+        patternTitle: "PRESSURE COIL",
+        behaviorRead: "Volume and attention are building while price has not fully expanded yet.",
+        pressureSummary: "HT is watching compression turn into pressure. This is an early-alert structure where the market may be preparing for a stronger directional move.",
+        continuationOutlook: "Breakout pressure improves if buyers keep absorbing dips and volume stays above normal before confirmation.",
+        riskState: "Constructive / waiting for trigger",
+        operatorDirective: "Do not force it yet. Let the trigger confirm while HT tracks the pressure underneath.",
+      };
+    }
+
+    if (stack.patternSignal === "Continuation Stack") {
+      return {
+        ...base,
+        patternTitle: "CONTINUATION STACK",
+        behaviorRead: "Momentum is holding while participation and signal quality keep confirming.",
+        pressureSummary: "HT is seeing evidence that the move still has structure, not just hype. Buyers are attempting to sustain control after the first expansion.",
+        continuationOutlook: "Continuation remains favored while volume retention and higher-low behavior stay intact.",
+        riskState: extensionRisk >= 70 ? "Active / manage extension" : "Active / healthy continuation",
+        operatorDirective: "Manage the move like a runner. Respect profit windows and do not ignore weakening participation.",
+      };
+    }
+
+    if (stack.patternSignal === "Reclaim Setup") {
+      return {
+        ...base,
+        patternTitle: "RECLAIM SETUP",
+        behaviorRead: "Weak tape is showing early signs of buyer interest returning.",
+        pressureSummary: "HT is not calling this clean yet. The system is watching whether buyers can reclaim control with volume instead of producing a weak bounce.",
+        continuationOutlook: "Upside modeling improves only after reclaim strength appears and participation confirms.",
+        riskState: "Defensive / confirmation required",
+        operatorDirective: "Stand down until buyers prove control. No forced long bias.",
+      };
+    }
+
+    return {
+      ...base,
+      patternTitle: move >= 8 && attention >= 84 ? "LATE CROWD PRESSURE" : "EARLY PRESSURE WATCH",
+      behaviorRead: stack.behavioralSummary,
+      pressureSummary: `${stock.symbol} has ${rvol}x relative volume, ${attention}/99 attention, and ${stack.convictionScore}/99 HT conviction. HT is waiting for a cleaner behavioral fingerprint before upgrading the read.`,
+      continuationOutlook: "Monitor only until pressure separates from noise. Confirmation matters more than prediction here.",
+      riskState: extensionRisk >= 72 ? "Elevated / wait for cleaner entry" : "Controlled / developing",
+      operatorDirective: "Keep it on the board, but do not treat it like the main thesis until pattern quality improves.",
+    };
+  };
+
+  const getSimpleConvictionRead = (stock: Stock) => {
+    const stack = buildPressureStack(stock);
+    const move = Math.abs(stock.change);
+    const attention = getAttentionScore(stock);
+    const continuation = getContinuationStrengthScore(stock);
+    const riskReward = getRiskRewardQualityScore(stock);
+    const extensionRisk = getExtensionRiskScore(stock);
+    const pattern = stack.patternSignal;
+    const entryQuality = stack.entryQualityScore;
+    const trapRisk = stack.trapRiskScore;
+    const qualityGate = stack.qualityGate;
+
+    let state = "BUILDING PRESSURE";
+    let opinion = "Retail attention and participation are accelerating together.";
+    let risk = "Controlled aggression";
+    let operatorRead = "Stay selective. Let pressure confirm before chasing.";
+
+    if (qualityGate === "Reject" || trapRisk >= 72 || entryQuality < 45) {
+      state = "HIGH TRAP RISK";
+      opinion = "Momentum is loud, but entry quality failed HT quality control.";
+      risk = "Avoid chase";
+      operatorRead = "Important ticker, bad opportunity right now. Wait for reset or reclaim.";
+    } else if (qualityGate === "Caution" || trapRisk >= 52 || entryQuality < 62) {
+      state = "EXTENDED";
+      opinion = "The ticker matters, but risk/reward needs a cleaner entry.";
+      risk = "Caution";
+      operatorRead = "Let the first move settle before trusting continuation.";
+    } else if (stock.change < 0 || pattern === "Reclaim Setup") {
+      state = "RECLAIM WATCH";
+      opinion = "Buyers need to regain control before HT upgrades this read.";
+      risk = "Defensive";
+      operatorRead = "Stand down until reclaim strength improves.";
+    } else if (pattern === "Exhaustion Risk" || extensionRisk >= 78 || move >= 12) {
+      state = "EXTENDED";
+      opinion = "Momentum is active, but risk/reward quality is weakening.";
+      risk = "Late chase risk";
+      operatorRead = "Favor protected exits over emotional entries.";
+    } else if (pattern === "Quiet Accumulation" || pattern === "Pressure Coil") {
+      state = "EARLY MOMENTUM";
+      opinion = "Volume and attention are rising before the move becomes obvious.";
+      risk = "Constructive";
+      operatorRead = "Watch for confirmation without forcing the trade.";
+    } else if (pattern === "Crowd Ignition" || attention >= 86) {
+      state = "BUILDING PRESSURE";
+      opinion = "Retail attention and participation are accelerating together.";
+      risk = extensionRisk >= 68 ? "Moderate aggression" : "Controlled aggression";
+      operatorRead = "Pressure is active. Avoid late emotional chasing.";
+    } else if (pattern === "Continuation Stack" || continuation >= 82) {
+      state = "CONTINUATION ACTIVE";
+      opinion = "Momentum remains healthy while participation keeps confirming.";
+      risk = extensionRisk >= 70 ? "Manage extension" : "Constructive";
+      operatorRead = "Let the runner work, but respect weakening pressure.";
+    } else if (stack.convictionScore < 72 || riskReward < 58) {
+      state = "MONITOR ONLY";
+      opinion = "Setup is developing, but HT wants stronger confirmation first.";
+      risk = "Wait for clarity";
+      operatorRead = "No forced action. Keep scanning for cleaner pressure.";
+    }
+
+    const backgroundRead = getBackgroundOpportunityEngine(stock);
+    const discoveryRead =
+      backgroundRead.opportunityWindow === "EARLY WINDOW OPEN"
+        ? `Opportunity Window: EARLY WINDOW OPEN. Crowd participation remains below saturation while discovery, acceleration, and historical runner behavior are aligned.`
+        : backgroundRead.opportunityWindow === "EARLY WINDOW BUILDING"
+          ? `Opportunity Window: EARLY WINDOW BUILDING. Momentum is strengthening before full crowd saturation, but HT still wants confirmation.`
+          : backgroundRead.opportunityWindow === "CONFIRMATION PHASE"
+            ? `Opportunity Window: CONFIRMATION PHASE. The setup is still eligible, but the early edge is not as clean as the top discovery window.`
+            : backgroundRead.opportunityWindow === "CROWD ARRIVED"
+              ? `Opportunity Window: CROWD ARRIVED. HT is limiting conviction because the before-crowd edge is fading.`
+              : `Opportunity Window: EXHAUSTION RISK. HT is filtering this because the move looks too late, crowded, or trap-heavy.`;
+
+    return {
+      state,
+      opinion,
+      risk,
+      operatorRead,
+      discoveryRead,
+      discoveryScore: backgroundRead.discoveryScore,
+      fingerprintScore: backgroundRead.fingerprintScore,
+      fingerprintMatch: backgroundRead.fingerprintMatch,
+      accelerationScore: backgroundRead.accelerationScore,
+      accelerationLabel: backgroundRead.accelerationLabel,
+      crowdSaturationScore: backgroundRead.crowdSaturationScore,
+      crowdSaturationLevel: backgroundRead.crowdSaturationLevel,
+      opportunityWindow: backgroundRead.opportunityWindow,
+      score: stack.opportunityScore,
+      scoreLabel: `HT EDGE ${stack.opportunityScore}`,
+      convictionScore: stack.convictionScore,
+      entryQuality,
+      trapRisk,
+      qualityGate,
+      timingQuality: getTimingQualityLabel(stock),
+      internalPattern: stack.patternSignal,
+    };
+  };
+
+  const getSignalMemoryStatus = (engine: BackgroundOpportunityEngine): SignalMemoryStatus => {
+    if (engine.tooLate || engine.qualityGate === "Reject") return "fake_momentum";
+    if (engine.consumerLabel === "Top Conviction" && engine.opportunityWindowOpen) return "tracking";
+    if (engine.consumerLabel === "Strong Watch" || engine.consumerLabel === "Developing") return "watching";
+
+    return "tracking";
+  };
+
+  const buildSignalMemoryPayload = (stock: Stock): SignalMemoryPayload | null => {
+    if (!session?.user?.id) return null;
+
+    const engine = getBackgroundOpportunityEngine(stock);
+    const read = getSimpleConvictionRead(stock);
+
+    return {
+      user_id: session.user.id,
+      symbol: stock.symbol,
+      picked_at: new Date().toISOString(),
+      entry_price: Number(stock.price || 0),
+      change_percent: Number(stock.change || 0),
+      ht_score: read.score,
+      final_score: engine.finalScore,
+      discovery_score: engine.discoveryScore,
+      acceleration_score: engine.accelerationScore,
+      fingerprint_score: engine.fingerprintScore,
+      crowd_saturation_score: engine.crowdSaturationScore,
+      opportunity_window: engine.opportunityWindow,
+      opportunity_window_open: engine.opportunityWindowOpen,
+      pattern: engine.pattern,
+      contender_status: engine.contenderStatus,
+      quality_gate: engine.qualityGate,
+      trap_risk: engine.trapRisk,
+      entry_quality: engine.entryQuality,
+      participation: engine.participation,
+      continuation: engine.continuation,
+      consumer_label: engine.consumerLabel,
+      discovery_read: read.discoveryRead,
+      internal_reason: engine.internalReason,
+      status: getSignalMemoryStatus(engine),
+    };
+  };
+
+  const saveTopConvictionToMemory = async (stock: Stock) => {
+    if (!session?.user?.id) {
+      setSignalMemoryMessage("Signal memory waiting for login.");
+      return;
+    }
+
+    const payload = buildSignalMemoryPayload(stock);
+    if (!payload) return;
+
+    const memoryKey = `${payload.user_id}-${payload.symbol}-${payload.opportunity_window}-${new Date().toISOString().slice(0, 13)}`;
+
+    if (lastSignalMemoryKey.current === memoryKey) return;
+    lastSignalMemoryKey.current = memoryKey;
+
+    try {
+      const since = new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString();
+      const { data: recentExisting, error: lookupError } = await supabase
+        .from("ht_signal_memory")
+        .select("id")
+        .eq("user_id", payload.user_id)
+        .eq("symbol", payload.symbol)
+        .gte("picked_at", since)
+        .limit(1);
+
+      if (lookupError) {
+        console.error("SIGNAL MEMORY LOOKUP ERROR:", lookupError);
+        setSignalMemoryMessage("Signal memory table needs setup.");
+        return;
+      }
+
+      if (recentExisting && recentExisting.length > 0) {
+        setSignalMemoryMessage(`Signal memory already tracking ${payload.symbol}.`);
+        return;
+      }
+
+      const { error } = await supabase.from("ht_signal_memory").insert(payload);
+
+      if (error) {
+        console.error("SIGNAL MEMORY INSERT ERROR:", error);
+        setSignalMemoryMessage("Signal memory table needs setup.");
+        return;
+      }
+
+      setSignalMemoryMessage(`Signal memory tracking ${payload.symbol}.`);
+    } catch (error) {
+      console.error("SIGNAL MEMORY SAVE ERROR:", error);
+      setSignalMemoryMessage("Signal memory save failed.");
+    }
+  };
+
+
+  const getOutcomeLabel = (
+    row: SignalMemoryRow,
+    currentReturnPct: number,
+    maxGain: number,
+    maxDrawdown: number,
+    ageHours: number,
+  ): OutcomeStatus => {
+    const discovery = Number(row.discovery_score || 0);
+    const acceleration = Number(row.acceleration_score || 0);
+    const saturation = Number(row.crowd_saturation_score || 0);
+    const window = String(row.opportunity_window || "");
+    const hadStrongSetup = discovery >= 78 && acceleration >= 68;
+    const crowdWasHot = saturation >= 70 || window === "CROWD ARRIVED" || window === "EXHAUSTION RISK";
+
+    // Strong winners are the signals HT should learn from first.
+    if (maxGain >= 18 || currentReturnPct >= 15) return "strong_winner";
+    if (maxGain >= 10 || currentReturnPct >= 10) return "winner";
+
+    // Trap = the setup moved against the original read before proving upside follow-through.
+    if (ageHours >= 24 && maxDrawdown <= -8 && maxGain < 5 && crowdWasHot) {
+      return "trap";
+    }
+
+    // Failed momentum = the setup looked strong on discovery/acceleration but did not follow through.
+    if (ageHours >= 48 && maxGain < 4 && currentReturnPct <= 1.5 && hadStrongSetup) {
+      return "failed_momentum";
+    }
+
+    if (ageHours >= 24 && currentReturnPct <= -5 && crowdWasHot) {
+      return "failed_momentum";
+    }
+
+    if (ageHours >= 72 && currentReturnPct <= -3) return "failed";
+    if (ageHours >= 120 && maxGain < 5 && currentReturnPct > -3 && currentReturnPct < 5) return "neutral";
+
+    return "tracking";
+  };
+
+  const getOutcomeSuccessScore = (
+    currentReturnPct: number,
+    maxGain: number,
+    maxDrawdown: number,
+    outcomeStatus: OutcomeStatus,
+  ) => {
+    const statusBoost =
+      outcomeStatus === "strong_winner"
+        ? 28
+        : outcomeStatus === "winner"
+          ? 18
+          : outcomeStatus === "neutral"
+            ? 0
+            : outcomeStatus === "failed"
+              ? -16
+              : outcomeStatus === "failed_momentum" || outcomeStatus === "fake_momentum"
+                ? -24
+                : outcomeStatus === "trap"
+                  ? -30
+                  : 0;
+
+    return clampScore(
+      50 + maxGain * 3.2 + currentReturnPct * 1.35 + maxDrawdown * 1.25 + statusBoost,
+      0,
+      99,
+    );
+  };
+
+  const evaluateTrackedSignalOutcomes = async () => {
+    if (!session?.user?.id) return;
+
+    const evaluationKey = `${session.user.id}-${new Date().toISOString().slice(0, 13)}`;
+    if (lastOutcomeEvaluationKey.current === evaluationKey) return;
+    lastOutcomeEvaluationKey.current = evaluationKey;
+
+    try {
+      const { data, error } = await supabase
+        .from("ht_signal_memory")
+        .select(
+          "id,symbol,entry_price,picked_at,discovery_score,acceleration_score,crowd_saturation_score,opportunity_window,status,outcome_status,max_gain,max_drawdown,price_1d,price_3d,price_5d",
+        )
+        .eq("user_id", session.user.id)
+        .in("status", ["tracking", "watching", "fake_momentum"])
+        .order("picked_at", { ascending: false })
+        .limit(24);
+
+      if (error) {
+        console.error("SIGNAL OUTCOME LOOKUP ERROR:", error);
+        return;
+      }
+
+      const rows = (data || []) as SignalMemoryRow[];
+      if (!rows.length) return;
+
+      let updates = 0;
+
+      for (const row of rows) {
+        const entryPrice = Number(row.entry_price || 0);
+        if (!entryPrice || !row.symbol || !row.picked_at) continue;
+
+        const pickedAt = new Date(row.picked_at).getTime();
+        const ageHours = (Date.now() - pickedAt) / (1000 * 60 * 60);
+
+        // Avoid over-writing brand new records. HT needs a little time before judging the signal.
+        if (ageHours < 0.25) continue;
+
+        const currentQuote = await fetchSingleStock(row.symbol);
+        const currentPrice = Number(currentQuote.price || 0);
+        if (!currentPrice) continue;
+
+        const currentReturnPct = Number((((currentPrice - entryPrice) / entryPrice) * 100).toFixed(2));
+        const previousMaxGain = Number(row.max_gain ?? currentReturnPct);
+        const previousMaxDrawdown = Number(row.max_drawdown ?? currentReturnPct);
+        const maxGain = Number(Math.max(previousMaxGain, currentReturnPct).toFixed(2));
+        const maxDrawdown = Number(Math.min(previousMaxDrawdown, currentReturnPct).toFixed(2));
+        const outcomeStatus = getOutcomeLabel(row, currentReturnPct, maxGain, maxDrawdown, ageHours);
+        const successScore = getOutcomeSuccessScore(currentReturnPct, maxGain, maxDrawdown, outcomeStatus);
+
+        const updatePayload: Record<string, number | string | null> = {
+          max_gain: maxGain,
+          max_drawdown: maxDrawdown,
+          outcome_status: outcomeStatus,
+          success_score: successScore,
+          evaluated_at: new Date().toISOString(),
+        };
+
+        if (ageHours >= 20 && row.price_1d === null) updatePayload.price_1d = currentPrice;
+        if (ageHours >= 68 && row.price_3d === null) updatePayload.price_3d = currentPrice;
+        if (ageHours >= 116 && row.price_5d === null) updatePayload.price_5d = currentPrice;
+
+        const { error: updateError } = await supabase
+          .from("ht_signal_memory")
+          .update(updatePayload)
+          .eq("id", row.id)
+          .eq("user_id", session.user.id);
+
+        if (updateError) {
+          console.error("SIGNAL OUTCOME UPDATE ERROR:", updateError);
+          continue;
+        }
+
+        updates += 1;
+      }
+
+      if (updates > 0) {
+        setSignalMemoryMessage(`Signal memory graded ${updates} outcome update${updates === 1 ? "" : "s"}.`);
+      }
+    } catch (error) {
+      console.error("SIGNAL OUTCOME EVALUATION ERROR:", error);
+    }
+  };
+
+  const loadSignalMemoryIntelligence = async () => {
+    if (!session?.user?.id) {
+      setSignalMemoryInsight(null);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("ht_signal_memory")
+        .select("outcome_status,status,discovery_score,acceleration_score,crowd_saturation_score,trap_risk,ht_score,pattern")
+        .eq("user_id", session.user.id)
+        .order("picked_at", { ascending: false })
+        .limit(100);
+
+      if (error) {
+        console.error("SIGNAL MEMORY INTELLIGENCE ERROR:", error);
+        return;
+      }
+
+      const rows = (data || []) as Array<{
+        outcome_status: string | null;
+        status: string | null;
+        discovery_score: number | null;
+        acceleration_score: number | null;
+        crowd_saturation_score: number | null;
+        trap_risk: number | null;
+        ht_score: number | null;
+        pattern: string | null;
+      }>;
+
+      const tracked = rows.length;
+      if (!tracked) {
+        setSignalMemoryInsight({
+          tracked: 0,
+          winners: 0,
+          failures: 0,
+          traps: 0,
+          tracking: 0,
+          successRate: null,
+          confidenceStatus: "Developing",
+          confidenceLabel: "Confidence developing",
+          winnerDNA: "Winner DNA: collecting outcome data...",
+          failureDNA: "Failure DNA: collecting outcome data...",
+          summary: "HT confidence is online and waiting for tracked outcomes.",
+        });
+        return;
+      }
+
+      const outcomeFor = (row: { outcome_status: string | null; status: string | null }) =>
+        String(row.outcome_status || row.status || "tracking").toLowerCase();
+
+      const winnerRows = rows.filter((row) => ["strong_winner", "winner"].includes(outcomeFor(row)));
+      const failureRows = rows.filter((row) => ["failed", "failed_momentum", "fake_momentum", "trap"].includes(outcomeFor(row)));
+      const trapRows = rows.filter((row) => ["trap", "fake_momentum", "failed_momentum"].includes(outcomeFor(row)));
+      const trackingRows = rows.filter((row) => ["tracking", "watching"].includes(outcomeFor(row)));
+      const gradedCount = winnerRows.length + failureRows.length;
+      const successRate = gradedCount ? Math.round((winnerRows.length / gradedCount) * 100) : null;
+
+      const avg = (items: typeof rows, field: keyof (typeof rows)[number]) => {
+        const values = items
+          .map((item) => Number(item[field] || 0))
+          .filter((value) => Number.isFinite(value) && value > 0);
+
+        if (!values.length) return 0;
+        return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+      };
+
+      const topPattern = (items: typeof rows) => {
+        const counts = items.reduce<Record<string, number>>((acc, item) => {
+          const pattern = String(item.pattern || "Unknown");
+          acc[pattern] = (acc[pattern] || 0) + 1;
+          return acc;
+        }, {});
+
+        return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Building";
+      };
+
+      const winnerDNA = winnerRows.length >= 5
+        ? `Winner DNA: Discovery ${avg(winnerRows, "discovery_score")}, Acceleration ${avg(winnerRows, "acceleration_score")}, HT Score ${avg(winnerRows, "ht_score")}, Pattern ${topPattern(winnerRows)}.`
+        : `Winner DNA: collecting outcome data... ${Math.max(0, 5 - winnerRows.length)} more winner sample${Math.max(0, 5 - winnerRows.length) === 1 ? "" : "s"} needed.`;
+
+      const failureDNA = failureRows.length >= 5
+        ? `Failure DNA: Saturation ${avg(failureRows, "crowd_saturation_score")}, Acceleration ${avg(failureRows, "acceleration_score")}, HT Score ${avg(failureRows, "ht_score")}, Pattern ${topPattern(failureRows)}.`
+        : `Failure DNA: collecting outcome data... ${Math.max(0, 5 - failureRows.length)} more failure sample${Math.max(0, 5 - failureRows.length) === 1 ? "" : "s"} needed.`;
+
+      const confidenceStatus: SignalMemoryInsight["confidenceStatus"] =
+        tracked >= 50
+          ? "Proving"
+          : tracked >= 10
+            ? "Active"
+            : "Developing";
+
+      const confidenceLabel = successRate === null || tracked < 10
+        ? "Confidence developing"
+        : `HT Confidence ${successRate}%`;
+
+      const summary = successRate === null || tracked < 10
+        ? `Status: ${confidenceStatus} · ${tracked}/10 signals needed for active confidence.`
+        : `Status: ${confidenceStatus} · ${successRate}% graded success · ${trapRows.length} fake/trap cluster${trapRows.length === 1 ? "" : "s"}.`;
+
+      setSignalMemoryInsight({
+        tracked,
+        winners: winnerRows.length,
+        failures: failureRows.length,
+        traps: trapRows.length,
+        tracking: trackingRows.length,
+        successRate,
+        confidenceStatus,
+        confidenceLabel,
+        winnerDNA,
+        failureDNA,
+        summary,
+      });
+    } catch (error) {
+      console.error("SIGNAL MEMORY INTELLIGENCE LOAD ERROR:", error);
+    }
+  };
+
+  const getSignalEvolutionState = (stock: Stock) => {
+    const htScore = getHTScore(stock);
+    const attention = getAttentionScore(stock);
+    const move = Math.abs(stock.change);
+    const pattern = detectPatternSignal(stock);
+
+    if (pattern.name === "Pressure Coil") return "Pressure Coil";
+    if (pattern.name === "Quiet Accumulation") return "Quiet Accumulation";
+    if (pattern.name === "Crowd Ignition") return "Crowd Ignition";
+    if (pattern.name === "Continuation Stack") return "Continuation Stack";
+    if (pattern.name === "Reclaim Setup") return "Reclaim Setup";
+    if (stock.change < 0 && attention < 75) return "Fading";
+    if (pattern.name === "Exhaustion Risk" || (move >= 12 && htScore < 84)) return "Exhaustion Risk";
+    if (htScore >= 90 && attention >= 88) return "Attention Spike Expansion";
+    if (htScore >= 84) return "Crowd Arriving";
+    if (attention >= 78 || htScore >= 76) return "Pressure Building";
+
+    return "Early Detection";
+  };
+
+  const getSignalEvolutionDetail = (stock: Stock) => {
+    const state = getSignalEvolutionState(stock);
+
+    if (state === "Pressure Coil") {
+      return "Volume and attention are building while price has not fully expanded. HT is watching for breakout pressure before confirmation.";
+    }
+
+    if (state === "Quiet Accumulation") {
+      return "Structure is improving quietly before the crowd fully notices. HT is monitoring for ignition.";
+    }
+
+    if (state === "Crowd Ignition") {
+      return "Retail attention, volume, and early price lift are waking up together. Speed matters, but discipline matters more.";
+    }
+
+    if (state === "Continuation Stack") {
+      return "Momentum is holding with participation. HT is watching whether the trend can keep stacking cleanly.";
+    }
+
+    if (state === "Reclaim Setup") {
+      return "Weakness is trying to turn into buyer control. HT wants reclaim confirmation before upgrading conviction.";
+    }
+
+    if (state === "Attention Spike Expansion") {
+      return "Crowd pressure, conviction, and participation are aligned. HT is watching for continuation quality, not just price movement.";
+    }
+
+    if (state === "Crowd Arriving") {
+      return "The crowd is starting to notice. This is where HT separates clean pressure from late chase behavior.";
+    }
+
+    if (state === "Pressure Building") {
+      return "Attention is forming beneath the move. Participation still needs to prove the signal has legs.";
+    }
+
+    if (state === "Exhaustion Risk") {
+      return "The move is getting loud. HT is watching whether liquidity can absorb profit-taking before calling continuation.";
+    }
+
+    if (state === "Fading") {
+      return "Pressure is leaking out. HT needs reclaim strength before this deserves fresh attention.";
+    }
+
+    return "Early pressure pocket. Not fully public yet, but HT is monitoring for attention expansion.";
+  };
+
+
+
+
+
+
+  const getEmotionalMomentumState = (stock: Stock) => {
+    const ht = getHTScore(stock);
+    const attention = getAttentionScore(stock);
+    const move = Math.abs(stock.change);
+
+    if (stock.change < 0) return "Pressure Fading";
+    if (move >= 12 && attention >= 86) return "Crowd Rushing In";
+    if (ht >= 90 || attention >= 90) return "Momentum Expanding";
+    if (ht >= 82 || attention >= 82) return "Crowd Arriving";
+    if (ht >= 72 || attention >= 72) return "Pressure Building";
+    return "Early Watch";
+  };
+
+  const getEmotionalRiskState = (stock: Stock) => {
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+
+    if (move >= 15 || rvol >= 6) return "Chase Risk Elevated";
+    if (move >= 8 || attention >= 88 || rvol >= 4) return "Overheated";
+    if (move >= 3 || attention >= 72 || rvol >= 2) return "Aggressive";
+    return "Controlled";
+  };
+
+  const getEmotionalStyle = (stock: Stock) => {
+    const risk = getEmotionalRiskState(stock);
+    const momentum = getEmotionalMomentumState(stock);
+    const signal = getSignalQuality(stock);
+
+    if (stock.change < 0) return "Reclaim Only";
+    if (risk === "Chase Risk Elevated") return "Reactive Scalping";
+    if (risk === "Overheated" && signal >= 82) return "Confirmation Entry";
+    if (momentum === "Crowd Arriving") return "Early Crowd Entry";
+    if (momentum === "Pressure Building") return "High Conviction Watch";
+    return "Momentum Watch";
+  };
+
+  const getEmotionalOpportunity = (stock: Stock) => {
+    const risk = getEmotionalRiskState(stock);
+    const momentum = getEmotionalMomentumState(stock);
+    const ht = getHTScore(stock);
+
+    if (stock.change < 0) {
+      return {
+        label: "Reclaim Window",
+        defensive: "Stand down",
+        balanced: "Wait for reclaim",
+        aggressive: "Pressure must return",
+        note: "HT wants buyers to prove control before modeling upside.",
+      };
+    }
+
+    if (risk === "Chase Risk Elevated") {
+      return {
+        label: "Late Crowd Risk",
+        defensive: "+3% to +6%",
+        balanced: "+7% to +15%",
+        aggressive: "+15%+",
+        note: "Expansion potential is real, but late entries can get punished fast.",
+      };
+    }
+
+    if (momentum === "Momentum Expanding" || ht >= 86) {
+      return {
+        label: "Momentum Window",
+        defensive: "+2% to +5%",
+        balanced: "+6% to +12%",
+        aggressive: "+13%+",
+        note: "Best when participation keeps expanding after the first move.",
+      };
+    }
+
+    return {
+      label: "Early Window",
+      defensive: "+1% to +3%",
+      balanced: "+3% to +7%",
+      aggressive: "+8%+",
+      note: "Still early. HT wants confirmation before upgrading the setup.",
+    };
+  };
+
+  const getEmotionalSignalReason = (stock: Stock) => {
+    const momentum = getEmotionalMomentumState(stock);
+    const risk = getEmotionalRiskState(stock);
+
+    if (momentum === "Crowd Rushing In") return "Attention is moving fast. Great for urgency, dangerous for late chase.";
+    if (momentum === "Momentum Expanding") return "Pressure is spreading beyond price. Participation is starting to confirm the move.";
+    if (momentum === "Crowd Arriving") return "The crowd is noticing, but the move is not fully saturated yet.";
+    if (risk === "Overheated") return "The setup is alive, but emotional buying can turn into fast reversals.";
+    if (stock.change < 0) return "The setup is losing control. HT wants reclaim strength first.";
+    return "Pressure is forming. HT is watching for confirmation before calling it real.";
+  };
+
+
+  const getMomentumStrength = (stock: Stock) => {
+    const ht = getHTScore(stock);
+    const attention = getAttentionScore(stock);
+    const move = Math.abs(stock.change);
+
+    if (stock.change < 0) return "Weakening";
+    if (ht >= 90 || attention >= 90 || move >= 12) return "Momentum Expanding";
+    if (ht >= 82 || attention >= 82 || move >= 6) return "Strong";
+    if (ht >= 72 || attention >= 72 || move >= 3) return "Building";
+
+    return "Quiet";
+  };
+
+  const getRiskTemperature = (stock: Stock) => {
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+
+    if (move >= 15 || rvol >= 6) return "Explosive";
+    if (move >= 8 || attention >= 88 || rvol >= 4) return "Overheated";
+    if (move >= 3 || attention >= 72 || rvol >= 2) return "Active";
+
+    return "Stable";
+  };
+
+  const getSuggestedStyle = (stock: Stock) => {
+    const risk = getRiskTemperature(stock);
+    const momentum = getMomentumStrength(stock);
+    const signal = getSignalQuality(stock);
+
+    if (stock.change < 0) return "Reclaim Watch";
+    if (risk === "Explosive" && momentum === "Momentum Expanding") return "High Risk Runner";
+    if (risk === "Overheated" && signal >= 82) return "Confirmation Entry";
+    if (momentum === "Building" && signal >= 78) return "Swing Opportunity";
+    if (signal < 68) return "Watchlist Candidate";
+
+    return "Momentum Watch";
+  };
+
+  const getOpportunityRange = (stock: Stock) => {
+    const risk = getRiskTemperature(stock);
+    const momentum = getMomentumStrength(stock);
+    const ht = getHTScore(stock);
+
+    if (stock.change < 0) {
+      return {
+        label: "Reclaim First",
+        defensive: "Wait",
+        balanced: "Reclaim",
+        aggressive: "Only if pressure returns",
+        note: "HT does not model upside until buyers prove control again.",
+      };
+    }
+
+    if (risk === "Explosive" || momentum === "Momentum Expanding") {
+      return {
+        label: "Late Crowd Risk",
+        defensive: "+3% to +6%",
+        balanced: "+7% to +15%",
+        aggressive: "+15%+",
+        note: "Higher upside potential, but chase risk and fast reversals are elevated.",
+      };
+    }
+
+    if (ht >= 82) {
+      return {
+        label: "Active Range",
+        defensive: "+2% to +4%",
+        balanced: "+5% to +9%",
+        aggressive: "+10%+",
+        note: "Best if volume and crowd pressure keep confirming after the first move.",
+      };
+    }
+
+    return {
+      label: "Developing Range",
+      defensive: "+1% to +3%",
+      balanced: "+3% to +6%",
+      aggressive: "+7%+",
+      note: "Still forming. HT wants more confirmation before treating it as a main opportunity.",
+    };
+  };
+
+  const getRiskTemperatureNote = (stock: Stock) => {
+    const temp = getRiskTemperature(stock);
+
+    if (temp === "Explosive") return "Fast-moving setup. Upside exists, but sizing discipline matters.";
+    if (temp === "Overheated") return "Momentum is active. Avoid chasing without confirmation.";
+    if (temp === "Active") return "Tradable attention forming, but not yet emotionally extreme.";
+
+    return "Controlled tape. Wait for pressure to separate.";
+  };
+
+
+  const getCatalystCardRead = (stock: Stock) => {
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const rvol = getRelativeVolume(stock);
+    const state = getLiveSignalState(stock);
+
+    if (stock.symbol === "SNAL") {
+      return {
+        title: "Retail pressure building",
+        reason: "Small-cap attention is moving fast. HT is watching whether the crowd can turn interest into real participation.",
+        signal: "High volatility. Strong upside if pressure holds, but fade risk stays elevated.",
+        next: "Watch volume retention and reclaim behavior after pullbacks.",
+      };
+    }
+
+    if (stock.symbol === "NVDA") {
+      return {
+        title: "AI leadership still matters",
+        reason: "NVDA is a bellwether for AI risk appetite. Strength here can support related names across semis and large-cap tech.",
+        signal: "Institutional flow read. Less explosive, but important for market tone.",
+        next: "Watch whether AI strength spreads into AMD, SMCI, and QQQ.",
+      };
+    }
+
+    if (stock.symbol === "QUBT") {
+      return {
+        title: "Speculative quantum attention",
+        reason: "QUBT is pulling high-beta attention. This is the kind of name that can move before fundamentals are fully clear.",
+        signal: "Crowd-sensitive setup. Can accelerate fast, but chasing risk rises when attention gets loud.",
+        next: "Watch for continuation after the first pullback, not just the first green candle.",
+      };
+    }
+
+    if (stock.symbol === "SMCI") {
+      return {
+        title: "Semiconductor rotation watch",
+        reason: "SMCI can act as a risk-on AI infrastructure proxy. HT is checking whether buyers rotate back into high-beta semis.",
+        signal: "Momentum pocket. Needs volume confirmation to avoid fake strength.",
+        next: "Watch if strength follows NVDA/AMD or fades against the group.",
+      };
+    }
+
+    if (stock.symbol === "AMD") {
+      return {
+        title: "AI sympathy flow",
+        reason: "AMD often catches secondary AI rotation when traders look beyond the main leader.",
+        signal: "Secondary momentum read. Better when sector pressure is broad.",
+        next: "Watch whether AMD confirms with QQQ and NVDA strength.",
+      };
+    }
+
+    if (stock.symbol === "MSTR") {
+      return {
+        title: "Crypto-beta risk appetite",
+        reason: "MSTR often reflects crypto-linked risk appetite. Movement here can signal speculative appetite returning or fading.",
+        signal: "High beta. HT treats this as a volatility read, not a clean low-risk setup.",
+        next: "Watch BTC direction and whether buyers defend dips.",
+      };
+    }
+
+    if (stock.symbol === "HOOD") {
+      return {
+        title: "Retail trading activity proxy",
+        reason: "HOOD can reflect retail participation and risk appetite. Strength can suggest traders are getting more active.",
+        signal: "Sentiment read. Stronger when meme/speculative names are also heating up.",
+        next: "Watch if retail flow spreads into smaller momentum names.",
+      };
+    }
+
+    return {
+      title: state === "Cooling" ? "Reclaim watch" : "Setup still forming",
+      reason: `${stock.symbol} has ${attention}/99 attention, ${signal}/99 signal quality, and ${rvol}x relative volume. HT is watching if this becomes real pressure or stays noise.`,
+      signal: getDeskAlertTone(stock),
+      next: getCatalystWatchNext(stock),
+    };
+  };
+
+
+  const getCatalystFallbackTitle = (stock: Stock) => {
+    const state = getLiveSignalState(stock);
+    const attention = getAttentionScore(stock);
+    const rvol = getRelativeVolume(stock);
+
+    if (getNewsArticles(stock.symbol)[0]?.headline) return getNewsArticles(stock.symbol)[0]?.headline || "Live catalyst detected";
+    if (stock.change >= 6 && attention >= 80) return "Attention-led momentum building";
+    if (stock.change >= 3 && rvol >= 3) return "Volume expansion without headline";
+    if (state === "Exhaustion Risk") return "Extended move needs confirmation";
+    if (stock.change < 0) return "Weak tape / reclaim watch";
+    if (getSignalQuality(stock) >= 82) return "Clean setup forming";
+
+    return "Scanner watchlist read";
+  };
+
+  const getCatalystFallbackBody = (stock: Stock) => {
+    const headline = getNewsArticles(stock.symbol)[0]?.headline;
+    const summary = getNewsArticles(stock.symbol)[0]?.summary;
+
+    if (headline) {
+      return summary || "Fresh headline detected. HT is watching whether news flow converts into participation.";
+    }
+
+    if (stock.change >= 6 && getAttentionScore(stock) >= 80) {
+      return "No headline found yet, but price and attention are already moving. HT is watching if crowd interest becomes durable participation.";
+    }
+
+    if (getRelativeVolume(stock) >= 3) {
+      return "Volume is expanding before a clear news catalyst appears. That can signal early rotation or speculative attention.";
+    }
+
+    if (stock.change < 0) {
+      return "Ticker is weak right now. HT is waiting for reclaim strength before treating this as opportunity.";
+    }
+
+    if (getSignalQuality(stock) >= 82) {
+      return "Structure is improving even without a headline. HT is watching confirmation instead of chasing noise.";
+    }
+
+    return "No major catalyst is confirmed yet. Keep it on watch until volume, attention, or news flow separates.";
+  };
+
+  const getCatalystWatchNext = (stock: Stock) => {
+    if (stock.change < 0) return "Watch for reclaim + volume returning.";
+    if (Math.abs(stock.change) >= 10) return "Watch pullback, liquidity, and failed breakout risk.";
+    if (getRelativeVolume(stock) >= 3) return "Watch if volume holds above normal.";
+    if (getAttentionScore(stock) >= 80) return "Watch if attention turns into continuation.";
+    return "Watch for headline, volume, or scanner upgrade.";
+  };
+
+  const getCatalystBadge = (stock: Stock) => {
+    if (getNewsArticles(stock.symbol)[0]?.headline) return "Live News";
+    if (stock.change >= 6 || getAttentionScore(stock) >= 85) return "Attention";
+    if (getRelativeVolume(stock) >= 3) return "Volume";
+    if (stock.change < 0) return "Risk";
+    return "Watch";
+  };
+
+
+  const getLiveSignalState = (stock: Stock) => {
+    const attention = getAttentionScore(stock);
+    const ht = getHTScore(stock);
+    const move = Math.abs(stock.change);
+    const rvol = getRelativeVolume(stock);
+
+    if (stock.change < 0) return "Cooling";
+    if (move >= 12 && ht < 88) return "Exhaustion Risk";
+    if (attention >= 88 && ht >= 88 && rvol >= 3) return "Accelerating";
+    if (attention >= 78 || ht >= 80) return "Building";
+
+    return "Watching";
+  };
+
+  const getSetupPersonality = (stock: Stock) => {
+    const state = getLiveSignalState(stock);
+    const attention = getAttentionScore(stock);
+    const rvol = getRelativeVolume(stock);
+
+    if (state === "Exhaustion Risk") return "Crowded Momentum";
+    if (state === "Accelerating") return "Attention Spike";
+    if (rvol >= 3 && attention < 82) return "Quiet Pressure";
+    if (stock.change < 0) return "Reclaim Watch";
+    if (getConvictionScore(stock) >= 84) return "Authority Build";
+
+    return "Early Rotation";
+  };
+
+  const getWhatChangedNow = (stock: Stock) => {
+    const state = getLiveSignalState(stock);
+    const attention = getAttentionScore(stock);
+    const conviction = getConvictionScore(stock);
+    const rvol = getRelativeVolume(stock);
+
+    if (state === "Accelerating") {
+      return "Crowd pressure is accelerating faster than the rest of the board.";
+    }
+
+    if (state === "Exhaustion Risk") {
+      return "The move is getting loud. HT is watching for profit-taking or failed continuation.";
+    }
+
+    if (state === "Cooling") {
+      return "Pressure is cooling. HT wants reclaim strength before trusting the setup again.";
+    }
+
+    if (attention >= 80 && conviction >= 82) {
+      return "Attention and conviction are starting to align instead of fighting each other.";
+    }
+
+    if (rvol >= 3) {
+      return "Volume is waking up before the crowd fully commits.";
+    }
+
+    return "HT is monitoring whether this setup upgrades from watchlist noise into real pressure.";
+  };
+
+  const getLivePressureCue = (stock: Stock) => {
+    const state = getLiveSignalState(stock);
+    const attention = getAttentionScore(stock);
+    const ht = getHTScore(stock);
+
+    if (state === "Accelerating") return "Pressure rising now";
+    if (state === "Building") return "Signal building";
+    if (state === "Exhaustion Risk") return "Chase risk elevated";
+    if (state === "Cooling") return "Momentum cooling";
+    if (ht >= 80 || attention >= 76) return "Pressure forming";
+
+    return "Waiting for confirmation";
+  };
+
+  const getSignalEvolutionNote = (stock: Stock) => {
+    const state = getLiveSignalState(stock);
+    const personality = getSetupPersonality(stock);
+
+    if (state === "Accelerating") {
+      return `${personality}: attention is moving fast, but HT still wants clean continuation quality.`;
+    }
+
+    if (state === "Building") {
+      return `${personality}: pressure is forming, but the crowd has not fully priced the move yet.`;
+    }
+
+    if (state === "Exhaustion Risk") {
+      return `${personality}: strong move, but discipline matters because late entries can get punished.`;
+    }
+
+    if (state === "Cooling") {
+      return `${personality}: not an automatic long until buyers prove control again.`;
+    }
+
+    return `${personality}: early read only until participation confirms.`;
+  };
+
+
+  const getDeskAlertTone = (stock: Stock) => {
+    const state = getSignalEvolutionState(stock);
+
+    if (state === "Attention Spike Expansion") return "Signal is expanding. Watch for clean continuation instead of emotional chase.";
+    if (state === "Crowd Arriving") return "Crowd is arriving. This is where discipline matters most.";
+    if (state === "Pressure Building") return "Pressure is building quietly. HT is watching for the confirmation trigger.";
+    if (state === "Exhaustion Risk") return "Extension risk is rising. Wait for pullback, reclaim, or liquidity proof.";
+    if (state === "Fading") return "Stand down until reclaim strength returns.";
+
+    return "Early read only. Let participation confirm before treating it as actionable.";
+  };
+
+  const htScoreLeaders = useMemo(() => {
+    return [...stocks]
+      .sort((a, b) => getHTScore(b) - getHTScore(a))
+      .slice(0, 5);
+  }, [stocks, news, watchlist, savedSetups, traderMode]);
+
+  const liveIntelligenceFeed = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || htScoreLeaders[0];
+    const rotation = htScoreLeaders.find((stock) => stock.symbol !== leader?.symbol) || secondaryTarget;
+    const heat = attentionLeaders.find((stock) => stock.symbol !== leader?.symbol) || topMovers[1];
+    const riskName = dangerTarget || topLosers[0];
+
+    return [
+      {
+        tag: "HT Desk",
+        tone: "text-orange-200",
+        symbol: leader?.symbol || "--",
+        state: leader ? getSignalEvolutionState(leader) : "Scanning",
+        score: leader ? getHTScore(leader) : 0,
+        message: leader
+          ? `${leader.symbol} is the live HT focus. ${getDeskAlertTone(leader)}`
+          : "HT Desk is waiting for the first clean pressure pocket.",
+      },
+      {
+        tag: "Signal Evolution",
+        tone: "text-green-300",
+        symbol: leader?.symbol || "--",
+        state: leader ? getSignalEvolutionState(leader) : "Waiting",
+        score: leader ? getBeforeCrowdScore(leader) : 0,
+        message: leader
+          ? getSignalEvolutionDetail(leader)
+          : "No lifecycle state has separated yet.",
+      },
+      {
+        tag: "Rotation Watch",
+        tone: "text-zinc-200",
+        symbol: rotation?.symbol || "--",
+        state: rotation ? getSignalEvolutionState(rotation) : "No rotation",
+        score: rotation ? getHTScore(rotation) : 0,
+        message: rotation
+          ? `${rotation.symbol} is the next pressure pocket if attention rotates away from ${leader?.symbol || "the leader"}.`
+          : "No secondary pressure pocket yet.",
+      },
+      {
+        tag: "Crowd Heat",
+        tone: "text-orange-300",
+        symbol: heat?.symbol || "--",
+        state: heat ? getCrowdPhase(heat) : "Quiet",
+        score: heat ? getAttentionScore(heat) : 0,
+        message: heat
+          ? `${heat.symbol} crowd behavior is ${getCrowdPhase(heat).toLowerCase()}. HT is watching if attention converts into participation.`
+          : "Crowd heat is not concentrated yet.",
+      },
+      {
+        tag: "Risk Desk",
+        tone: "text-red-300",
+        symbol: riskName?.symbol || "--",
+        state: riskName ? "Avoid Chase" : "Clean",
+        score: riskName ? Math.abs(Math.round(riskName.change)) : 0,
+        message: riskName
+          ? `${riskName.symbol} is where HT is filtering noise. Movement without reclaim strength is not opportunity.`
+          : "No major downside pressure pocket detected.",
+      },
+    ];
+  }, [stocks, firstSignal, priorityTarget, htScoreLeaders, secondaryTarget, attentionLeaders, topMovers, topLosers, dangerTarget, news, traderMode]);
+
+  const activeDeskPulse = mounted ? liveIntelligenceFeed[deskPulseIndex % Math.max(1, liveIntelligenceFeed.length)] : liveIntelligenceFeed[0];
+
+
+  const signalTimeline = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    if (!leader) return [];
+
+    const baseTime = lastUpdated || new Date();
+    const times = [34, 26, 18, 9, 0].map((minutesAgo) => {
+      const time = new Date(baseTime.getTime() - minutesAgo * 60000);
+      return time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    });
+
+    const evolution = getSignalEvolutionState(leader);
+
+    return [
+      {
+        time: times[0],
+        phase: "Early Detection",
+        status: "Pressure Pocket Found",
+        detail: `${leader.symbol} started separating from the board before the move became obvious.`,
+        intensity: 54,
+      },
+      {
+        time: times[1],
+        phase: "Pressure Building",
+        status: "Attention Expanding",
+        detail: `Crowd attention climbed to ${getAttentionScore(leader)}/99 while participation quality improved.`,
+        intensity: Math.min(88, getAttentionScore(leader)),
+      },
+      {
+        time: times[2],
+        phase: "Top Conviction Triggered",
+        status: firstSignal?.status || "Signal Forming",
+        detail: `HT Top Conviction™ tagged ${leader.symbol} with ${getBeforeCrowdScore(leader)}/99 before-crowd pressure.`,
+        intensity: getBeforeCrowdScore(leader),
+      },
+      {
+        time: times[3],
+        phase: evolution,
+        status: getCrowdPhase(leader),
+        detail: getSignalEvolutionDetail(leader),
+        intensity: getHTScore(leader),
+      },
+      {
+        time: times[4],
+        phase: "Current Desk Read",
+        status: getDeskAlertTone(leader),
+        detail: `${leader.symbol} remains the live HT focus unless rotation pulls pressure into ${secondaryTarget?.symbol || "the next watch"}.`,
+        intensity: getHTScore(leader),
+      },
+    ];
+  }, [firstSignal, priorityTarget, topStock, secondaryTarget, lastUpdated, news, traderMode, stocks]);
+
+  const attentionHeatmap = useMemo(() => {
+    const groups = [
+      {
+        theme: "AI / Semis",
+        symbols: ["NVDA", "AMD", "SMCI", "MSFT"],
+        identity: "Institutional Rotation",
+      },
+      {
+        theme: "Quantum / Spec",
+        symbols: ["QUBT"],
+        identity: "Speculative Attention",
+      },
+      {
+        theme: "Retail Attention Spike",
+        symbols: ["SNAL", "HOOD", "PLTR"],
+        identity: "Retail Swarm",
+      },
+      {
+        theme: "Crypto Beta",
+        symbols: ["MSTR"],
+        identity: "Risk Appetite",
+      },
+      {
+        theme: "Mega Cap Flow",
+        symbols: ["AAPL", "MSFT", "NVDA"],
+        identity: "Quality Bid",
+      },
+    ];
+
+    return groups.map((group) => {
+      const groupStocks = group.symbols
+        .map((symbol) => stocks.find((stock) => stock.symbol === symbol))
+        .filter(Boolean) as Stock[];
+      const score = groupStocks.length
+        ? Math.round(groupStocks.reduce((total, stock) => total + getAttentionScore(stock), 0) / groupStocks.length)
+        : 42;
+      const leader = [...groupStocks].sort((a, b) => getHTScore(b) - getHTScore(a))[0];
+
+      return {
+        ...group,
+        score,
+        leader: leader?.symbol || group.symbols[0],
+        state: score >= 84 ? "Heating Fast" : score >= 72 ? "Building" : score >= 58 ? "Watching" : "Quiet",
+      };
+    });
+  }, [stocks, news, watchlist, savedSetups, traderMode]);
+
+  const smartAlertPersonalities = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    const rotation = secondaryTarget || htScoreLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+    const riskName = dangerTarget || topLosers[0];
+
+    return [
+      {
+        title: "Early Signal",
+        symbol: leader?.symbol || "--",
+        tone: "text-orange-200",
+        copy: leader
+          ? `HT is watching ${leader.symbol} before the crowd fully prices the pressure shift.`
+          : "Waiting for the first clean early signal.",
+      },
+      {
+        title: "Retail Swarm",
+        symbol: heat?.symbol || "--",
+        tone: "text-green-300",
+        copy: heat
+          ? `${heat.symbol} attention is ${getCrowdPhase(heat).toLowerCase()}; confirm participation before chasing.`
+          : "No retail swarm has separated yet.",
+      },
+      {
+        title: "Rotation Watch",
+        symbol: rotation?.symbol || "--",
+        tone: "text-zinc-200",
+        copy: rotation
+          ? `${rotation.symbol} becomes important if pressure rotates away from the current Top Conviction.`
+          : "Rotation map is still forming.",
+      },
+      {
+        title: "Exhaustion Warning",
+        symbol: riskName?.symbol || leader?.symbol || "--",
+        tone: "text-red-300",
+        copy: riskName
+          ? `${riskName.symbol} is where movement can fake opportunity. HT wants reclaim strength first.`
+          : "No major exhaustion warning has separated.",
+      },
+    ];
+  }, [firstSignal, priorityTarget, topStock, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, dangerTarget, topLosers, news, traderMode]);
+
+
+  const premiumCommandMetrics = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    const pressure = leader ? getBeforeCrowdScore(leader) : 0;
+    const ht = leader ? getHTScore(leader) : 0;
+    const attention = leader ? getAttentionScore(leader) : 0;
+    const conviction = leader ? getConvictionScore(leader) : 0;
+
+    return [
+      ["HT Score", ht || "--", leader ? getSignalEvolutionState(leader) : "Scanning"],
+      ["Pressure", pressure || "--", leader ? `${getCrowdPhase(leader)} phase` : "No signal yet"],
+      ["Attention", attention || "--", attention >= 80 ? "Crowd activity rising" : "Crowd still forming"],
+      ["Conviction", conviction || "--", conviction >= 82 ? "Prime watch quality" : "Needs confirmation"],
+    ];
+  }, [firstSignal, priorityTarget, topStock, news, traderMode, stocks]);
+
+  const premiumFocusStack = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    const rotation = secondaryTarget || htScoreLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+
+    return [
+      {
+        label: "Look Here First",
+        title: leader ? `${leader.symbol} owns the current HT read.` : "HT is scanning for a clean signal.",
+        detail: leader
+          ? getDeskAlertTone(leader)
+          : "The terminal is waiting for attention, conviction, and participation to align.",
+      },
+      {
+        label: "Then Watch Rotation",
+        title: rotation ? `${rotation.symbol} is the backup pressure pocket.` : "No secondary pressure pocket yet.",
+        detail: rotation
+          ? `${getSignalEvolutionState(rotation)} · ${getHTScore(rotation)}/99 HT Score.`
+          : "Rotation becomes important when the Top Conviction fades or crowd heat shifts.",
+      },
+      {
+        label: "Ignore Noise",
+        title: heat ? `${heat.symbol} has crowd heat, not automatic conviction.` : "Crowd heat is still scattered.",
+        detail: heat
+          ? "HT separates attention from actual participation quality before calling a real move."
+          : "Movement alone is not enough. HT waits for pressure quality.",
+      },
+    ];
+  }, [firstSignal, priorityTarget, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, topStock, news, traderMode]);
+
+  const premiumSignalBars = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    if (!leader) return [];
+
+    return [
+      ["Attention", getAttentionScore(leader)],
+      ["Conviction", getConvictionScore(leader)],
+      ["Participation", Math.min(99, Math.round(getRelativeVolume(leader) * 13))],
+      ["Signal Strength", getSignalQuality(leader)],
+    ];
+  }, [firstSignal, priorityTarget, topStock, news, traderMode, stocks]);
+
+
+  const getPriorityFlowMode = () => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+
+    if (!leader) return "Scanning Atmosphere";
+    if (marketPulse === "Defensive") return "Defensive Pressure";
+    if (getSignalEvolutionState(leader) === "Exhaustion Risk") return "Chase Risk Rising";
+    if (getHTScore(leader) >= 90 && getAttentionScore(leader) >= 88) return "Crowd Frenzy";
+    if (getConvictionScore(leader) >= 84 && getAttentionScore(leader) < 80) return "Quiet Accumulation";
+    if (hotStocks.length >= 2) return "Risk-On Flow";
+
+    return "Pressure Building";
+  };
+
+  const getPriorityFlowAtmosphere = () => {
+    const mode = getPriorityFlowMode();
+
+    if (mode === "Crowd Frenzy") {
+      return "Crowd behavior is accelerating. HT is watching whether participation quality can keep up with the speed of attention.";
+    }
+
+    if (mode === "Quiet Accumulation") {
+      return "Conviction is forming before the loud crowd arrives. This is where HT separates early pressure from obvious movement.";
+    }
+
+    if (mode === "Defensive Pressure") {
+      return "The tape is defensive. HT is prioritizing reclaim strength, risk filters, and patience over forced aggression.";
+    }
+
+    if (mode === "Chase Risk Rising") {
+      return "The move is getting emotionally loud. HT is watching for exhaustion, failed reclaims, and weak participation behind the price.";
+    }
+
+    if (mode === "Risk-On Flow") {
+      return "Momentum appetite is expanding across the board. HT is ranking which pressure pocket deserves attention first.";
+    }
+
+    return "Pressure is building beneath the surface. HT is waiting for attention, participation, and conviction to align.";
+  };
+
+  const livingPressureMap = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    const rotation = secondaryTarget || htScoreLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+    const riskName = dangerTarget || topLosers[0];
+
+    return [
+      {
+        zone: "Directive Core",
+        label: leader?.symbol || "--",
+        score: leader ? getHTScore(leader) : 0,
+        state: leader ? getSignalEvolutionState(leader) : "Scanning",
+        note: leader
+          ? `${leader.symbol} is where attention, conviction, and participation are currently clustering.`
+          : "Waiting for a clean pressure cluster.",
+      },
+      {
+        zone: "Rotation Field",
+        label: rotation?.symbol || "--",
+        score: rotation ? getHTScore(rotation) : 0,
+        state: rotation ? getSignalEvolutionState(rotation) : "No rotation",
+        note: rotation
+          ? `${rotation.symbol} becomes important if the current directive loses pressure.`
+          : "No secondary flow has separated yet.",
+      },
+      {
+        zone: "Crowd Heat",
+        label: heat?.symbol || "--",
+        score: heat ? getAttentionScore(heat) : 0,
+        state: heat ? getCrowdPhase(heat) : "Quiet",
+        note: heat
+          ? `${heat.symbol} is drawing attention, but HT still wants participation proof.`
+          : "Crowd behavior is scattered.",
+      },
+      {
+        zone: "Risk Filter",
+        label: riskName?.symbol || "--",
+        score: riskName ? Math.min(99, Math.round(Math.abs(riskName.change) * 7)) : 0,
+        state: riskName ? "Noise Check" : "Clean",
+        note: riskName
+          ? `${riskName.symbol} is where movement can fake opportunity if reclaim strength is missing.`
+          : "No major downside pressure pocket detected.",
+      },
+    ];
+  }, [firstSignal, priorityTarget, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, dangerTarget, topLosers, topStock, stocks, news, traderMode]);
+
+  const aiDeskMemory = useMemo(() => {
+    const leader = firstSignal?.stock || priorityTarget || topStock;
+    const previous = signalTimeline[1];
+    const rotation = secondaryTarget || htScoreLeaders[1];
+
+    return [
+      leader
+        ? `${leader.symbol} remains the active Top Conviction after earlier ${previous?.phase || "pressure building"}. HT is watching whether crowd pressure becomes durable participation.`
+        : "HT Desk is waiting for the first clean directive to separate from the board.",
+      rotation
+        ? `${rotation.symbol} is still the rotation memory. If the lead signal fades, HT will check whether pressure transfers there or disappears completely.`
+        : "No secondary rotation memory has separated yet.",
+      hotStocks.length
+        ? "Momentum is emotionally active today. The desk is filtering urgency from actual edge so traders do not chase noise."
+        : "The tape is quieter. HT is prioritizing patience until pressure clusters become obvious.",
+    ];
+  }, [firstSignal, priorityTarget, topStock, signalTimeline, secondaryTarget, htScoreLeaders, hotStocks.length, stocks, news, traderMode]);
+
+
+  const convictionEngineTarget = firstSignal?.stock || priorityTarget || htScoreLeaders[0] || topStock;
+  const topConviction = convictionEngineTarget;
+
+  const getBreakoutProbability = (stock: Stock) => {
+    const ht = getHTScore(stock);
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+    const rvol = getRelativeVolume(stock);
+    const extensionPenalty = Math.abs(stock.change) >= 12 ? 9 : 0;
+
+    return Math.min(
+      96,
+      Math.max(
+        28,
+        Math.round(ht * 0.38 + attention * 0.24 + signal * 0.24 + rvol * 3 - extensionPenalty),
+      ),
+    );
+  };
+
+  const getEdgeStatus = (stock: Stock) => {
+    const confidence = getHTScore(stock);
+    const breakout = getBreakoutProbability(stock);
+    const attention = getAttentionScore(stock);
+
+    if (confidence >= 90 && breakout >= 82) return "Edge Active";
+    if (attention >= 85 && confidence >= 80) return "Crowd Waking";
+    if (confidence >= 74) return "Developing Edge";
+    if (stock.change < 0) return "Wait For Reclaim";
+
+    return "Ignore Noise";
+  };
+
+  const getWhyThisMatters = (stock: Stock) => {
+    const attention = getAttentionScore(stock);
+    const rvol = getRelativeVolume(stock);
+    const breakout = getBreakoutProbability(stock);
+    const state = getSignalEvolutionState(stock);
+    const htScore = getHTScore(stock);
+    const signal = getSignalQuality(stock);
+    const move = Math.abs(stock.change);
+
+    if (stock.change < 0) {
+      return `${stock.symbol} matters because weakness is still controlling the read. HT is not treating this as opportunity until reclaim strength, volume, and signal quality prove buyers are returning.`;
+    }
+
+    if (state === "Exhaustion Risk" || move >= 12) {
+      return `${stock.symbol} matters because the move is getting emotionally loud. HT sees attention, but the edge now depends on whether participation can absorb profit-taking instead of turning into a late chase.`;
+    }
+
+    if (breakout >= 84 && attention >= 84 && htScore >= 86) {
+      return `${stock.symbol} matters because attention, participation, and conviction are compressing at the same time. HT is flagging a real pressure pocket — not just a green candle — while the crowd is still deciding whether to pile in.`;
+    }
+
+    if (state === "Crowd Arriving") {
+      return `${stock.symbol} matters because the crowd is starting to notice, but the setup is not fully saturated yet. HT is watching whether attention turns into durable participation or fades into late-chase noise.`;
+    }
+
+    if (rvol >= 3 && attention < 82) {
+      return `${stock.symbol} matters because volume is expanding before crowd attention is fully saturated. That imbalance is where HT looks for informational edge before the move becomes obvious.`;
+    }
+
+    if (signal >= 84 && attention < 76) {
+      return `${stock.symbol} matters because structure is improving before the crowd is fully awake. HT is monitoring whether quiet pressure becomes a cleaner public momentum signal.`;
+    }
+
+    return `${stock.symbol} matters because pressure is forming beneath the surface. HT is waiting for attention, participation, and conviction to align before upgrading it from noise to priority.`;
+  };
+
+  const getWhyThisMattersHeadline = (stock: Stock) => {
+    const state = getSignalEvolutionState(stock);
+    const attention = getAttentionScore(stock);
+    const breakout = getBreakoutProbability(stock);
+    const move = Math.abs(stock.change);
+
+    if (stock.change < 0) return "Reclaim needed before HT trusts the move.";
+    if (state === "Exhaustion Risk" || move >= 12) return "Momentum is loud — chase risk is rising.";
+    if (breakout >= 84 && attention >= 84) return "Attention and conviction are compressing together.";
+    if (state === "Crowd Arriving") return "The crowd is noticing, but saturation is not complete.";
+    if (getRelativeVolume(stock) >= 3 && attention < 82) return "Volume is moving before the crowd fully wakes up.";
+    return "Pressure is forming, but HT still wants confirmation.";
+  };
+
+  const getWhyThisMattersBullets = (stock: Stock) => {
+    const attention = getAttentionScore(stock);
+    const conviction = getConvictionScore(stock);
+    const breakout = getBreakoutProbability(stock);
+    const rvol = getRelativeVolume(stock);
+    const state = getSignalEvolutionState(stock);
+
+    if (stock.change < 0) {
+      return [
+        "Do not force long bias until reclaim strength improves.",
+        `${stock.symbol} needs better participation before HT upgrades the read.`,
+        "Use this as a risk filter, not an automatic opportunity.",
+      ];
+    }
+
+    if (state === "Exhaustion Risk" || Math.abs(stock.change) >= 12) {
+      return [
+        "Move is emotionally extended; avoid chasing vertical candles.",
+        `${rvol}x volume must hold or the signal can fade fast.`,
+        "Best use: wait for pullback, reclaim, or liquidity proof.",
+      ];
+    }
+
+    if (breakout >= 84 && attention >= 84) {
+      return [
+        `${attention}/99 attention shows crowd pressure is accelerating.`,
+        `${conviction}/99 conviction means the read is more than raw momentum.`,
+        "Best use: monitor continuation quality, not blind entry hype.",
+      ];
+    }
+
+    if (rvol >= 3 && attention < 82) {
+      return [
+        `${rvol}x volume is expanding before full crowd saturation.`,
+        "That imbalance can create early informational edge.",
+        "Best use: watch for attention confirmation before size increases.",
+      ];
+    }
+
+    return [
+      `${state} is the current lifecycle read.`,
+      "HT wants attention, volume, and conviction aligned.",
+      "Best use: keep it on watch until the signal separates from noise.",
+    ];
+  };
+
+  const getNextTriggerShort = (stock: Stock) => {
+    if (stock.change >= 8) return "Pullback hold";
+    if (stock.change >= 2) return "Higher-low hold";
+    if (stock.change < 0) return "Reclaim first";
+    return "Fresh volume";
+  };
+
+  const getEntryBiasShort = (stock: Stock) => {
+    if (Math.abs(stock.change) >= 10) return "Do not chase";
+    if (getBreakoutProbability(stock) >= 82) return "Watch breakout";
+    if (stock.change < 0) return "Wait only";
+    return "Build watch";
+  };
+
+  const getRiskGuardrailShort = (stock: Stock) => {
+    if (Math.abs(stock.change) >= 10) return "Extension risk";
+    if (stock.change < 0) return "Weak tape";
+    if (getRelativeVolume(stock) >= 3) return "Volume must hold";
+    return "Needs proof";
+  };
+
+  const getSetupRoleShort = (stock: Stock) => {
+    if (getHTScore(stock) >= 88) return "Main focus";
+    if (getAttentionScore(stock) >= 80) return "Crowd watch";
+    if (stock.change < 0) return "Risk filter";
+    return "Secondary watch";
+  };
+
+  const getMarketRank = (stock: Stock) => {
+    const ranked = [...stocks].sort((a, b) => getLiveConvictionScore(b) - getLiveConvictionScore(a));
+    const index = ranked.findIndex((item) => item.symbol === stock.symbol);
+
+    return index >= 0 ? index + 1 : 1;
+  };
+
+  const getBoardAverageMove = () => {
+    if (!stocks.length) return 0;
+
+    return stocks.reduce((total, item) => total + Math.abs(item.change), 0) / stocks.length;
+  };
+
+  const getHardProofLine = (stock: Stock) => {
+    const rank = getMarketRank(stock);
+    const rvol = getRelativeVolume(stock);
+    const ht = getHTScore(stock);
+    const boardAverage = getBoardAverageMove();
+    const move = Math.abs(stock.change);
+    const moveMultiplier = boardAverage > 0 ? Math.max(1, move / boardAverage) : 1;
+
+    return `HT selected this from the active market scan • Rank #${rank} • ${rvol}x RVOL • ${getLiveConvictionScore(stock)}/99 live conviction • ${moveMultiplier.toFixed(1)}x board move.`;
+  };
+
+  const getHardProofSummary = (stock: Stock) => {
+    const rank = getMarketRank(stock);
+    const rvol = getRelativeVolume(stock);
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+
+    return `${stock.symbol} was elevated because participation is expanding: ${rvol}x relative volume, ${attention}/99 attention, ${signal}/99 signal quality, and ${getContinuationStrengthScore(stock)}/99 continuation strength. HT is filtering the active board for pressure, not recycling a watchlist.`;
+  };
+
+  const getHardProofBullets = (stock: Stock) => [
+    [`#${getMarketRank(stock)}`, `of ${stocks.length || marketScanStats.scanned} scanned`],
+    [`${getRelativeVolume(stock)}x`, "relative volume"],
+    [`${getParticipationScore(stock)}/99`, "participation"],
+    [`${getContinuationStrengthScore(stock)}/99`, "continuation"],
+  ];
+
+  const getContinuationWindows = (stock: Stock) => {
+    const ht = getHTScore(stock);
+    const rvol = getRelativeVolume(stock);
+    const signal = getSignalQuality(stock);
+    const attention = getAttentionScore(stock);
+    const move = Math.abs(stock.change);
+    const isExtended = move >= 10 || getRiskTemperature(stock) === "Explosive";
+
+    let conservativeLow = 3;
+    let conservativeHigh = 6;
+    let aggressiveLow = 7;
+    let aggressiveHigh = 10;
+
+    if (ht >= 90 && signal >= 88 && rvol >= 3) {
+      conservativeLow = 7;
+      conservativeHigh = 11;
+      aggressiveLow = 12;
+      aggressiveHigh = 18;
+    } else if (ht >= 84 || attention >= 84) {
+      conservativeLow = 5;
+      conservativeHigh = 8;
+      aggressiveLow = 9;
+      aggressiveHigh = 14;
+    } else if (ht >= 76 || rvol >= 2) {
+      conservativeLow = 3;
+      conservativeHigh = 6;
+      aggressiveLow = 7;
+      aggressiveHigh = 11;
+    }
+
+    if (isExtended) {
+      conservativeLow = Math.max(2, conservativeLow - 2);
+      conservativeHigh = Math.max(4, conservativeHigh - 2);
+      aggressiveLow = Math.max(conservativeHigh + 1, aggressiveLow - 2);
+      aggressiveHigh = Math.max(aggressiveLow + 2, aggressiveHigh - 3);
+    }
+
+    if (stock.change < 0) {
+      return {
+        conservative: "Reclaim first",
+        aggressive: "No chase",
+        note: "HT needs buyers to regain control before modeling upside.",
+        stance: "Standby",
+      };
+    }
+
+    return {
+      conservative: `${conservativeLow}-${conservativeHigh}%`,
+      aggressive: `${aggressiveLow}-${aggressiveHigh}%`,
+      note: isExtended
+        ? "Momentum is active, but HT favors scaling into strength because extension risk is rising."
+        : "HT favors continuation while participation and signal quality stay aligned.",
+      stance: ht >= 84 ? "Continuation favored" : "Confirmation needed",
+    };
+  };
+
+  const getSelectionTrustLine = (stock: Stock) => {
+    const rank = getMarketRank(stock);
+    const rvol = getRelativeVolume(stock);
+    const read = getSimpleConvictionRead(stock);
+
+    if (read.score >= 88) {
+      return `${stock.symbol} is the #${rank} active read because pressure, entry quality, and trap safety passed HT quality control. ${rvol}x RVOL • Entry ${read.entryQuality}/99 • Trap ${read.trapRisk}/99.`;
+    }
+
+    if (rvol >= 3) {
+      return `${stock.symbol} is on the board because participation is expanding. #${rank} active read • ${rvol}x RVOL.`;
+    }
+
+    return `${stock.symbol} is being monitored until pressure separates from noise. #${rank} active read • ${read.scoreLabel}.`;
+  };
+
+  const convictionEngineMetrics = useMemo(() => {
+    const leader = convictionEngineTarget;
+
+    if (!leader) {
+      return [
+        ["Next Trigger", "--", "what HT needs next"],
+        ["Entry Bias", "--", "how to treat it"],
+        ["Risk Guardrail", "--", "what can break it"],
+        ["Setup Role", "--", "where it fits"],
+      ];
+    }
+
+    return [
+      ["Next Trigger", getNextTriggerShort(leader), getConfirmationTrigger(leader)],
+      ["Entry Bias", getEntryBiasShort(leader), getBestTraderFit(leader)],
+      ["Risk Guardrail", getRiskGuardrailShort(leader), getInvalidationRule(leader)],
+      ["Setup Role", getSetupRoleShort(leader), getEdgeStatus(leader)],
+    ];
+  }, [convictionEngineTarget, stocks, news, traderMode, watchlist, savedSetups]);
+
+  const convictionHistory = useMemo(() => {
+    const leader = convictionEngineTarget;
+    const second = secondaryTarget || htScoreLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+
+    return [
+      {
+        label: "HT Detected",
+        symbol: leader?.symbol || "--",
+        result: leader ? `${getBeforeCrowdScore(leader)}/99 before-crowd pressure` : "Scanning",
+        note: leader
+          ? "Top Conviction logged before the move becomes obvious to the wider crowd."
+          : "Waiting for a clean pressure pocket.",
+      },
+      {
+        label: "Confidence Expanded",
+        symbol: leader?.symbol || "--",
+        result: leader ? `${getHTScore(leader)}% HT confidence` : "No read",
+        note: leader
+          ? "HT confidence rises when attention, signal quality, and participation compress together."
+          : "No confidence expansion yet.",
+      },
+      {
+        label: "Attention Shift",
+        symbol: heat?.symbol || "--",
+        result: heat ? `${getAttentionScore(heat)}/99 crowd attention` : "No shift",
+        note: heat
+          ? "Crowd behavior is being tracked before it turns into noisy consensus."
+          : "Crowd heat is still scattered.",
+      },
+      {
+        label: "Next Edge Watch",
+        symbol: second?.symbol || "--",
+        result: second ? `${getBreakoutProbability(second)}% breakout probability` : "No rotation",
+        note: second
+          ? "If the lead signal fades, HT checks whether pressure rotates here or disappears."
+          : "No secondary edge pocket yet.",
+      },
+    ];
+  }, [convictionEngineTarget, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, stocks, news, traderMode]);
+
+  const beginnerRead = convictionEngineTarget
+    ? `${convictionEngineTarget.symbol} is the current HT read. Translation: attention is moving here first, but HT still wants participation quality to confirm before calling it clean.`
+    : "HT is scanning for the first clean pressure pocket. Translation: no forced trade, no fake urgency.";
+
+
+  const getConvictionVerdict = (stock: Stock) => {
+    const confidence = getHTScore(stock);
+    const breakout = getBreakoutProbability(stock);
+    const attention = getAttentionScore(stock);
+    const signal = getSignalQuality(stock);
+
+    if (confidence >= 90 && breakout >= 84 && signal >= 84) {
+      return "Highest-conviction read on the board. Pressure quality, attention, and signal integrity are aligned.";
+    }
+
+    if (attention >= 86 && confidence >= 80) {
+      return "Crowd attention is waking up, but HT is still checking whether participation quality supports continuation.";
+    }
+
+    if (breakout >= 74 && confidence >= 74) {
+      return "Developing conviction. The read is improving, but HT still wants cleaner confirmation before calling it elite.";
+    }
+
+    if (stock.change < 0) {
+      return "Defensive read. HT is filtering this until reclaim strength proves pressure is returning.";
+    }
+
+    return "Monitor only. HT sees possible pressure, but not enough alignment to make this the main read yet.";
+  };
+
+  const convictionFlow = useMemo(() => {
+    const leader = convictionEngineTarget;
+
+    if (!leader) {
+      return [
+        ["Pressure Quality", 0, "scanning"],
+        ["Crowd Timing", 0, "waiting"],
+        ["Risk Control", 0, "neutral"],
+        ["Signal Strength", 0, "no read"],
+      ];
+    }
+
+    const pressureQuality = Math.min(99, Math.round((getHTScore(leader) + getSignalQuality(leader)) / 2));
+    const crowdTiming = Math.min(99, Math.round((getAttentionScore(leader) + getBeforeCrowdScore(leader)) / 2));
+    const riskControl = Math.max(30, Math.min(99, 100 - Math.round(Math.abs(leader.change) * 3)));
+    const signalIntegrity = getSignalQuality(leader);
+
+    return [
+      ["Pressure Quality", pressureQuality, pressureQuality >= 84 ? "clean compression" : "still developing"],
+      ["Crowd Timing", crowdTiming, crowdTiming >= 84 ? "early enough to matter" : "crowd still forming"],
+      ["Risk Control", riskControl, riskControl >= 72 ? "manageable" : "chase risk rising"],
+      ["Signal Strength", signalIntegrity, signalIntegrity >= 82 ? "trustworthy read" : "needs confirmation"],
+    ];
+  }, [convictionEngineTarget, stocks, news, traderMode, watchlist, savedSetups]);
+
+  const convictionMemory = useMemo(() => {
+    const leader = convictionEngineTarget;
+    const second = secondaryTarget || htScoreLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+
+    return [
+      {
+        title: "What HT Chose",
+        value: leader ? `${leader.symbol} as the conviction focus` : "Scanning",
+        detail: leader ? getConvictionVerdict(leader) : "No clean conviction cluster has separated yet.",
+      },
+      {
+        title: "What Changed",
+        value: leader ? `${getAttentionScore(leader)}/99 attention pressure` : "Waiting",
+        detail: leader
+          ? `${leader.symbol} separated because pressure, crowd timing, and signal quality are clustering tighter than the rest of the board.`
+          : "HT is waiting for attention and participation to compress together.",
+      },
+      {
+        title: "What To Avoid",
+        value: heat ? `${heat.symbol} crowd heat` : "Random chase",
+        detail: heat
+          ? `${heat.symbol} may be loud, but HT only promotes it if attention turns into durable participation.`
+          : "Movement without confirmation stays filtered as noise.",
+      },
+      {
+        title: "Backup Read",
+        value: second?.symbol || "No rotation",
+        detail: second
+          ? `${second.symbol} becomes important if the main conviction read fades or pressure rotates.`
+          : "No secondary pressure pocket is strong enough yet.",
+      },
+    ];
+  }, [convictionEngineTarget, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, stocks, news, traderMode]);
+
+  const beginnerConvictionRead = convictionEngineTarget
+    ? `${convictionEngineTarget.symbol} is HT's current conviction read. Simple version: this is where attention and pressure are lining up best, but HT still wants confirmation so you do not chase noise.`
+    : "HT is scanning for the first clean conviction read. Simple version: no forced trade, no fake urgency.";
+
+
+  const getSignalOutcomeStatus = (stock: Stock) => {
+    const confidence = getHTScore(stock);
+    const beforeCrowd = getBeforeCrowdScore(stock);
+    const breakout = getBreakoutProbability(stock);
+    const move = stock.change;
+
+    if (move >= 10 && confidence >= 84 && beforeCrowd >= 78) return "Validated Pressure";
+    if (breakout >= 84 && confidence >= 84) return "Authority Building";
+    if (move >= 4 && beforeCrowd >= 72) return "Pressure Confirming";
+    if (stock.change < 0) return "Risk Filter Active";
+
+    return "Tracking";
+  };
+
+  const signalAuthorityStats = useMemo(() => {
+    const leader = convictionEngineTarget;
+
+    if (!leader) {
+      return [
+        ["Authority Read", "Scanning", "waiting for signal memory"],
+        ["Confidence Path", "--", "no compression yet"],
+        ["Pressure Result", "--", "no validated outcome"],
+        ["Crowd Evolution", "--", "quiet tape"],
+      ];
+    }
+
+    const earlyConfidence = Math.max(42, getHTScore(leader) - 18);
+    const currentConfidence = getHTScore(leader);
+    const pressureResult = leader.change >= 0 ? `+${leader.change.toFixed(2)}% live move` : `${leader.change.toFixed(2)}% defensive read`;
+
+    return [
+      ["Authority Read", getSignalOutcomeStatus(leader), "tracked signal outcome"],
+      ["Confidence Path", `${earlyConfidence} → ${currentConfidence}%`, "pressure expansion"],
+      ["Pressure Result", pressureResult, leader.change >= 0 ? "move after HT focus" : "risk filter held"],
+      ["Crowd Evolution", `${getCrowdPhase(leader)}`, getSignalEvolutionState(leader)],
+    ];
+  }, [convictionEngineTarget, stocks, news, traderMode, watchlist, savedSetups]);
+
+  const signalOutcomeTimeline = useMemo(() => {
+    const leader = convictionEngineTarget;
+    const second = secondaryTarget || htScoreLeaders[1];
+
+    if (!leader) {
+      return [
+        {
+          phase: "Scanning",
+          value: "No authority read yet",
+          note: "HT is waiting for attention, participation, and conviction to compress before logging a signal outcome.",
+        },
+      ];
+    }
+
+    const earlyConfidence = Math.max(42, getHTScore(leader) - 18);
+    const middleConfidence = Math.max(52, getHTScore(leader) - 8);
+
+    return [
+      {
+        phase: "Early Read",
+        value: `${leader.symbol} pressure found`,
+        note: `HT detected ${getBeforeCrowdScore(leader)}/99 before-crowd pressure before the read became obvious.` ,
+      },
+      {
+        phase: "Confidence Expanded",
+        value: `${earlyConfidence}% → ${middleConfidence}%`,
+        note: "Attention and signal integrity started compressing together instead of moving as random noise.",
+      },
+      {
+        phase: "Crowd Status Shift",
+        value: getCrowdPhase(leader),
+        note: getSignalEvolutionDetail(leader),
+      },
+      {
+        phase: "Outcome Check",
+        value: getSignalOutcomeStatus(leader),
+        note: leader.change >= 0
+          ? `${leader.symbol} is being tracked against the original Top Conviction so users can see whether HT was early.`
+          : `${leader.symbol} remains a risk-filter read until reclaim strength proves pressure is returning.`,
+      },
+      {
+        phase: "Next Authority Watch",
+        value: second?.symbol || "No rotation",
+        note: second
+          ? `${second.symbol} is the next pressure pocket if the current signal loses authority.`
+          : "No secondary read has earned enough conviction yet.",
+      },
+    ];
+  }, [convictionEngineTarget, secondaryTarget, htScoreLeaders, stocks, news, traderMode]);
+
+  const authoritySummary = convictionEngineTarget
+    ? `HT is not just flagging ${convictionEngineTarget.symbol}; it is tracking whether the original pressure read keeps earning authority through confidence expansion, crowd phase progression, and outcome behavior.`
+    : "HT is waiting for a clean signal before assigning authority. No forced conviction, no fake certainty.";
+
+
+
+  const getLiveTerminalState = () => {
+    const leader = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
+
+    if (!leader) return "Scanning For Pressure";
+    if (marketPulse === "Defensive") return "Defensive Tape";
+    if (getSignalEvolutionState(leader) === "Exhaustion Risk") return "Exhaustion Risk Rising";
+    if (getHTScore(leader) >= 90 && getAttentionScore(leader) >= 88) return "Pressure Expanding";
+    if (getConvictionScore(leader) >= 84 && getAttentionScore(leader) < 80) return "Quiet Accumulation";
+    if (hotStocks.length >= 2) return "Risk-On Rotation";
+
+    return "Pressure Building";
+  };
+
+  const getLiveTerminalBrief = () => {
+    const leader = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
+    const state = getLiveTerminalState();
+
+    if (!leader) {
+      return "HT is waiting for attention, conviction, and participation to align before forcing a read.";
+    }
+
+    if (state === "Pressure Expanding") {
+      return `${leader.symbol} is gaining conviction while crowd attention expands. HT is watching whether participation stays clean or turns into late chase behavior.`;
+    }
+
+    if (state === "Quiet Accumulation") {
+      return `${leader.symbol} is showing conviction before full crowd saturation. This is the type of early pressure pocket HT wants users to notice before it gets loud.`;
+    }
+
+    if (state === "Defensive Tape") {
+      return "The tape is defensive. HT is prioritizing reclaim strength, risk control, and confirmation over forced aggression.";
+    }
+
+    if (state === "Exhaustion Risk Rising") {
+      return `${leader.symbol} is moving loud enough for chase risk to matter. HT is watching liquidity, pullbacks, and participation quality.`;
+    }
+
+    if (state === "Risk-On Rotation") {
+      return "Momentum appetite is active across the board. HT is ranking the cleanest pressure pocket instead of treating every mover equally.";
+    }
+
+    return `${leader.symbol} remains the active read while pressure, attention, and signal quality continue developing.`;
+  };
+
+  const liveTerminalMetrics = useMemo(() => {
+    const leader = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
+    const pulseBoost = mounted ? terminalPulse % 3 : 0;
+
+    if (!leader) {
+      return [
+        ["Terminal State", "Scanning", "waiting for alignment"],
+        ["Pressure Pulse", "--", "no clean read yet"],
+        ["Crowd Motion", "--", "quiet"],
+        ["HT Read", "--", "standby"],
+      ];
+    }
+
+    const liveConfidence = Math.min(99, Math.max(35, getHTScore(leader) + pulseBoost - 1));
+    const livePressure = Math.min(99, Math.max(35, getBeforeCrowdScore(leader) + (mounted ? (terminalPulse % 4) - 1 : 0)));
+    const liveAttention = Math.min(99, Math.max(35, getAttentionScore(leader) + (mounted ? (terminalPulse % 5) - 2 : 0)));
+
+    return [
+      ["Terminal State", getLiveTerminalState(), "adaptive tape mood"],
+      ["Pressure Pulse", `${livePressure}%`, getSignalEvolutionState(leader)],
+      ["Crowd Motion", `${liveAttention}%`, getCrowdPhase(leader)],
+      ["HT Read", `${liveConfidence}%`, getEdgeStatus(leader)],
+    ];
+  }, [
+    convictionEngineTarget,
+    firstSignal,
+    priorityTarget,
+    topStock,
+    terminalPulse,
+    marketPulse,
+    hotStocks.length,
+    stocks,
+    news,
+    traderMode,
+    watchlist,
+    savedSetups,
+  ]);
+
+  const livePulseFeed = useMemo(() => {
+    const leader = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
+    const rotation = secondaryTarget || htScoreLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+
+    return [
+      leader
+        ? `${leader.symbol}: ${getLiveTerminalState()} — ${getDeskAlertTone(leader)}`
+        : "HT Desk: scanning for clean pressure alignment.",
+      rotation
+        ? `${rotation.symbol}: rotation memory active if the lead read fades.`
+        : "Rotation memory: no secondary pressure pocket has separated yet.",
+      heat
+        ? `${heat.symbol}: crowd heat is ${getCrowdPhase(heat).toLowerCase()}, but HT still wants participation proof.`
+        : "Crowd heat: scattered and not yet actionable.",
+    ];
+  }, [
+    convictionEngineTarget,
+    firstSignal,
+    priorityTarget,
+    topStock,
+    secondaryTarget,
+    htScoreLeaders,
+    attentionLeaders,
+    topMovers,
+    terminalPulse,
+    stocks,
+    news,
+    traderMode,
+  ]);
+
+
+
+
+  const getInteractiveReasoning = (type: string, stock?: Stock | null) => {
+    const target = stock || convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
+
+    if (!target) return "HT is waiting for a clean pressure pocket before assigning conviction.";
+
+    const attention = getAttentionScore(target);
+    const conviction = getConvictionScore(target);
+    const pressure = getBeforeCrowdScore(target);
+    const signal = getSignalQuality(target);
+    const breakout = getBreakoutProbability(target);
+    const rvol = getRelativeVolume(target);
+
+    if (type === "confidence") {
+      return `${target.symbol} confidence is shaped by ${conviction}/99 conviction, ${attention}/99 attention, ${signal}/99 signal integrity, and ${rvol}x volume pressure. HT wants alignment, not just movement.`;
+    }
+    if (type === "crowd") {
+      return `${target.symbol} is in the ${getCrowdPhase(target)} phase. HT is watching whether crowd attention converts into durable participation or late-chase behavior.`;
+    }
+    if (type === "pressure") {
+      return `${target.symbol} has ${pressure}/99 before-crowd pressure. HT is tracking attention compression before the broader crowd fully prices the move.`;
+    }
+    if (type === "breakout") {
+      return `${target.symbol} breakout probability is ${breakout}%. HT is balancing pressure expansion against extension risk so the read does not become blind hype.`;
+    }
+    if (type === "risk") return getInvalidationRule(target);
+
+    return getWhyThisMatters(target);
+  };
+
+  const interactiveInsightCards = useMemo(() => {
+    const target = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
+
+    return [
+      {
+        id: "why-this-matters",
+        label: "Why This Matters",
+        value: target ? getEdgeStatus(target) : "Scanning",
+        note: getInteractiveReasoning("why", target),
+      },
+      {
+        id: "confidence",
+        label: "Confidence Logic",
+        value: target ? `${getHTScore(target)}%` : "--",
+        note: getInteractiveReasoning("confidence", target),
+      },
+      {
+        id: "crowd",
+        label: "Crowd Status",
+        value: target ? getCrowdPhase(target) : "--",
+        note: getInteractiveReasoning("crowd", target),
+      },
+      {
+        id: "breakout",
+        label: "Breakout Read",
+        value: target ? `${getBreakoutProbability(target)}%` : "--",
+        note: getInteractiveReasoning("breakout", target),
+      },
+    ];
+  }, [convictionEngineTarget, firstSignal, priorityTarget, topStock, terminalPulse, stocks, news, traderMode, watchlist, savedSetups]);
+
+  const liveStatusShifts = useMemo(() => {
+    const target = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
+    const rotation = secondaryTarget || htScoreLeaders[1];
+    const heat = attentionLeaders[1] || topMovers[1];
+
+    return [
+      {
+        label: "Confidence",
+        value: target ? "increasing" : "waiting",
+        detail: target ? (mounted ? `${target.symbol} pressure read refreshed ${8 + (terminalPulse % 11)}s ago.` : `${target.symbol} pressure read refreshing...`) : "No active target yet.",
+      },
+      {
+        label: "Attention",
+        value: heat ? "rotating" : "quiet",
+        detail: heat ? `${heat.symbol} crowd heat is moving, but HT still needs participation proof.` : "Crowd heat remains scattered.",
+      },
+      {
+        label: "Risk",
+        value: target && Math.abs(target.change) >= 10 ? "elevated" : "controlled",
+        detail: target ? getInvalidationRule(target) : "Risk engine waiting for live tape structure.",
+      },
+      {
+        label: "Rotation",
+        value: rotation ? "armed" : "standby",
+        detail: rotation ? `${rotation.symbol} becomes relevant if the lead Top Conviction fades.` : "No secondary pressure pocket has separated yet.",
+      },
+    ];
+  }, [convictionEngineTarget, firstSignal, priorityTarget, topStock, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, terminalPulse, stocks, news, traderMode]);
+
+
+  const watchlistStocks = useMemo(() => {
+    return watchlist
+      .map((symbol) => stocks.find((stock) => stock.symbol === symbol))
+      .filter(Boolean) as Stock[];
+  }, [watchlist, stocks]);
+
+  const watchlistPriority = useMemo(() => {
+    if (watchlistStocks.length === 0) return null;
+
+    return [...watchlistStocks].sort(
+      (a, b) => getConvictionScore(b) - getConvictionScore(a),
+    )[0];
+  }, [watchlistStocks, news, savedSetups, traderMode]);
+
+  const savedSetupStocks = useMemo(() => {
+    return savedSetups
+      .map((symbol) => stocks.find((stock) => stock.symbol === symbol))
+      .filter(Boolean) as Stock[];
+  }, [savedSetups, stocks]);
+
+  const recentlyViewedStocks = useMemo(() => {
+    return viewedTickers
+      .map((symbol) => stocks.find((stock) => stock.symbol === symbol))
+      .filter(Boolean)
+      .slice(0, 4) as Stock[];
+  }, [viewedTickers, stocks]);
+
+  const personalWorkspaceStatus = useMemo(() => {
+    if (session && watchlist.length >= 3 && savedSetups.length >= 2) {
+      return "Personal Terminal Active";
+    }
+
+    if (session && watchlist.length > 0) {
+      return "Cloud Workspace Building";
+    }
+
+    if (watchlist.length > 0 || savedSetups.length > 0) {
+      return "Local Workspace Active";
+    }
+
+    return "Guest Workspace";
+  }, [session, watchlist.length, savedSetups.length]);
+
+  const personalInsight = useMemo(() => {
+    if (watchlistPriority) {
+      return `${watchlistPriority.symbol} is the strongest ticker inside your watchlist right now with ${getConvictionScore(watchlistPriority)}/99 conviction.`;
+    }
+
+    if (recentlyViewedStocks[0]) {
+      return `${recentlyViewedStocks[0].symbol} is your most recent focus. Save it or add it to watchlist if it matters.`;
+    }
+
+    if (priorityTarget) {
+      return `${priorityTarget.symbol} is leading the public scanner. Add tickers to personalize your terminal.`;
+    }
+
+    return "Add 3-5 tickers to start building a personalized HT Labs workflow.";
+  }, [watchlistPriority, recentlyViewedStocks, priorityTarget, news, savedSetups, traderMode]);
+
+  const getTradePlan = (stock: Stock) => {
+    if (stock.change >= 8) {
+      return "Attention Spike is hot. Wait for pullback/reclaim instead of chasing the biggest candle.";
+    }
+
+    if (stock.change >= 2) {
+      return "Attention pressure is forming. Participation quality must expand before the move earns conviction.";
     }
 
     if (stock.change < 0) {
       return "Defensive tape. Needs reclaim confirmation before treating it as a long setup.";
     }
 
-    return "Neutral setup. Keep it on watch until volume or news confirms direction.";
+    return "Pre-signal watch. HT needs attention, participation, or catalyst pressure before calling it early.";
   };
 
   const fetchNews = async (symbol: string) => {
-    if (news[symbol]) return;
+    if (news[symbol] || newsIntel[symbol]) return;
 
     try {
-      const response = await fetch(`/api/news?symbol=${symbol}`);
+      const response = await fetch(`/api/news-intel?symbol=${symbol}`);
 
       if (!response.ok) {
         throw new Error(`News request failed for ${symbol}`);
       }
 
       const data = await response.json();
+      const articles = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.articles)
+          ? data.articles
+          : [];
+
+      const newsVelocity =
+        typeof data?.newsVelocity === "number"
+          ? data.newsVelocity
+          : articles.length >= 5
+            ? 84
+            : articles.length >= 3
+              ? 72
+              : articles.length >= 1
+                ? 56
+                : 25;
 
       setNews((prev) => ({
         ...prev,
-        [symbol]: Array.isArray(data) ? data : [],
+        [symbol]: articles,
+      }));
+
+      setNewsIntel((prev) => ({
+        ...prev,
+        [symbol]: {
+          articles,
+          newsVelocity,
+          catalystStrength:
+            data?.catalystStrength ||
+            (articles.length >= 3
+              ? "Fresh catalyst activity"
+              : articles.length >= 1
+                ? "Light news activity"
+                : "No fresh catalyst"),
+          narrativeSignal:
+            data?.narrativeSignal ||
+            (articles.length >= 3
+              ? "Narrative pressure accelerating"
+              : articles.length >= 1
+                ? "Fresh headline detected"
+                : "Narrative still quiet"),
+          sentimentBias: data?.sentimentBias || "Neutral narrative",
+          sentimentScore: typeof data?.sentimentScore === "number" ? data.sentimentScore : 55,
+          hypeScore: typeof data?.hypeScore === "number" ? data.hypeScore : 35,
+          sourceCount: articles.length,
+        },
       }));
     } catch (error) {
-      console.error("NEWS FETCH ERROR:", error);
+      console.warn("NEWS FETCH:", error instanceof Error ? error.message : "fetch unavailable");
 
       setNews((prev) => ({
         ...prev,
         [symbol]: [],
       }));
+
+      setNewsIntel((prev) => ({
+        ...prev,
+        [symbol]: {
+          articles: [],
+          newsVelocity: 25,
+          catalystStrength: "No fresh catalyst",
+          narrativeSignal: "Narrative still quiet",
+          sentimentBias: "Neutral narrative",
+          sentimentScore: 50,
+          hypeScore: 25,
+          sourceCount: 0,
+        },
+      }));
     }
   };
 
   const getTopNews = (symbol: string) => {
-    return news[symbol]?.[0];
+    return getNewsArticles(symbol)?.[0];
   };
 
   const getWhyMoving = (stock: Stock) => {
     const move = Math.abs(stock.change);
-    const topNews = news[stock.symbol]?.[0];
+    const topNews = getNewsArticles(stock.symbol)[0];
 
     if (topNews?.headline) {
       return `Recent catalyst detected: ${topNews.headline}`;
@@ -997,15 +5717,539 @@ export default function Home() {
     }
 
     if (move >= 4) {
-      return "Momentum is above scanner threshold with enough movement to justify active watch.";
+      return "Attention pressure is above scanner threshold. Watch whether participation quality keeps expanding.";
     }
 
     if (stock.change < 0) {
       return "Weak tape today. Needs reclaim confirmation before treating it as a long setup.";
     }
 
-    return "Normal movement. Keep it on watch until volume, news, or attention confirms direction.";
+    return "No true pressure shift yet. Keep it on watch until crowd behavior starts changing.";
   };
+
+  const liveHeroTarget = convictionEngineTarget || priorityTarget || topStock;
+  const liveHeroPrice = liveHeroTarget ? Number(liveHeroTarget.price || 0) : 0;
+  const liveHeroChange = liveHeroTarget ? Number(liveHeroTarget.change || 0) : 0;
+  const liveHeroIsGreen = liveHeroChange >= 0;
+  const liveHeroPriceDecimals = liveHeroPrice > 0 && liveHeroPrice < 10 ? 2 : 2;
+  const liveHeroPriceDisplay = liveHeroTarget && mounted
+    ? `$${liveHeroPrice.toLocaleString(undefined, {
+        minimumFractionDigits: liveHeroPriceDecimals,
+        maximumFractionDigits: liveHeroPriceDecimals,
+      })}`
+    : "--";
+  const liveHeroChangeDisplay = liveHeroTarget
+    ? `${liveHeroIsGreen ? "+" : ""}${liveHeroChange.toFixed(2)}%`
+    : "--";
+  const liveHeroMomentumBadge = liveHeroTarget
+    ? getSignalEvolutionState(liveHeroTarget)
+    : "Scanning";
+  const liveHeroPricePulse = mounted && terminalPulse % 2 === 0;
+
+  const emergingNextSetup = useMemo(() => {
+    const leaderSymbol = liveHeroTarget?.symbol;
+    const candidates = [...stocks]
+      .filter((stock) => stock.symbol !== leaderSymbol)
+      .sort((a, b) => {
+        const aScore = getHTScore(a) * 0.45 + getAttentionScore(a) * 0.35 + getSignalQuality(a) * 0.2;
+        const bScore = getHTScore(b) * 0.45 + getAttentionScore(b) * 0.35 + getSignalQuality(b) * 0.2;
+
+        return bScore - aScore;
+      });
+
+    const next = candidates[0];
+
+    if (!next) return null;
+
+    const nextScore = getHTScore(next);
+    const nextAttention = getAttentionScore(next);
+    const nextSignal = getSignalQuality(next);
+
+    if (nextScore < 74 && nextAttention < 76 && nextSignal < 74) {
+      return null;
+    }
+
+    return next;
+  }, [stocks, liveHeroTarget, news, traderMode, watchlist, savedSetups]);
+
+  const getEmergingRead = (stock: Stock | null) => {
+    if (!stock) {
+      return "No clean secondary setup. HT is not forcing a backup ticker.";
+    }
+
+    if (getHTScore(stock) >= 86 && getAttentionScore(stock) >= 80) {
+      return `${stock.symbol} is the next pressure pocket if the primary read fades or rotation expands.`;
+    }
+
+    if (getAttentionScore(stock) >= 78) {
+      return `${stock.symbol} has attention building, but HT still wants participation proof before upgrading it.`;
+    }
+
+    return `${stock.symbol} is on secondary watch. Not priority yet, but pressure is forming.`;
+  };
+
+  const operatorPriorityStack = [
+    {
+      label: "Primary Focus",
+      symbol: liveHeroTarget?.symbol || "--",
+      state: liveHeroTarget ? getSignalEvolutionState(liveHeroTarget) : "Scanning",
+      note: liveHeroTarget
+        ? `${liveHeroTarget.symbol} still owns the main HT read unless pressure fades.`
+        : "HT is scanning for a clean focus directive.",
+    },
+    {
+      label: "Emerging Next",
+      symbol: emergingNextSetup?.symbol || "No clean setup",
+      state: emergingNextSetup ? getSignalEvolutionState(emergingNextSetup) : "Standby",
+      note: getEmergingRead(emergingNextSetup),
+    },
+    {
+      label: "Avoid / Weak Tape",
+      symbol: dangerTarget?.symbol || "None",
+      state: dangerTarget ? "Risk Filter" : "Clean",
+      note: dangerTarget
+        ? `${dangerTarget.symbol} is weak. HT does not confuse movement with opportunity.`
+        : "No major weak-tape warning is dominating the board.",
+    },
+  ];
+
+  const whyHTLikesThis = liveHeroTarget
+    ? [
+        {
+          label: "Price Action",
+          value: `${liveHeroIsGreen ? "+" : ""}${liveHeroChange.toFixed(2)}% live move`,
+          note: liveHeroChange >= 8 ? "Momentum is active, but chase risk must be respected." : "Move is still developing; HT is watching confirmation quality.",
+        },
+        {
+          label: "Volume Heat",
+          value: `${getRelativeVolume(liveHeroTarget)}x relative flow`,
+          note: getRelativeVolume(liveHeroTarget) >= 3 ? "Participation is expanding beneath the move." : "Volume needs to keep improving before HT treats this as elite.",
+        },
+        {
+          label: "Crowd Behavior",
+          value: getCrowdPhase(liveHeroTarget),
+          note: getAttentionScore(liveHeroTarget) >= 80 ? "Attention is building faster than the rest of the board." : "Crowd participation is still forming.",
+        },
+        {
+          label: "Risk Framing",
+          value: getRiskProfile(liveHeroTarget),
+          note: getSignalEvolutionState(liveHeroTarget) === "Exhaustion Risk" ? "Potential exhaustion forming. Wait for proof instead of chasing." : getDeskAlertTone(liveHeroTarget),
+        },
+      ]
+    : [];
+
+  const signalReplaySpotlight = useMemo(() => {
+    const leader = liveHeroTarget;
+
+    if (!leader) {
+      return {
+        symbol: "--",
+        price: "--",
+        change: "--",
+        phase: "Scanning",
+        detected: "--",
+        high: "--",
+        expansion: "--",
+        status: "Scanning",
+        thesis: "HT is waiting for the next pressure pocket worth logging.",
+      };
+    }
+
+    const estimatedDetectedPrice = leader.symbol === "SNAL"
+      ? 0.88
+      : Math.max(0.01, leader.price / (1 + Math.max(1, Math.abs(leader.change)) / 100));
+    const estimatedHigh = leader.symbol === "SNAL"
+      ? 1.24
+      : leader.price;
+    const expansion = ((estimatedHigh - estimatedDetectedPrice) / estimatedDetectedPrice) * 100;
+
+    return {
+      symbol: leader.symbol,
+      price: `$${Number(leader.price || 0).toFixed(2)}`,
+      change: `${leader.change >= 0 ? "+" : ""}${leader.change.toFixed(2)}%`,
+      phase: getCrowdPhase(leader),
+      detected: `$${estimatedDetectedPrice.toFixed(2)}`,
+      high: `$${estimatedHigh.toFixed(2)}`,
+      expansion: `${expansion >= 0 ? "+" : ""}${expansion.toFixed(1)}%`,
+      status: getSignalOutcomeStatus(leader),
+      thesis: getHTSignalLanguage(leader),
+    };
+  }, [liveHeroTarget, stocks, news, traderMode, watchlist, savedSetups]);
+
+  const capitalAvailable = Math.max(0, Number(capitalInput.replace(/[^0-9.]/g, "")) || 0);
+  const coreCandidates = stocks.filter((stock) =>
+    ["NVDA", "MSFT", "AAPL", "PLTR", "AMD", "SPY", "QQQ"].includes(stock.symbol),
+  );
+  const stabilityAnchor =
+    [...coreCandidates].sort((a, b) => getHTScore(b) - getHTScore(a))[0] ||
+    stocks.find((stock) => stock.symbol !== liveHeroTarget?.symbol) ||
+    liveHeroTarget;
+
+  const allocationProfileLabel =
+    allocationStyle === "short"
+      ? "Short-Term Momentum"
+      : allocationStyle === "swing"
+        ? "Swing / Multi-Day"
+        : "Long-Term Growth";
+
+  const riskProfileLabel =
+    allocationRisk === "conservative"
+      ? "Conservative"
+      : allocationRisk === "moderate"
+        ? "Moderate"
+        : "Aggressive";
+
+  const experienceLabel =
+    experienceLevel === "beginner"
+      ? "Beginner"
+      : experienceLevel === "intermediate"
+        ? "Intermediate"
+        : "Advanced";
+
+  const adaptiveAllocationPlan = useMemo(() => {
+    const capital = capitalAvailable;
+    const primary = liveHeroTarget;
+    const secondary = emergingNextSetup;
+    const anchor = stabilityAnchor;
+
+    const reservePct = (() => {
+      if (allocationRisk === "conservative") return allocationStyle === "long" ? 0.35 : 0.45;
+      if (allocationRisk === "aggressive") return allocationStyle === "short" ? 0.22 : 0.18;
+      return allocationStyle === "short" ? 0.32 : 0.25;
+    })();
+
+    const primaryPct = (() => {
+      if (!primary) return 0;
+      if (allocationStyle === "long") return allocationRisk === "aggressive" ? 0.18 : allocationRisk === "moderate" ? 0.12 : 0.08;
+      if (allocationRisk === "aggressive") return 0.30;
+      if (allocationRisk === "moderate") return 0.22;
+      return 0.14;
+    })();
+
+    const secondaryPct = (() => {
+      if (!secondary) return 0;
+      if (allocationStyle === "long") return 0.08;
+      if (allocationRisk === "aggressive") return 0.18;
+      if (allocationRisk === "moderate") return 0.12;
+      return 0.07;
+    })();
+
+    const anchorPct = Math.max(0, 1 - reservePct - primaryPct - secondaryPct);
+
+    const items = [
+      primary && {
+        label: "Primary HT Read",
+        symbol: primary.symbol,
+        amount: Math.round(capital * primaryPct),
+        pct: Math.round(primaryPct * 100),
+        state: getSignalEvolutionState(primary),
+        note: primaryPct >= 0.22
+          ? "Momentum exposure sized for opportunity, not an all-in chase."
+          : "Smaller exposure because HT is respecting volatility and user profile.",
+      },
+      secondary && {
+        label: "Emerging Next",
+        symbol: secondary.symbol,
+        amount: Math.round(capital * secondaryPct),
+        pct: Math.round(secondaryPct * 100),
+        state: getSignalEvolutionState(secondary),
+        note: "Only deploy if rotation confirms. This is a secondary pressure pocket, not the main read yet.",
+      },
+      anchor && {
+        label: allocationStyle === "long" ? "Core / Stability" : "Stability Anchor",
+        symbol: anchor.symbol,
+        amount: Math.round(capital * anchorPct),
+        pct: Math.round(anchorPct * 100),
+        state: getSignalEvolutionState(anchor),
+        note: "Balances the plan so the account is not fully dependent on one volatile momentum name.",
+      },
+      {
+        label: "Cash Reserve",
+        symbol: "CASH",
+        amount: Math.round(capital * reservePct),
+        pct: Math.round(reservePct * 100),
+        state: "Flexibility",
+        note: "Cash is a position. HT preserves buying power for pullbacks, reclaims, or cleaner signals.",
+      },
+    ].filter(Boolean) as { label: string; symbol: string; amount: number; pct: number; state: string; note: string }[];
+
+    const deployment = items.reduce((sum, item) => item.symbol === "CASH" ? sum : sum + item.amount, 0);
+    const reserve = items.find((item) => item.symbol === "CASH")?.amount || 0;
+    const maxSingle = items.filter((item) => item.symbol !== "CASH").reduce((max, item) => Math.max(max, item.amount), 0);
+    const maxSinglePct = capital > 0 ? Math.round((maxSingle / capital) * 100) : 0;
+
+    return {
+      items,
+      deployment,
+      reserve,
+      maxSinglePct,
+      summary: capital > 0
+        ? `HT would deploy about $${mounted ? deployment.toLocaleString() : deployment} and keep $${mounted ? reserve.toLocaleString() : reserve} flexible based on your ${riskProfileLabel.toLowerCase()} ${allocationProfileLabel.toLowerCase()} profile.`
+        : "Enter capital to generate an adaptive allocation read.",
+    };
+  }, [
+    capitalAvailable,
+    allocationStyle,
+    allocationRisk,
+    experienceLevel,
+    liveHeroTarget,
+    emergingNextSetup,
+    stabilityAnchor,
+    stocks,
+    news,
+    traderMode,
+    watchlist,
+    savedSetups,
+  ]);
+
+  const adaptiveRiskMessage = (() => {
+    if (!liveHeroTarget) return "HT is waiting for a clean read before suggesting deployment.";
+    if (allocationStyle === "short" && getRiskProfile(liveHeroTarget).includes("HIGH")) {
+      return `${liveHeroTarget.symbol} has elevated volatility. HT will not recommend full-capital deployment into a speculative momentum move.`;
+    }
+    if (experienceLevel === "beginner") {
+      return "Beginner mode keeps sizing tighter and preserves more cash so the user can learn without overexposure.";
+    }
+    return "Allocation adapts to the active signal, market pressure, and your stated risk profile.";
+  })();
+
+  const profitProtectionPlan = useMemo(() => {
+    const target = liveHeroTarget;
+
+    if (!target) {
+      return {
+        symbol: "--",
+        headline: "HT Exit Assist waiting for a clean signal.",
+        protectZone: "No setup",
+        stopRule: "Wait for a live priority target before modeling exits.",
+        trimStyle: "Standby",
+        tiers: [
+          { label: "First trim", range: "--", action: "No trade yet" },
+          { label: "Runner trim", range: "--", action: "Let HT find pressure first" },
+          { label: "Risk line", range: "--", action: "Do not force entries" },
+        ],
+      };
+    }
+
+    const opportunity = getOpportunityRange(target);
+    const price = Number(target.price || 0);
+    const move = Math.abs(target.change);
+    const riskTemp = getRiskTemperature(target);
+    const signalState = getSignalEvolutionState(target);
+
+    const firstTrimPct =
+      allocationRisk === "conservative" ? 0.025 : allocationRisk === "moderate" ? 0.045 : 0.07;
+    const secondTrimPct =
+      allocationRisk === "conservative" ? 0.05 : allocationRisk === "moderate" ? 0.085 : 0.14;
+    const stopPct =
+      allocationRisk === "conservative" ? 0.025 : allocationRisk === "moderate" ? 0.04 : 0.065;
+
+    const firstTrim = price > 0 ? price * (1 + firstTrimPct) : 0;
+    const secondTrim = price > 0 ? price * (1 + secondTrimPct) : 0;
+    const riskLine = price > 0 ? price * (1 - stopPct) : 0;
+
+    const trimStyle =
+      allocationRisk === "conservative"
+        ? "Take smaller wins faster and protect the account."
+        : allocationRisk === "moderate"
+          ? "Scale out in pieces so one winner can keep working."
+          : "Let runners breathe, but cut fast if pressure fails.";
+
+    const headline =
+      target.change < 0
+        ? `${target.symbol} is not an exit-ladder candidate yet. HT wants reclaim strength first.`
+        : riskTemp === "Explosive" || signalState === "Exhaustion Risk" || move >= 10
+          ? `${target.symbol} has upside energy, but chase risk is elevated. Protect profits in layers.`
+          : `${target.symbol} has a cleaner compounding window. Plan trims before emotion takes over.`;
+
+    return {
+      symbol: target.symbol,
+      headline,
+      protectZone: opportunity.label,
+      stopRule: getInvalidationRule(target),
+      trimStyle,
+      tiers: [
+        {
+          label: "First trim",
+          range: price > 0 ? `$${firstTrim.toFixed(2)}` : opportunity.defensive,
+          action: allocationRisk === "conservative" ? "Secure part of the win" : "Pay yourself, keep exposure" ,
+        },
+        {
+          label: "Runner trim",
+          range: price > 0 ? `$${secondTrim.toFixed(2)}` : opportunity.balanced,
+          action: allocationRisk === "aggressive" ? "Let strength prove itself" : "Reduce emotional decision pressure",
+        },
+        {
+          label: "Risk line",
+          range: price > 0 ? `$${riskLine.toFixed(2)}` : "Reclaim/fail level",
+          action: "If pressure fails, reassess instead of hoping",
+        },
+      ],
+    };
+  }, [
+    liveHeroTarget,
+    allocationRisk,
+    allocationStyle,
+    experienceLevel,
+    stocks,
+    news,
+    traderMode,
+    watchlist,
+    savedSetups,
+  ]);
+
+
+  const portfolioIntelligence = useMemo(() => {
+    const holdings = portfolioHoldings
+      .map((holding) => {
+        const symbol = holding.symbol.trim().toUpperCase();
+        const amount = Math.max(0, Number(holding.amount) || 0);
+        const stock = stocks.find((item) => item.symbol === symbol) || fallbackQuotes[symbol];
+        const htScore = stock ? getHTScore(stock) : 50;
+        const phase = stock ? getSignalEvolutionState(stock) : "Manual Watch";
+        const risk = stock ? getRiskProfile(stock) : "UNKNOWN";
+
+        return { ...holding, symbol, amount, stock, htScore, phase, risk };
+      })
+      .filter((holding) => holding.symbol && holding.amount > 0);
+
+    const cash = Math.max(0, Number(cashInput) || 0);
+    const invested = holdings.reduce((sum, holding) => sum + holding.amount, 0);
+    const total = invested + cash;
+    const cashPct = total > 0 ? Math.round((cash / total) * 100) : 0;
+    const momentumExposure = holdings
+      .filter((holding) =>
+        holding.stock
+          ? Math.abs(holding.stock.change) >= 4 || getSignalEvolutionState(holding.stock).includes("Crowd") || getSignalEvolutionState(holding.stock).includes("Priority")
+          : ["SNAL", "QUBT", "MSTR", "HOOD"].includes(holding.symbol),
+      )
+      .reduce((sum, holding) => sum + holding.amount, 0);
+    const momentumPct = total > 0 ? Math.round((momentumExposure / total) * 100) : 0;
+    const largestHolding = [...holdings].sort((a, b) => b.amount - a.amount)[0];
+    const concentrationPct = largestHolding && total > 0 ? Math.round((largestHolding.amount / total) * 100) : 0;
+    const strongest = [...holdings].sort((a, b) => b.htScore - a.htScore)[0];
+    const weakest = [...holdings].sort((a, b) => a.htScore - b.htScore)[0];
+
+    const riskLevel =
+      momentumPct >= 60 || concentrationPct >= 45 || cashPct < 10
+        ? "Elevated"
+        : momentumPct >= 40 || concentrationPct >= 32 || cashPct < 18
+          ? "Moderate"
+          : "Balanced";
+
+    const cashHealth = cashPct >= 25 ? "Healthy" : cashPct >= 12 ? "Thin" : "Too Low";
+
+    const rebalance = (() => {
+      if (!total) return "Enter holdings and cash to activate the portfolio read.";
+      if (cashPct < 12) return "Build cash back above 15-25% before chasing new pressure pockets.";
+      if (concentrationPct >= 45 && largestHolding) return `Reduce concentration risk. ${largestHolding.symbol} is carrying ${concentrationPct}% of the portfolio.`;
+      if (momentumPct >= 60) return "Momentum exposure is hot. Trim weaker conviction names first and preserve flexibility.";
+      if (strongest && weakest && strongest.symbol !== weakest.symbol) return `Keep ${strongest.symbol} as the strongest read and review ${weakest.symbol} first if trimming is needed.`;
+      return "Portfolio structure is workable. Keep cash flexible and let HT rank rotation before adding more exposure.";
+    })();
+
+    const warning = (() => {
+      if (!total) return "No emotional risk read yet.";
+      if (momentumPct >= 60) return "You may be overexposed to fast-moving names. HT would avoid revenge adds and random averaging down.";
+      if (cashPct < 12) return "Cash is too thin. Low flexibility can force bad decisions when better setups appear.";
+      if (concentrationPct >= 45) return "One position has too much control over the account outcome.";
+      return "Risk is manageable. The key is staying selective instead of forcing every signal.";
+    })();
+
+    return {
+      holdings,
+      cash,
+      invested,
+      total,
+      cashPct,
+      momentumPct,
+      concentrationPct,
+      largestHolding,
+      strongest,
+      weakest,
+      riskLevel,
+      cashHealth,
+      rebalance,
+      warning,
+    };
+  }, [portfolioHoldings, cashInput, stocks, news, traderMode, watchlist, savedSetups]);
+
+
+  const watchtowerAlerts = useMemo(() => {
+    const leader = liveHeroTarget;
+    const rotation = emergingNextSetup;
+    const riskName = dangerTarget;
+    const profileTone = `${riskProfileLabel} ${allocationProfileLabel}`;
+
+    const alerts = [
+      leader && {
+        severity: getHTScore(leader) >= 90 ? "Priority" : "Watch",
+        symbol: leader.symbol,
+        title: `${leader.symbol} remains the active HT focus`,
+        message: `${getSignalEvolutionState(leader)} with ${getHTScore(leader)}/99 HT Score and ${getAttentionScore(leader)}/99 attention. ${getDeskAlertTone(leader)}`,
+        action: allocationRisk === "conservative"
+          ? "Respect confirmation first. Do not size this like an aggressive momentum account."
+          : "Monitor continuation quality, volume pressure, and reclaim behavior before adding size.",
+        tone: "orange",
+      },
+      rotation && {
+        severity: "Rotation",
+        symbol: rotation.symbol,
+        title: `${rotation.symbol} is the next pressure pocket`,
+        message: `${rotation.symbol} is not the main read yet, but HT sees ${getAttentionScore(rotation)}/99 attention and ${getHTScore(rotation)}/99 HT Score building behind the leader.`,
+        action: `If ${leader?.symbol || "the primary read"} fades, watch whether attention rotates into ${rotation.symbol} with real participation.`,
+        tone: "green",
+      },
+      riskName && {
+        severity: "Risk",
+        symbol: riskName.symbol,
+        title: `${riskName.symbol} is weak-tape noise`,
+        message: `${riskName.symbol} is being filtered because movement without reclaim strength is not opportunity.`,
+        action: "Avoid forcing long bias until reclaim strength and signal quality improve.",
+        tone: "red",
+      },
+      portfolioIntelligence.total > 0 && {
+        severity: portfolioIntelligence.riskLevel === "Elevated" ? "Portfolio Risk" : "Portfolio Check",
+        symbol: "PORTFOLIO",
+        title: `${portfolioIntelligence.riskLevel} portfolio risk detected`,
+        message: `Momentum exposure is ${portfolioIntelligence.momentumPct}% and cash flexibility is ${portfolioIntelligence.cashPct}%. HT is reading this through your ${profileTone.toLowerCase()} profile.`,
+        action: portfolioIntelligence.warning,
+        tone: portfolioIntelligence.riskLevel === "Elevated" ? "red" : "zinc",
+      },
+      leader && Math.abs(leader.change) >= 10 && {
+        severity: "Exhaustion",
+        symbol: leader.symbol,
+        title: `${leader.symbol} chase risk is elevated`,
+        message: "The move is loud enough that emotional entries become dangerous. HT wants proof that liquidity can absorb profit-taking.",
+        action: "Wait for pullback, reclaim, or clean continuation instead of reacting to the vertical candle.",
+        tone: "red",
+      },
+    ].filter(Boolean) as {
+      severity: string;
+      symbol: string;
+      title: string;
+      message: string;
+      action: string;
+      tone: "orange" | "green" | "red" | "zinc";
+    }[];
+
+    return alerts.slice(0, 5);
+  }, [
+    liveHeroTarget,
+    emergingNextSetup,
+    dangerTarget,
+    portfolioIntelligence,
+    allocationRisk,
+    allocationStyle,
+    riskProfileLabel,
+    allocationProfileLabel,
+    stocks,
+    news,
+    traderMode,
+    watchlist,
+    savedSetups,
+  ]);
+
 
   const fetchSingleStock = async (symbol: string): Promise<Stock> => {
     try {
@@ -1041,21 +6285,41 @@ export default function Home() {
     }
   };
 
+  const fetchStockUniverse = async (symbols: string[], chunkSize = 24) => {
+    const results: Stock[] = [];
+
+    for (let index = 0; index < symbols.length; index += chunkSize) {
+      const chunk = symbols.slice(index, index + chunkSize);
+      const chunkResults = await Promise.all(chunk.map((symbol) => fetchSingleStock(symbol)));
+      results.push(...chunkResults);
+    }
+
+    return results;
+  };
+
   const fetchStocks = async () => {
     try {
       setIsRefreshing(true);
 
-      const tickersToFetch = [...new Set([...defaultTickers, ...watchlist])];
+      const tickersToFetch = [...new Set([...marketUniverse, ...watchlist])];
 
-      const stockData = await Promise.all(
-        tickersToFetch.map((symbol) => fetchSingleStock(symbol))
+      const stockData = await fetchStockUniverse(tickersToFetch);
+
+      const tradableData = stockData.filter((stock) => stock.price > 0 || Math.abs(stock.change) > 0);
+      const sortedStocks = tradableData.sort(
+        (a, b) => getScannerSelectionScore(b) - getScannerSelectionScore(a),
       );
 
-      const sortedStocks = stockData.sort(
-        (a, b) => Math.abs(b.change) - Math.abs(a.change)
-      );
+      const visibleBoard = sortedStocks.slice(0, 36);
 
-      setStocks(sortedStocks);
+      setStocks(visibleBoard);
+      setMarketScanStats({
+        scanned: tradableData.length,
+        gainers: tradableData.filter((stock) => stock.change > 0).length,
+        losers: tradableData.filter((stock) => stock.change < 0).length,
+        highVolume: tradableData.filter((stock) => getRelativeVolume(stock) >= 3).length,
+        lastFullScan: new Date(),
+      });
       setLastUpdated(new Date());
     } catch (err) {
       console.error("Stock fetch error:", err);
@@ -1066,6 +6330,13 @@ export default function Home() {
         .sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
 
       setStocks(fallbackData);
+      setMarketScanStats({
+        scanned: fallbackData.length,
+        gainers: fallbackData.filter((stock) => stock.change > 0).length,
+        losers: fallbackData.filter((stock) => stock.change < 0).length,
+        highVolume: fallbackData.filter((stock) => getRelativeVolume(stock) >= 3).length,
+        lastFullScan: new Date(),
+      });
       setLastUpdated(new Date());
     } finally {
       setIsRefreshing(false);
@@ -1073,6 +6344,8 @@ export default function Home() {
   };
 
   useEffect(() => {
+    setMounted(true);
+
     const savedWatchlist = localStorage.getItem("headtap-watchlist");
     const savedAiSetups = localStorage.getItem("htlabs-saved-setups");
 
@@ -1096,6 +6369,16 @@ export default function Home() {
     }
   }, []);
 
+
+  useEffect(() => {
+    const pulse = setInterval(() => {
+      setTerminalPulse((prev) => (prev + 1) % 1000);
+      setDeskPulseIndex((prev) => prev + 1);
+    }, 4500);
+
+    return () => clearInterval(pulse);
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -1110,12 +6393,20 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-
   useEffect(() => {
     if (session?.user?.id) {
       loadCloudWatchlist();
     }
-  }, [session]);
+    // Depend only on the user ID string, not the whole session object,
+    // to avoid re-running every time Supabase refreshes the session token.
+  }, [session?.user?.id]);
+
+  // AUTH STABILITY PATCH v149:
+  // Temporarily disable automatic Signal Memory Supabase writes after login/signup.
+  // v120 auth worked because login only restored the user session + cloud watchlist.
+  // These newer effects hit the ht_signal_memory table immediately after auth,
+  // which can make onboarding feel broken if that table/RLS policy is not ready.
+
 
   useEffect(() => {
     stocks.slice(0, 6).forEach((stock) => {
@@ -1128,45 +6419,67 @@ export default function Home() {
 
     const interval = setInterval(() => {
       fetchStocks();
-    }, 8000);
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [watchlist]);
 
   const handleAuth = async (mode: "signin" | "signup") => {
-    if (!authEmail || !authPassword) {
+    const email = authEmail.trim().toLowerCase();
+    const password = authPassword;
+
+    if (!email || !password) {
       setAuthMessage("Enter an email and password first.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setAuthMessage("Password must be at least 6 characters.");
       return;
     }
 
     try {
       setAuthLoading(true);
-      setAuthMessage("");
+      setAuthMessage(mode === "signin" ? "Signing in..." : "Creating account...");
 
-      const result =
-        mode === "signin"
-          ? await supabase.auth.signInWithPassword({
-              email: authEmail,
-              password: authPassword,
-            })
-          : await supabase.auth.signUp({
-              email: authEmail,
-              password: authPassword,
-            });
+      if (mode === "signin") {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-      if (result.error) {
-        setAuthMessage(result.error.message);
+        if (error) {
+          setAuthMessage(error.message);
+          return;
+        }
+
+        // onAuthStateChange handles setSession automatically — no double-set
+        setAuthPassword("");
+        setAuthMessage("Signed in successfully.");
         return;
       }
 
-      setAuthMessage(
-        mode === "signin"
-          ? "Signed in successfully."
-          : "Account created. Check your email if confirmation is required."
-      );
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (error) {
+        setAuthMessage(error.message);
+        return;
+      }
+
+      if (data.session) {
+        // onAuthStateChange handles setSession automatically
+        setAuthMessage("Account created. Your HT workspace is live.");
+      } else {
+        setAuthMessage("Account created. Check your email to confirm, then log in.");
+      }
+
+      setAuthPassword("");
     } catch (error) {
       console.error("AUTH ERROR:", error);
-      setAuthMessage("Auth request failed.");
+      setAuthMessage("Auth request failed. Check Supabase settings or try again.");
     } finally {
       setAuthLoading(false);
     }
@@ -1177,15 +6490,11 @@ export default function Home() {
     setAuthMessage("Signed out.");
   };
 
-
   const syncWatchlistToCloud = async (symbols: string[]) => {
     if (!session?.user?.id) return;
 
     try {
-      await supabase
-        .from("HT Labs")
-        .delete()
-        .eq("user_id", session.user.id);
+      await supabase.from("ht_labs_watchlist").delete().eq("user_id", session.user.id);
 
       if (symbols.length === 0) return;
 
@@ -1194,7 +6503,7 @@ export default function Home() {
         symbol,
       }));
 
-      await supabase.from("HT Labs").insert(payload);
+      await supabase.from("ht_labs_watchlist").insert(payload);
 
       setCloudSyncMessage("Cloud watchlist synced.");
     } catch (error) {
@@ -1208,7 +6517,7 @@ export default function Home() {
 
     try {
       const { data, error } = await supabase
-        .from("HT Labs")
+        .from("ht_labs_watchlist")
         .select("symbol")
         .eq("user_id", session.user.id);
 
@@ -1223,6 +6532,49 @@ export default function Home() {
       }
     } catch (error) {
       console.error("LOAD WATCHLIST ERROR:", error);
+    }
+  };
+
+  const handleTickerSearch = async () => {
+    const cleanTicker = ticker.toUpperCase().trim();
+
+    if (!cleanTicker) {
+      setSearchStatus("Enter a ticker first.");
+      return;
+    }
+
+    setSearchStatus(`Searching ${cleanTicker}...`);
+
+    try {
+      const searchedStock = await fetchSingleStock(cleanTicker);
+
+      setStocks((prev) => {
+        const filtered = prev.filter((stock) => stock.symbol !== cleanTicker);
+        const updated = [searchedStock, ...filtered];
+
+        return updated.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+      });
+
+      setSelectedStock(searchedStock);
+      setViewedTickers((prev) => {
+        const updated = [...new Set([searchedStock.symbol, ...prev])].slice(0, 12);
+        localStorage.setItem("htlabs-viewed-tickers", JSON.stringify(updated));
+        return updated;
+      });
+
+      setSearchStatus(`${cleanTicker} loaded into HT. Add it to watchlist if it deserves tracking.`);
+      setTicker("");
+
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => {
+          document
+            .getElementById("premium-terminal")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 150);
+      }
+    } catch (error) {
+      console.error("SEARCH ERROR:", error);
+      setSearchStatus(`Could not load ${cleanTicker}. Check the symbol and try again.`);
     }
   };
 
@@ -1244,7 +6596,10 @@ export default function Home() {
       const updatedWatchlist = [...watchlist, cleanTicker];
       setWatchlist(updatedWatchlist);
 
-      localStorage.setItem("headtap-watchlist", JSON.stringify(updatedWatchlist));
+      localStorage.setItem(
+        "headtap-watchlist",
+        JSON.stringify(updatedWatchlist),
+      );
 
       if (session?.user?.id) {
         syncWatchlistToCloud(updatedWatchlist);
@@ -1266,7 +6621,6 @@ export default function Home() {
     setWatchlist(updatedWatchlist);
     localStorage.setItem("headtap-watchlist", JSON.stringify(updatedWatchlist));
   };
-
 
   const dismissAlert = (symbol: string) => {
     const updated = [...new Set([symbol, ...dismissedAlerts])].slice(0, 20);
@@ -1347,38 +6701,414 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDeskPulseIndex((prev) => prev + 1);
+    }, 4500);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <main className="min-h-screen overflow-hidden bg-[#050505] text-white">
+    <main suppressHydrationWarning className="ht-simplified-ui min-h-screen overflow-hidden bg-[#050505] text-white">
+      <style jsx global>{`
+        /* HT Labs v69 production hierarchy: live tape, search/auth, top conviction hero, capital, portfolio, score/signals. Legacy OS block removed.
+
+        HT Labs v68 TRUE top stack replacement: tape + auth header + global search are physically prioritized, legacy hero hidden.
+
+        HT Labs v65 simplification pass: signal-first layout, calmer saturation, reduced visible overload.
+
+        HT Labs v49 laptop layout repair: desktop split grids now wait until 2xl, preventing normal-width side dead space.
+           No sections removed. No architecture rewrite.
+
+           HT Labs full-file layout repair:
+           Stop oversized terminal shells from creating dead empty zones. */
+        section {
+          padding-top: 2.25rem !important;
+          padding-bottom: 2.25rem !important;
+        }
+
+        section > div,
+        section [class*="max-w-7xl"],
+        section [class*="max-w-6xl"] {
+          align-items: start !important;
+        }
+
+        section [class*="grid"] {
+          align-items: start !important;
+        }
+
+        section [class*="rounded-[1.5rem]"],
+        section [class*="rounded-[2rem]"],
+        section [class*="rounded-[34px]"] {
+          min-height: 0 !important;
+          height: auto !important;
+        }
+
+        section [class*="lg:grid-cols"] > * {
+          min-height: 0 !important;
+          height: auto !important;
+          align-self: start !important;
+        }
+
+        section [class*="bg-[radial-gradient"],
+        section [class*="bg-[linear-gradient"] {
+          min-height: 0 !important;
+        }
+
+        .ht-compact-shell {
+          display: block !important;
+          height: auto !important;
+          min-height: 0 !important;
+        }
+
+
+        .ht-premium-card {
+          border-color: rgba(255,255,255,0.095) !important;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.045) !important;
+        }
+
+        .ht-soft-orange {
+          box-shadow: 0 0 46px rgba(255,106,0,0.105) !important;
+        }
+
+
+        .ht-simplified-ui > .relative.z-10 {
+          display: flex;
+          flex-direction: column;
+        }
+
+        /* v68: every direct child defaults below the product stack so footer/old sections cannot jump above tape/search/auth. */
+        .ht-simplified-ui > .relative.z-10 > * { order: 50; }
+
+        .ht-simplified-ui #live-tape { order: 1; }
+        .ht-simplified-ui #mode-switcher { order: 2; }
+        .ht-simplified-ui #quick-search { order: 3; }
+        .ht-simplified-ui #account { order: 4; }
+        .ht-simplified-ui #conviction-engine { order: 5; }
+        .ht-simplified-ui header { order: 98; }
+        .ht-simplified-ui #capital-intelligence { order: 7; }
+        .ht-simplified-ui #portfolio-intelligence { order: 8; }
+        .ht-simplified-ui #mobile-command { order: 9; }
+        .ht-simplified-ui #watchtower { order: 10; }
+        .ht-simplified-ui #watchlist { order: 11; }
+        .ht-simplified-ui #scanner { order: 12; }
+        .ht-simplified-ui #premium-terminal { display: none !important; order: 80; }
+        .ht-simplified-ui footer { order: 99; }
+
+        /* Remove old marketing hero from the visible product flow. */
+        .ht-simplified-ui #home { display: none !important; }
+
+        .ht-simplified-ui #daily-brief,
+        .ht-simplified-ui #interactive-intelligence,
+        .ht-simplified-ui #living-intelligence,
+        .ht-simplified-ui #priority-flow,
+        .ht-simplified-ui #signal-proof,
+        .ht-simplified-ui #signal-history,
+        .ht-simplified-ui #live-ht-desk,
+        .ht-simplified-ui #signal-timeline,
+        .ht-simplified-ui #market-narrative,
+        .ht-simplified-ui #features {
+          order: 40;
+        }
+
+
+        /* v97 integrated command deck: live tape, modes, search, and account live inside the hero so the user lands directly on the money section without losing controls. */
+        .ht-simplified-ui #conviction-engine {
+          order: 1 !important;
+          padding-top: 0.85rem !important;
+          padding-bottom: 1rem !important;
+        }
+
+        .ht-simplified-ui #live-tape,
+        .ht-simplified-ui #mode-switcher,
+        .ht-simplified-ui #quick-search {
+          display: none !important;
+        }
+
+        .ht-simplified-ui header {
+          display: none !important;
+        }
+
+        /* Auth section always visible regardless of mode */
+        .ht-simplified-ui #account { display: block !important; }
+
+        .ht-simplified-ui #capital-intelligence { order: 2 !important; }
+        .ht-simplified-ui #portfolio-intelligence { order: 3 !important; }
+        .ht-simplified-ui #scanner { order: 4 !important; }
+        .ht-simplified-ui #watchlist { order: 5 !important; }
+
+        .ht-command-viewport {
+          max-width: 1512px !important;
+          padding-left: 1.5rem !important;
+          padding-right: 1.5rem !important;
+        }
+
+        @media (min-width: 1024px) {
+          .ht-simplified-ui #conviction-engine {
+            padding-top: 0.65rem !important;
+          }
+        }
+
+        @media (max-width: 767px) {
+          .ht-command-viewport {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+          }
+        }
+
+        .ht-simplified-ui .pointer-events-none.fixed.inset-0 {
+          opacity: 0.58 !important;
+        }
+
+        .ht-simplified-ui section {
+          scroll-margin-top: 96px;
+        }
+
+        .ht-simplified-ui .ht-premium-card,
+        .ht-simplified-ui [class*="shadow-[0_0_"],
+        .ht-simplified-ui [class*="shadow-[0_20px"],
+        .ht-simplified-ui [class*="shadow-[0_30px"] {
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.04) !important;
+        }
+
+        .ht-simplified-ui [class*="border-orange-500/30"],
+        .ht-simplified-ui [class*="border-orange-500/40"],
+        .ht-simplified-ui [class*="border-orange-400/30"] {
+          border-color: rgba(255,255,255,0.12) !important;
+        }
+
+        .ht-simplified-ui [class*="bg-orange-500/20"],
+        .ht-simplified-ui [class*="bg-orange-500/15"],
+        .ht-simplified-ui [class*="bg-orange-500/10"] {
+          background-color: rgba(255,106,0,0.075) !important;
+        }
+
+        .ht-simplified-ui #live-tape {
+          position: sticky;
+          top: 0;
+          z-index: 70;
+        }
+
+        .ht-simplified-ui header {
+          position: sticky !important;
+          top: 44px !important;
+          z-index: 65;
+        }
+
+        .ht-simplified-ui #quick-search {
+          position: relative;
+          top: auto;
+          z-index: 55;
+          padding-bottom: 0.9rem !important;
+        }
+
+        .ht-simplified-ui #conviction-engine,
+        .ht-simplified-ui #capital-intelligence,
+        .ht-simplified-ui #portfolio-intelligence,
+        .ht-simplified-ui #watchtower,
+        .ht-simplified-ui #watchlist,
+        .ht-simplified-ui #scanner {
+          padding-top: 1.35rem !important;
+          padding-bottom: 1.35rem !important;
+        }
+
+        .ht-simplified-ui #daily-brief,
+        .ht-simplified-ui #interactive-intelligence,
+        .ht-simplified-ui #living-intelligence,
+        .ht-simplified-ui #priority-flow,
+        .ht-simplified-ui #signal-proof,
+        .ht-simplified-ui #signal-history,
+        .ht-simplified-ui #live-ht-desk,
+        .ht-simplified-ui #signal-timeline,
+        .ht-simplified-ui #market-narrative,
+        .ht-simplified-ui #features {
+          opacity: 0.78;
+          filter: saturate(0.82);
+        }
+
+        @media (min-width: 768px) {
+          .ht-simplified-ui #daily-brief,
+          .ht-simplified-ui #interactive-intelligence,
+          .ht-simplified-ui #living-intelligence,
+          .ht-simplified-ui #priority-flow,
+          .ht-simplified-ui #signal-proof,
+          .ht-simplified-ui #signal-history,
+          .ht-simplified-ui #live-ht-desk,
+          .ht-simplified-ui #signal-timeline,
+          .ht-simplified-ui #market-narrative,
+          .ht-simplified-ui #features {
+            max-width: 1120px;
+          }
+        }
+
+        @media (max-width: 767px) {
+          .ht-simplified-ui #capital-intelligence,
+          .ht-simplified-ui #portfolio-intelligence,
+          .ht-simplified-ui #watchtower,
+          .ht-simplified-ui #daily-brief,
+          .ht-simplified-ui #interactive-intelligence,
+          .ht-simplified-ui #living-intelligence,
+          .ht-simplified-ui #priority-flow,
+          .ht-simplified-ui #signal-proof,
+          .ht-simplified-ui #signal-history,
+          .ht-simplified-ui #live-ht-desk,
+          .ht-simplified-ui #signal-timeline,
+          .ht-simplified-ui #market-narrative,
+          .ht-simplified-ui #features {
+            display: none !important;
+          }
+
+          .ht-simplified-ui header {
+            top: 43px !important;
+          }
+
+          .ht-simplified-ui #quick-search {
+            top: auto;
+            z-index: 55;
+          }
+
+          .ht-simplified-ui #live-tape {
+            z-index: 70;
+          }
+
+          .ht-simplified-ui #conviction-engine,
+          .ht-simplified-ui #watchlist,
+          .ht-simplified-ui #scanner,
+          .ht-simplified-ui #account {
+            padding-top: 0.85rem !important;
+            padding-bottom: 0.85rem !important;
+          }
+
+          .ht-simplified-ui h1,
+          .ht-simplified-ui h2 {
+            letter-spacing: -0.05em !important;
+          }
+
+          .ht-simplified-ui [class*="text-7xl"],
+          .ht-simplified-ui [class*="text-8xl"] {
+            font-size: 3.25rem !important;
+            line-height: 0.95 !important;
+          }
+
+          section {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+          }
+
+          .ht-mobile-calm-card {
+            border-radius: 1.35rem !important;
+            padding: 1rem !important;
+          }
+
+          .ht-mobile-tight-copy {
+            line-height: 1.45 !important;
+          }
+
+          .ht-mobile-scroll-safe {
+            max-height: none !important;
+            overflow: visible !important;
+          }
+        }
+
+
+        /* V86 scope fix: emotional signal panel inserted inside Top Conviction using topConviction alias. */
+        .ht-mode-nav {
+          position: relative;
+          z-index: 30;
+        }
+
+        [data-active-mode="command"] #capital-intelligence,
+        [data-active-mode="command"] #portfolio-intelligence,
+        [data-active-mode="command"] #premium-terminal,
+        [data-active-mode="command"] #interactive-intelligence,
+        [data-active-mode="command"] #living-intelligence,
+        [data-active-mode="command"] #priority-flow,
+        [data-active-mode="command"] #signal-proof,
+        [data-active-mode="command"] #signal-history,
+        [data-active-mode="command"] #watchtower,
+        [data-active-mode="command"] #watchlist,
+        [data-active-mode="command"] #daily-brief,
+        [data-active-mode="command"] #live-ht-desk,
+        [data-active-mode="command"] #signal-timeline,
+        [data-active-mode="command"] #market-narrative,
+        [data-active-mode="command"] #features,
+        [data-active-mode="command"] #scanner { display: none !important; }
+
+        [data-active-mode="capital"] #mobile-command,
+        [data-active-mode="capital"] #conviction-engine,
+        [data-active-mode="capital"] #portfolio-intelligence,
+        [data-active-mode="capital"] #premium-terminal,
+        [data-active-mode="capital"] #interactive-intelligence,
+        [data-active-mode="capital"] #living-intelligence,
+        [data-active-mode="capital"] #priority-flow,
+        [data-active-mode="capital"] #signal-proof,
+        [data-active-mode="capital"] #signal-history,
+        [data-active-mode="capital"] #watchtower,
+        [data-active-mode="capital"] #watchlist,
+        [data-active-mode="capital"] #daily-brief,
+        [data-active-mode="capital"] #live-ht-desk,
+        [data-active-mode="capital"] #signal-timeline,
+        [data-active-mode="capital"] #market-narrative,
+        [data-active-mode="capital"] #features,
+        [data-active-mode="capital"] #scanner { display: none !important; }
+
+        [data-active-mode="portfolio"] #mobile-command,
+        [data-active-mode="portfolio"] #conviction-engine,
+        [data-active-mode="portfolio"] #capital-intelligence,
+        [data-active-mode="portfolio"] #premium-terminal,
+        [data-active-mode="portfolio"] #interactive-intelligence,
+        [data-active-mode="portfolio"] #living-intelligence,
+        [data-active-mode="portfolio"] #priority-flow,
+        [data-active-mode="portfolio"] #signal-proof,
+        [data-active-mode="portfolio"] #signal-history,
+        [data-active-mode="portfolio"] #watchtower,
+        [data-active-mode="portfolio"] #daily-brief,
+        [data-active-mode="portfolio"] #live-ht-desk,
+        [data-active-mode="portfolio"] #signal-timeline,
+        [data-active-mode="portfolio"] #market-narrative,
+        [data-active-mode="portfolio"] #features,
+        [data-active-mode="portfolio"] #scanner { display: none !important; }
+
+        [data-active-mode="signals"] #mobile-command,
+        [data-active-mode="signals"] #account,
+        [data-active-mode="signals"] #capital-intelligence,
+        [data-active-mode="signals"] #portfolio-intelligence,
+        [data-active-mode="signals"] #watchlist,
+        [data-active-mode="signals"] #watchtower,
+        [data-active-mode="signals"] #signal-proof,
+        [data-active-mode="signals"] #signal-history,
+        [data-active-mode="signals"] #daily-brief,
+        [data-active-mode="signals"] #signal-timeline,
+        [data-active-mode="signals"] #market-narrative,
+        [data-active-mode="signals"] #features { display: none !important; }
+
+        [data-active-mode="replay"] #mobile-command,
+        [data-active-mode="replay"] #conviction-engine,
+        [data-active-mode="replay"] #account,
+        [data-active-mode="replay"] #capital-intelligence,
+        [data-active-mode="replay"] #portfolio-intelligence,
+        [data-active-mode="replay"] #watchlist,
+        [data-active-mode="replay"] #premium-terminal,
+        [data-active-mode="replay"] #interactive-intelligence,
+        [data-active-mode="replay"] #living-intelligence,
+        [data-active-mode="replay"] #priority-flow,
+        [data-active-mode="replay"] #daily-brief,
+        [data-active-mode="replay"] #market-narrative,
+        [data-active-mode="replay"] #features,
+        [data-active-mode="replay"] #scanner { display: none !important; }
+
+        @media (max-width: 767px) {
+          .ht-mode-nav { top: 132px; }
+        }
+      `}</style>
+
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(255,106,0,0.22),transparent_26%),radial-gradient(circle_at_85%_10%,rgba(255,140,26,0.12),transparent_28%),linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[size:auto,auto,64px_64px,64px_64px]" />
       <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(90deg,#050505_0%,rgba(5,5,5,0.88)_45%,rgba(5,5,5,0.65)_100%)]" />
 
-      <div className="relative z-10">
-
-{/* V26 COMMAND CENTER UPGRADE */}
-<div className="mb-6 rounded-2xl border border-orange-500/20 bg-black/40 p-4">
-  <div className="flex flex-wrap items-center justify-between gap-3">
-    <div>
-      <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
-        V26 COMMAND CENTER UPGRADE
-      </p>
-      <h2 className="mt-1 text-xl font-black">
-        Command Center + Live Opportunity Routing
-      </h2>
-    </div>
-
-    <div className="flex gap-2 text-xs font-black">
-      <span className="rounded-full bg-green-500/15 px-3 py-2 text-green-400">
-        MARKET LIVE
-      </span>
-      <span className="rounded-full bg-orange-500/15 px-3 py-2 text-orange-300">
-        ALERT ENGINE ACTIVE
-      </span>
-    </div>
-  </div>
-</div>
-
-        <header className="sticky top-0 z-40 border-b border-orange-500/20 bg-black/75 backdrop-blur-2xl">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
+      <div className="relative z-10" data-active-mode={activeMode}>
+        <header className="sticky top-0 z-40 border-b border-white/10 bg-black/70 backdrop-blur-2xl">
+          <div className="mx-auto flex max-w-7xl items-center gap-5 px-5 py-4">
             <motion.div
               className="flex items-center gap-4"
               initial={{ opacity: 0, x: -18 }}
@@ -1388,51 +7118,73 @@ export default function Home() {
               <img src="/logo.png" alt="HT Labs" className="h-12 w-auto" />
             </motion.div>
 
-            <nav className="hidden items-center gap-8 text-sm font-semibold text-zinc-400 md:flex">
-              <a className="text-orange-500" href="#home">
-                Home
+            <nav className="hidden flex-1 items-center gap-6 text-sm font-semibold text-zinc-500 md:flex">
+              <a className="text-orange-400" href="#premium-terminal">
+                Dashboard
               </a>
-              <a className="transition hover:text-orange-400" href="#scanner">
+              <a className="transition hover:text-orange-300" href="#scanner">
                 Scanner
               </a>
-              <a className="transition hover:text-orange-400" href="#command-center">
-                Command
-              </a>
-              <a className="transition hover:text-orange-400" href="#priority-flow">
-                Priority
-              </a>
-              <a className="transition hover:text-orange-400" href="#market-narrative">
-                Narrative
-              </a>
-              <a className="transition hover:text-orange-400" href="#watchlist">
+              <a className="transition hover:text-orange-300" href="#watchlist">
                 Watchlist
               </a>
-              <a className="transition hover:text-orange-400" href="#account">
+              <a className="transition hover:text-orange-300" href="#account">
                 Account
-              </a>
-              <a className="transition hover:text-orange-400" href="#features">
-                Features
               </a>
             </nav>
 
-            <motion.button
-              onClick={() =>
-                document
-                  .getElementById("scanner")
-                  ?.scrollIntoView({ behavior: "smooth" })
-              }
-              className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white shadow-[0_0_30px_rgba(255,106,0,0.35)] transition"
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-            >
-              Start Scanning →
-            </motion.button>
+            <div className="ml-auto flex shrink-0 items-center gap-3">
+              {session?.user ? (
+                <div className="hidden items-center gap-2 rounded-2xl border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs font-black text-green-300 sm:flex">
+                  <span className="h-2 w-2 rounded-full bg-green-400" />
+                  <span className="max-w-[150px] truncate">
+                    {mounted ? (session.user.email || "HT Account") : ""}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() =>
+                      document
+                        .getElementById("account")
+                        ?.scrollIntoView({ behavior: "smooth" })
+                    }
+                    className="hidden rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-black text-zinc-200 transition hover:border-orange-500/40 hover:text-orange-300 sm:inline-flex"
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    onClick={() =>
+                      document
+                        .getElementById("account")
+                        ?.scrollIntoView({ behavior: "smooth" })
+                    }
+                    className="hidden rounded-2xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-black text-orange-300 transition hover:bg-orange-500/20 lg:inline-flex"
+                  >
+                    Sign Up
+                  </button>
+                </>
+              )}
+
+              <motion.button
+                onClick={() =>
+                  document
+                    .getElementById(session?.user ? "capital-intelligence" : "account")
+                    ?.scrollIntoView({ behavior: "smooth" })
+                }
+                className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white shadow-[0_0_18px_rgba(255,106,0,0.18)] transition hover:shadow-[0_0_28px_rgba(255,106,0,0.28)]"
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+              >
+                {session?.user ? "Launch Terminal →" : "Create Profile →"}
+              </motion.button>
+            </div>
           </div>
         </header>
 
-        <section className="border-b border-orange-500/10 bg-black/60 px-5 py-3">
+        <section id="live-tape" className="border-b border-white/5 bg-black/55 px-4 py-1.5 backdrop-blur-2xl md:px-5 md:py-2">
           <div className="mx-auto flex max-w-7xl items-center gap-4 overflow-hidden">
-            <div className="flex shrink-0 items-center gap-2 rounded-full border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs font-black text-green-400">
+            <div className="flex shrink-0 items-center gap-2 rounded-full border border-green-500/10 bg-green-500/[0.045] px-2.5 py-1.5 text-[10px] font-black text-green-400">
               <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
               LIVE TAPE
             </div>
@@ -1441,10 +7193,12 @@ export default function Home() {
               {tickerTape.map((stock) => (
                 <div
                   key={`tape-${stock.symbol}`}
-                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-4 py-2"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/5 bg-white/[0.018] px-3 py-1.5"
                 >
                   <span className="font-black text-white">{stock.symbol}</span>
-                  <span className="text-zinc-500">${Number(stock.price || 0).toFixed(2)}</span>
+                  <span className="text-zinc-500">
+                    ${Number(stock.price || 0).toFixed(2)}
+                  </span>
                   <span
                     className={`font-black ${
                       stock.change >= 0 ? "text-green-400" : "text-red-400"
@@ -1459,48 +7213,1179 @@ export default function Home() {
           </div>
         </section>
 
+
+        <section id="mode-switcher" className="ht-mode-nav border-b border-white/5 bg-black/60 px-4 py-1.5 backdrop-blur-2xl md:px-5">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-300">Workspace</p>
+                <p className="mt-1 text-xs font-bold text-zinc-500">Search or switch workspace without leaving the command center.</p>
+              </div>
+              <div className="hidden rounded-full border border-white/10 bg-white/[0.035] px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400 sm:block">
+                {activeMode === "command" ? "Top read" : activeMode === "capital" ? "Sizing" : activeMode === "portfolio" ? "Account" : activeMode === "signals" ? "Deep read" : "History"}
+              </div>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5 rounded-[1.1rem] border border-white/10 bg-zinc-950/80 p-1.5 shadow-[0_0_24px_rgba(255,106,0,0.07)] md:gap-2 md:p-2">
+              {[
+                ["command", "Command", "Top read"],
+                ["capital", "Capital", "Sizing"],
+                ["portfolio", "Portfolio", "Profile"],
+                ["signals", "Signals", "Scores"],
+                ["replay", "Replay", "History"],
+              ].map(([mode, label, note]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setActiveMode(mode as CommandMode)}
+                  className={`rounded-xl px-2 py-2.5 text-center transition md:rounded-2xl md:px-4 md:py-3 ${
+                    activeMode === mode
+                      ? "bg-orange-500 text-white shadow-[0_0_22px_rgba(255,106,0,0.25)]"
+                      : "bg-white/[0.035] text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
+                  }`}
+                >
+                  <span className="block text-[11px] font-black uppercase tracking-[0.12em] md:text-xs">{label}</span>
+                  <span className={`mt-1 hidden text-[9px] font-bold uppercase tracking-[0.14em] md:block ${activeMode === mode ? "text-orange-100" : "text-zinc-600"}`}>{note}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+
+
+        <section id="quick-search" className="border-b border-white/5 bg-black/60 px-4 py-1.5 backdrop-blur-2xl md:px-5 md:py-3">
+          <div className="mx-auto grid max-w-7xl gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <img src="/logo.png" alt="HT Labs" className="h-9 w-auto md:h-10" />
+                <div className="hidden sm:block">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-400">
+                    Global Search
+                  </p>
+                  <p className="text-xs font-semibold text-zinc-500">
+                    Find any ticker first. Let HT explain the setup next.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                {session?.user ? (
+                  <button
+                    onClick={() =>
+                      document
+                        .getElementById("account")
+                        ?.scrollIntoView({ behavior: "smooth" })
+                    }
+                    className="inline-flex max-w-[190px] items-center gap-2 rounded-2xl border border-green-500/25 bg-green-500/10 px-3 py-2 text-xs font-black text-green-300 transition hover:border-green-400/50"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-green-400" />
+                    <span className="truncate">{mounted ? (session.user.email || "HT Account") : ""}</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() =>
+                        document
+                          .getElementById("account")
+                          ?.scrollIntoView({ behavior: "smooth" })
+                      }
+                      className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black text-zinc-200 transition hover:border-orange-500/40 hover:text-orange-300 md:px-4"
+                    >
+                      Login
+                    </button>
+                    <button
+                      onClick={() =>
+                        document
+                          .getElementById("account")
+                          ?.scrollIntoView({ behavior: "smooth" })
+                      }
+                      className="rounded-2xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs font-black text-orange-300 transition hover:bg-orange-500/20 md:px-4"
+                    >
+                      Sign Up
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="group grid gap-2 rounded-[1.35rem] border border-white/10 bg-zinc-950/95 p-2 shadow-[0_0_28px_rgba(255,106,0,0.10)] transition focus-within:border-orange-500/45 focus-within:shadow-[0_0_38px_rgba(255,106,0,0.18)] md:grid-cols-[1fr_auto]">
+              <input
+                type="text"
+                placeholder="Search ticker or company..."
+                value={ticker}
+                onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleTickerSearch();
+                  }
+                }}
+                className="min-w-0 bg-transparent px-3 py-3 text-base font-black uppercase tracking-[-0.02em] text-white outline-none placeholder:normal-case placeholder:font-bold placeholder:text-zinc-600 md:text-sm"
+              />
+              <button
+                onClick={handleTickerSearch}
+                className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-xs font-black text-white shadow-[0_0_18px_rgba(255,106,0,0.22)] transition hover:scale-[1.02] hover:opacity-95"
+              >
+                Search
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
+              <span className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-400 sm:hidden">
+                Fast Ticker Access
+              </span>
+              <span className="truncate">{searchStatus}</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="account" className="mx-auto max-w-7xl px-5 py-2">
+          <motion.div
+            className="backdrop-blur-xl"
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+            viewport={{ once: true }}
+          >
+            {session ? (
+              <div className="mx-auto flex max-w-5xl flex-col gap-3 rounded-[1.1rem] border border-green-500/15 bg-black/55 px-4 py-3 shadow-[0_0_22px_rgba(34,197,94,0.055)] md:flex-row md:items-center md:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-green-500/20 bg-green-500/10 text-sm font-black text-green-300">
+                    HT
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-green-400">
+                        Trader Profile
+                      </p>
+                      <span className="rounded-full border border-green-500/20 bg-green-500/10 px-2.5 py-1 text-[9px] font-black text-green-300">
+                        Cloud Sync Active
+                      </span>
+                    </div>
+                    <h3 className="mt-1 truncate text-base font-black text-white md:text-lg">
+                      {traderMode} trader · {mounted ? (session.user.email || "HT Account") : ""}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 md:min-w-[300px]">
+                  {[
+                    ["Watchlist", watchlist.length],
+                    ["Saved", savedSetups.length],
+                    ["Viewed", viewedTickers.length],
+                  ].map((item) => (
+                    <div
+                      key={`profile-chip-${item[0]}`}
+                      className="rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-center"
+                    >
+                      <p className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-500">
+                        {item[0]}
+                      </p>
+                      <p className="mt-0.5 text-base font-black text-white">{item[1]}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 rounded-[1.25rem] border border-orange-500/15 bg-zinc-950/70 p-4 shadow-[0_0_24px_rgba(255,106,0,0.07)] lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-400">
+                    Create Your Trader Profile
+                  </p>
+                  <h3 className="mt-1 text-2xl font-black text-white">
+                    Save the terminal around your trading style.
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-zinc-500">
+                    Keep watchlists, saved AI reads, recent tickers, and your personal momentum workflow synced.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto] md:items-center">
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/45 px-4 py-3 text-sm outline-none transition placeholder:text-zinc-700 focus:border-orange-500"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    className="w-full rounded-2xl border border-white/10 bg-black/45 px-4 py-3 text-sm outline-none transition placeholder:text-zinc-700 focus:border-orange-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAuth("signin")}
+                    disabled={authLoading}
+                    className="rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-black text-zinc-200 transition hover:border-orange-500/40 hover:text-orange-300 disabled:opacity-50"
+                  >
+                    {authLoading ? "Loading..." : "Login"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAuth("signup")}
+                    disabled={authLoading}
+                    className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white transition hover:opacity-90 disabled:opacity-50"
+                  >
+                    Sign Up
+                  </button>
+                </div>
+
+                {authMessage && (
+                  <p className="rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-sm text-zinc-300 lg:col-span-2">
+                    {authMessage}
+                  </p>
+                )}
+              </div>
+            )}
+          </motion.div>
+        </section>
+
+        <section id="mobile-command" className="mx-auto max-w-7xl px-5 py-4 md:hidden">
+          <div className="ht-mobile-calm-card rounded-[1.5rem] border border-orange-500/20 bg-[linear-gradient(135deg,rgba(255,106,0,0.12),rgba(255,255,255,0.03))] p-4 backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-300">
+                  Mobile Priority View
+                </p>
+                <h2 className="mt-2 text-3xl font-black tracking-[-0.06em] text-white">
+                  {priorityTarget?.symbol || "HT"}
+                </h2>
+              </div>
+
+              {priorityTarget && (
+                <div className="text-right">
+                  <p className="font-mono text-xl font-black text-white">
+                    ${Number(priorityTarget.price || 0).toFixed(2)}
+                  </p>
+                  <p className={`text-xs font-black ${priorityTarget.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {priorityTarget.change >= 0 ? "+" : ""}{Number(priorityTarget.change || 0).toFixed(2)}%
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-orange-400/15 bg-black/40 p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300/80">
+                Why This Matters
+              </p>
+              <p className="mt-2 text-base font-black leading-snug text-white">
+                {priorityTarget ? getWhyThisMattersHeadline(priorityTarget) : "HT is waiting for one ticker to separate."}
+              </p>
+              <p className="ht-mobile-tight-copy mt-2 text-sm text-zinc-300">
+                {priorityTarget ? getWhyThisMatters(priorityTarget) : "HT is waiting for one ticker to separate from the board."}
+              </p>
+              {priorityTarget && (
+                <div className="mt-3 grid gap-2">
+                  {getWhyThisMattersBullets(priorityTarget).map((item) => (
+                    <div key={`mobile-why-${item}`} className="flex gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-orange-300" />
+                      <p className="text-xs font-bold leading-5 text-zinc-300">{item}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {priorityTarget && (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[
+                  ["HT", getHTScore(priorityTarget), getSignalEvolutionState(priorityTarget)],
+                  ["Crowd", getAttentionScore(priorityTarget), getCrowdPhase(priorityTarget)],
+                  ["Risk", getRiskProfile(priorityTarget), getDecisionClarity(priorityTarget)],
+                ].map(([label, value, note]) => (
+                  <div key={`mobile-${label}`} className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+                    <p className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</p>
+                    <p className="mt-1 text-lg font-black text-white">{value}</p>
+                    <p className="mt-1 truncate text-[10px] font-bold text-zinc-500">{note}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth" })}
+                className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black text-zinc-200"
+              >
+                Watchlist
+              </button>
+              <button
+                onClick={() => document.getElementById("scanner")?.scrollIntoView({ behavior: "smooth" })}
+                className="rounded-2xl bg-orange-500 px-4 py-3 text-xs font-black text-white"
+              >
+                Expand Feed
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section id="conviction-engine" className="mx-auto max-w-[1488px] px-4 pt-3 md:px-6 md:pt-4">
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45 }}
+            className="relative overflow-hidden rounded-[1.65rem] border border-white/10 bg-[#04080b] p-3 shadow-[0_28px_90px_rgba(0,0,0,0.52)] md:p-4"
+          >
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(255,106,0,0.11),transparent_28%),radial-gradient(circle_at_76%_28%,rgba(34,211,238,0.055),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.018),transparent_42%)]" />
+
+            <div className="relative space-y-4">
+              <div className="flex flex-col gap-3 border-b border-white/10 pb-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center gap-7">
+                  <div className="flex items-center gap-2">
+                    <img src="/logo.png" alt="HT Labs" className="h-8 w-auto" />
+                  </div>
+                  <nav className="hidden items-center gap-7 text-xs font-bold text-zinc-500 lg:flex">
+                    {[
+                      ["Dashboard", "command"],
+                      ["Top Convictions", "command"],
+                      ["Scanner", "signals"],
+                      ["News", "signals"],
+                      ["Watchlist", "portfolio"],
+                    ].map(([label, mode]) => (
+                      <button
+                        key={`mock-nav-${label}`}
+                        type="button"
+                        onClick={() => setActiveMode(mode as CommandMode)}
+                        className={`transition hover:text-white ${label === "Top Convictions" ? "text-orange-400" : ""}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="flex min-w-[240px] items-center gap-2 rounded-xl border border-white/10 bg-black/40 px-3 py-2.5">
+                    <span className="text-zinc-600">⌕</span>
+                    <input
+                      type="text"
+                      placeholder="Search ticker..."
+                      value={ticker}
+                      onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleTickerSearch();
+                      }}
+                      className="min-w-0 flex-1 bg-transparent text-xs font-black uppercase text-white outline-none placeholder:normal-case placeholder:text-zinc-600"
+                    />
+                  </div>
+                  {session?.user ? (
+                    <div className="flex items-center gap-2">
+                      <span className="max-w-[180px] truncate rounded-full border border-green-400/20 bg-green-500/10 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-green-300">
+                        {mounted ? (session.user.email || "HT Account") : ""}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSignOut}
+                        className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300 hover:text-white"
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="email"
+                          placeholder="Email"
+                          value={authEmail}
+                          onChange={(e) => setAuthEmail(e.target.value)}
+                          className="w-36 rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-orange-500/60"
+                        />
+                        <input
+                          type="password"
+                          placeholder="Password"
+                          value={authPassword}
+                          onChange={(e) => setAuthPassword(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleAuth("signin"); }}
+                          className="w-32 rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-orange-500/60"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAuth("signin")}
+                          disabled={authLoading}
+                          className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-200 transition hover:border-orange-400/40 hover:text-orange-300 disabled:opacity-50"
+                        >
+                          {authLoading ? "..." : "Login"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAuth("signup")}
+                          disabled={authLoading}
+                          className="rounded-full bg-orange-500 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-black shadow-[0_0_22px_rgba(249,115,22,0.22)] disabled:opacity-50"
+                        >
+                          {authLoading ? "..." : "Sign Up"}
+                        </button>
+                      </div>
+                      {authMessage && (
+                        <p className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-[10px] font-bold text-zinc-300">
+                          {authMessage}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-center">
+                <div>
+                  <div className="flex items-center gap-4">
+                    <h2 className="text-[2.45rem] font-black uppercase leading-none tracking-[-0.07em] text-white md:text-[3.2rem]">
+                      Top Conviction Right Now
+                    </h2>
+                    <div className="hidden h-px flex-1 bg-gradient-to-r from-orange-400 via-orange-500/50 to-transparent lg:block" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <p className="max-w-[330px] text-sm font-medium leading-5 text-zinc-400">
+                    HT continuously filters the active market and elevates the strongest actionable read.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById("why-ht-likes-this")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                    className="shrink-0 rounded-full bg-orange-500 px-6 py-4 text-[11px] font-black uppercase tracking-[0.12em] text-black shadow-[0_0_26px_rgba(249,115,22,0.24)]"
+                  >
+                    Why HT<br />Picked This
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                {[
+                  ["Market Sweep", "Active", "Broad scan running", "text-white"],
+                  ["Green", marketScanStats.gainers, "Names Positive", "text-green-300"],
+                  ["Red", marketScanStats.losers, "Names Negative", "text-red-300"],
+                  ["Unusual Flow", marketScanStats.highVolume, "3x+ Relative Volume", "text-orange-300"],
+                  ["Updated", mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live", "Live Scan", "text-white"],
+                ].map(([label, value, note, tone]) => (
+                  <div key={`mock-stat-${label}`} className="rounded-2xl border border-white/10 bg-white/[0.025] px-4 py-3">
+                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600">{label}</p>
+                    <p className={`mt-1 font-mono text-lg font-black ${tone}`}>{value}</p>
+                    <p className="mt-0.5 text-[10px] font-semibold text-zinc-600">{note}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-4 rounded-[1.35rem] border border-orange-400/18 bg-[radial-gradient(circle_at_top_left,rgba(255,106,0,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))] p-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(330px,0.9fr)]">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-orange-400/25 bg-orange-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-orange-300">HT Conviction Read</span>
+                    <span className="rounded-full border border-white/10 bg-black/35 px-4 py-2 text-sm font-black text-white">{liveHeroTarget ? getSimpleConvictionRead(liveHeroTarget).scoreLabel : "HT EDGE --"}</span>
+                    {liveHeroTarget && <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-sm font-black text-cyan-100">ENTRY {getSimpleConvictionRead(liveHeroTarget).entryQuality}/99</span>}
+                  </div>
+                  <h1 className="mt-5 font-mono text-[3.7rem] font-black uppercase leading-[0.82] tracking-[-0.12em] text-white md:text-[5.4rem]">
+                    {liveHeroTarget ? liveHeroTarget.symbol : "Scanning"}
+                  </h1>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-white/10 bg-white/[0.045] px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-zinc-200">
+                      {liveHeroTarget ? getSimpleConvictionRead(liveHeroTarget).state : "Waiting for signal"}
+                    </span>
+                    {liveHeroTarget && (
+                      <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-cyan-100">
+                        {getTimingQualityLabel(liveHeroTarget)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-4 text-xl font-black tracking-[-0.03em] text-zinc-100">
+                    {liveHeroTarget ? getSimpleConvictionRead(liveHeroTarget).opinion : "HT is waiting for clean participation."}
+                  </p>
+
+                  <div className="mt-4 rounded-2xl border border-orange-400/20 bg-[linear-gradient(135deg,rgba(249,115,22,0.13),rgba(255,255,255,0.025))] p-4 shadow-[0_0_28px_rgba(249,115,22,0.08)]">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-300">HT Action</p>
+                        <p className="mt-1 text-sm font-semibold text-zinc-400">The immediate read: status, entry quality, risk, targets, and invalidation.</p>
+                      </div>
+                      <span className={`w-fit rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] ${liveHeroTarget && getQualityGateLabel(liveHeroTarget) !== "Reject" ? "border-green-400/25 bg-green-500/10 text-green-300" : "border-zinc-500/20 bg-zinc-500/10 text-zinc-400"}`}>
+                        {liveHeroTarget ? (getQualityGateLabel(liveHeroTarget) === "Reject" ? "Wait" : "Valid") : "Scanning"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                      {liveHeroTarget ? [
+                        ["Entry Quality", `${getEntryQualityScore(liveHeroTarget)}/99`, getTimingQualityLabel(liveHeroTarget), "text-cyan-200"],
+                        ["Risk", getRiskProfile(liveHeroTarget), getMomentumStrength(liveHeroTarget), "text-green-300"],
+                        ["Target 1", getContinuationWindows(liveHeroTarget).conservative, "Conservative zone", "text-purple-300"],
+                        ["Target 2", getContinuationWindows(liveHeroTarget).aggressive, "Aggressive zone", "text-purple-300"],
+                        ["Invalidation", getRiskGuardrailShort(liveHeroTarget), "Thesis break", "text-orange-200"],
+                      ].map(([label, value, note, tone]) => (
+                        <div key={`ht-action-${label}`} className="rounded-xl border border-white/10 bg-black/32 p-3">
+                          <p className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</p>
+                          <p className={`mt-1 font-mono text-lg font-black ${tone}`}>{value}</p>
+                          <p className="mt-0.5 text-[10px] font-bold text-zinc-500">{note}</p>
+                        </div>
+                      )) : (
+                        <div className="rounded-xl border border-white/10 bg-black/32 p-3 sm:col-span-2 xl:col-span-5">
+                          <p className="text-sm font-black text-zinc-300">HT Action activates when one ticker separates from the board.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {liveHeroTarget && (
+                    <div className="mt-4 rounded-2xl border border-orange-400/18 bg-black/35 p-4">
+                      <p className="text-[12px] font-black uppercase tracking-[0.18em] text-orange-300">
+                        HT Discovery Read <span className="ml-2 normal-case tracking-normal text-sm text-zinc-100">{getSimpleConvictionRead(liveHeroTarget).discoveryRead}</span>
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-3 space-y-2">
+                    <div className="rounded-xl border border-white/10 bg-black/30 px-4 py-2.5">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-green-300">
+                        Signal Memory <span className="ml-2 text-zinc-500">·</span> <span className="ml-2 text-zinc-400">{signalMemoryMessage}</span>
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-green-400/15 bg-green-500/[0.05] px-4 py-2.5">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-green-300">
+                        HT Memory Status <span className="mx-2 text-zinc-500">·</span>
+                        <span className="text-zinc-300">Pattern Library Building</span>
+                        <span className="mx-2 text-zinc-500">·</span>
+                        <span className="text-zinc-300">{signalMemoryInsight?.tracked ?? 0} Signals Tracked</span>
+                        <span className="mx-2 text-zinc-500">·</span>
+                        <span className="text-green-300">Winner DNA Collecting</span>
+                        <span className="mx-2 text-zinc-500">·</span>
+                        <span className="text-red-300">Failure DNA Collecting</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  <div className="rounded-2xl border border-cyan-300/15 bg-cyan-400/[0.035] p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Pattern Intelligence</p>
+                      <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-400">Coming Online</span>
+                    </div>
+                    <p className="mt-3 text-sm font-black text-white">Learning from HT Memory Engine.</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-zinc-500">Pattern match confidence activates after enough outcome data is collected.</p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-black/28 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600">Operator Read</p>
+                      <p className="mt-3 text-base font-black leading-6 text-white">{liveHeroTarget ? getSimpleConvictionRead(liveHeroTarget).operatorRead : "Wait for a clean separation."}</p>
+                    </div>
+                    <div className="rounded-2xl border border-red-400/12 bg-red-500/[0.045] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-red-300">Risk</p>
+                      <p className="mt-3 text-base font-black text-white">{liveHeroTarget ? getSimpleConvictionRead(liveHeroTarget).risk : "No signal"}</p>
+                      {liveHeroTarget && <p className="mt-2 text-[11px] font-black uppercase tracking-[0.12em] text-zinc-500">{getSimpleConvictionRead(liveHeroTarget).timingQuality} · Entry {getSimpleConvictionRead(liveHeroTarget).entryQuality}/99 · Trap {getSimpleConvictionRead(liveHeroTarget).trapRisk}/99</p>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-[1.15fr_0.55fr_0.85fr]">
+                <div className="grid gap-0 overflow-hidden rounded-2xl border border-orange-400/20 bg-white/[0.025] lg:grid-cols-[0.82fr_1fr]">
+                  <div className="p-4">
+                    <span className="rounded-lg border border-orange-300/35 bg-orange-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-orange-200">#{liveHeroTarget ? getMarketRank(liveHeroTarget) : "--"} on active board</span>
+                    <p className="mt-6 font-mono text-[4.9rem] font-black uppercase leading-[0.8] tracking-[-0.12em] text-white md:text-[6.2rem]">{liveHeroTarget?.symbol || "--"}</p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-orange-300/25 bg-orange-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-orange-200">
+                        {liveHeroTarget ? getSimpleConvictionRead(liveHeroTarget).state : "Scanning"}
+                      </span>
+                      <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-cyan-100">
+                        Entry {liveHeroTarget ? getSimpleConvictionRead(liveHeroTarget).entryQuality : "--"}/99
+                      </span>
+                    </div>
+                    <p className="mt-4 text-sm font-black leading-6 text-zinc-100">{liveHeroTarget ? getSelectionTrustLine(liveHeroTarget) : "HT is filtering for the cleanest active read."}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className={`rounded-full border px-3 py-1.5 font-mono text-sm font-black ${liveHeroIsGreen ? "border-green-400/20 bg-green-500/10 text-green-300" : "border-red-400/20 bg-red-500/10 text-red-300"}`}>{liveHeroChangeDisplay}</span>
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-zinc-300">{liveHeroTarget ? getTimingQualityLabel(liveHeroTarget) : "Scanning"}</span>
+                    </div>
+                    <p className="mt-5 text-[9px] font-black uppercase tracking-[0.16em] text-zinc-600">Live Price</p>
+                    <p className="mt-1 font-mono text-4xl font-black text-white md:text-5xl">{liveHeroPriceDisplay}</p>
+                    {liveHeroTarget && <p className={`mt-2 font-mono text-lg font-black ${liveHeroIsGreen ? "text-green-300" : "text-red-300"}`}>{liveHeroIsGreen ? "+" : ""}{(liveHeroPrice * (liveHeroChange / 100)).toFixed(2)} ({liveHeroChangeDisplay})</p>}
+                    <button onClick={() => liveHeroTarget && openAiModal(liveHeroTarget)} disabled={!liveHeroTarget} className="mt-5 w-full rounded-xl bg-orange-500 px-5 py-4 text-xs font-black uppercase tracking-[0.08em] text-black disabled:opacity-50">View {liveHeroTarget?.symbol || "Ticker"} Analysis →</button>
+                    <button onClick={() => liveHeroTarget && toggleWatchlist(liveHeroTarget.symbol)} disabled={!liveHeroTarget} className="mt-2 w-full rounded-xl border border-white/10 bg-black/40 px-5 py-3 text-xs font-black uppercase tracking-[0.08em] text-zinc-200 disabled:opacity-50">{liveHeroTarget && watchlist.includes(liveHeroTarget.symbol) ? "Remove from watchlist" : "Add to watchlist ☆"}</button>
+                  </div>
+                  <div className="border-t border-white/10 p-4 lg:border-l lg:border-t-0">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Intraday Price · {mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"} ET</p>
+                      <span className="rounded-full border border-green-400/20 bg-green-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-green-300">{liveHeroTarget ? getLivePressureCue(liveHeroTarget) : "Scanning"}</span>
+                    </div>
+                    <div className="h-[245px] rounded-2xl border border-white/10 bg-black/28 p-3">
+                      {liveHeroTarget ? <MiniStockChart symbol={liveHeroTarget.symbol} price={liveHeroTarget.price} change={liveHeroTarget.change} /> : <div className="grid h-full place-items-center text-xs font-bold text-zinc-600">Waiting for live ticker</div>}
+                    </div>
+                    <div className="mt-3 hidden rounded-xl border border-white/10 bg-black/32 p-1 md:flex">
+                      {["1D", "5D", "1M", "3M", "YTD", "1Y"].map((range, index) => <span key={range} className={`flex-1 rounded-lg px-3 py-2 text-center text-[10px] font-black ${index === 0 ? "bg-orange-500/12 text-orange-200" : "text-zinc-500"}`}>{range}</span>)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">The Proof</p>
+                  <div className="mt-4 space-y-3">
+                    {liveHeroTarget && [
+                      [`${getRelativeVolume(liveHeroTarget)}x`, "Relative Volume", "Above normal activity", "text-green-300"],
+                      [getAttentionScore(liveHeroTarget), "Attention Score", "High market attention", "text-purple-300"],
+                      [getSignalQuality(liveHeroTarget), "Signal Quality", "Strong, high quality setup", "text-sky-300"],
+                      [getHTScore(liveHeroTarget), "HT Edge", "Proprietary conviction score", "text-orange-300"],
+                    ].map(([value, label, note, tone]) => (
+                      <div key={`mock-proof-${label}`} className="flex items-center gap-4 border-b border-white/10 pb-3 last:border-b-0 last:pb-0">
+                        <span className={`grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-black/30 font-mono text-xl font-black ${tone}`}>{value}</span>
+                        <div><p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{label}</p><p className="mt-1 text-sm font-medium text-zinc-300">{note}</p></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div id="why-ht-likes-this" className="rounded-2xl border border-cyan-300/12 bg-cyan-400/[0.035] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Why HT Likes This</p>
+                    <span className="rounded-full border border-cyan-300/15 bg-cyan-400/[0.08] px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100">No Duplicate Stats</span>
+                  </div>
+                  <h3 className="mt-3 text-2xl font-black leading-tight text-white">Reasoning layer.</h3>
+                  <div className="mt-4 space-y-2">
+                    {(liveHeroTarget ? [
+                      "Relative volume remains elevated.",
+                      "Participation continues building.",
+                      "Signal quality remains above threshold.",
+                      getTrapRiskScore(liveHeroTarget) < 45 ? "Trap probability remains low." : "Trap probability remains controlled.",
+                      "Momentum structure remains intact.",
+                    ] : ["Waiting for HT confirmation."]).map((reason) => (
+                      <div key={reason} className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/26 px-3 py-2.5">
+                        <span className="grid h-5 w-5 place-items-center rounded-full bg-green-500/18 text-[10px] font-black text-green-300">✓</span>
+                        <p className="text-sm font-black text-zinc-100">{reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 rounded-xl border border-orange-400/16 bg-orange-500/[0.045] p-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">HT Summary</p>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-zinc-200">{liveHeroTarget ? `HT sees ${getSimpleConvictionRead(liveHeroTarget).state.toLowerCase()} because participation, signal quality, and volume remain aligned while crowd saturation remains below warning levels.` : "HT summary activates once a top read is available."}</p>
+                  </div>
+                </div>
+              </div>
+
+              {emergingRadarCandidates.length > 0 && (
+                <div id="emerging-radar" className="rounded-2xl border border-cyan-300/12 bg-cyan-400/[0.025] p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div><p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-300">Emerging Radar</p><p className="mt-1 text-xs font-semibold leading-5 text-zinc-500">Early setups HT noticed before they earn Top Conviction. The OTLK protection layer.</p></div>
+                    <span className="rounded-full border border-cyan-300/15 bg-cyan-400/[0.06] px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.14em] text-cyan-100">Needs Review</span>
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-4">
+                    {emergingRadarCandidates.slice(0, 4).map(({ stock, engine, radarScore, status }) => (
+                      <div key={`mock-emerging-${stock.symbol}`} className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                        <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-xl font-black tracking-[-0.05em] text-white">{stock.symbol}</p><p className="mt-1 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-300">{status}</p></div><div className="text-right"><p className="font-mono text-xl font-black text-cyan-100">{radarScore}</p><p className="text-[8px] font-black uppercase tracking-[0.12em] text-zinc-600">Radar</p></div></div>
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-[9px] font-bold text-zinc-500"><p><span className="block text-zinc-700">Disc</span><span className="font-mono text-zinc-200">{engine.discoveryScore}</span></p><p><span className="block text-zinc-700">Accel</span><span className="font-mono text-zinc-200">{engine.accelerationScore}</span></p><p><span className="block text-zinc-700">Trap</span><span className="font-mono text-zinc-200">{engine.trapRisk}</span></p></div>
+                        <p className="mt-2 truncate text-[9px] font-black uppercase tracking-[0.1em] text-zinc-600">{engine.pattern} · {engine.opportunityWindow}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-center gap-3"><p className="text-sm font-black uppercase tracking-[0.16em] text-orange-300">Top 10 by HT Score</p><button onClick={() => setActiveMode("signals")} className="text-xs font-black uppercase tracking-[0.14em] text-sky-300 hover:text-sky-200">View full scanner →</button></div>
+                  <p className="text-xs font-bold text-zinc-500">Selective scan: HT surfaces the strongest reads, not every noisy mover.</p>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-10">
+                  {convictionLeaders.slice(0, 10).map((stock, index) => (
+                    <button key={stock.symbol} onClick={() => setSelectedStock(stock)} className={`rounded-xl border p-3 text-left transition ${liveHeroTarget?.symbol === stock.symbol ? "border-orange-400/60 bg-orange-500/10" : "border-white/10 bg-white/[0.025] hover:border-orange-400/30"}`}>
+                      <div className="flex items-start justify-between gap-2"><div><p className="text-[10px] font-black text-zinc-500">{index + 1}</p><p className="mt-1 text-sm font-black text-white">{stock.symbol}</p><p className="mt-1 font-mono text-xs text-zinc-500">${stock.price.toFixed(stock.price < 10 ? 2 : 2)}</p><p className={`mt-1 font-mono text-xs font-black ${stock.change >= 0 ? "text-green-300" : "text-red-300"}`}>{stock.change >= 0 ? "+" : ""}{stock.change.toFixed(2)}%</p></div><p className="font-mono text-xl font-black text-lime-300">{getHTScore(stock)}</p></div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+
+        <section id="capital-intelligence" className="mx-auto max-w-7xl px-5 pt-4 md:pt-5">
+          <motion.div
+            initial={{ opacity: 0, y: 28 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.05 }}
+            className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_12%_0%,rgba(255,106,0,0.16),transparent_30%),linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.018))] p-5 backdrop-blur-2xl md:p-6 ht-premium-card"
+          >
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(255,106,0,0.08),transparent_42%,rgba(255,255,255,0.025))]" />
+            <div className="relative grid gap-5 xl:grid-cols-[0.9fr_1.1fr] xl:items-stretch">
+              <div className="rounded-[1.5rem] border border-white/10 bg-black/35 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-orange-300">
+                      Capital Allocation
+                    </p>
+                    <h2 className="mt-2 text-3xl font-black tracking-[-0.05em] text-white md:text-4xl">
+                      Size the opportunity to the account.
+                    </h2>
+                  </div>
+                  <span className="rounded-full border border-green-400/20 bg-green-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-green-300">
+                    allocation
+                  </span>
+                </div>
+
+                <p className="mt-3 text-sm leading-6 text-zinc-400">
+                  Tell HT how much capital you are working with, your time horizon, and your risk level. HT turns the live market read into a smarter deployment plan instead of a random ticker pick.
+                </p>
+
+                <div className="mt-5 grid gap-4">
+                  <label className="block">
+                    <span className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Capital available</span>
+                    <div className="mt-2 flex items-center rounded-2xl border border-white/10 bg-black/45 px-4 py-3">
+                      <span className="font-mono text-xl font-black text-zinc-500">$</span>
+                      <input
+                        value={capitalInput}
+                        onChange={(event) => setCapitalInput(event.target.value)}
+                        inputMode="decimal"
+                        className="ml-2 w-full bg-transparent font-mono text-2xl font-black text-white outline-none placeholder:text-zinc-700"
+                        placeholder="500"
+                      />
+                    </div>
+                  </label>
+
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Style</p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      {[
+                        ["short", "Quick In / Out"],
+                        ["swing", "Swing"],
+                        ["long", "Long-Term"],
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          onClick={() => setAllocationStyle(value as AllocationStyle)}
+                          className={`rounded-2xl border px-4 py-3 text-xs font-black uppercase tracking-[0.12em] transition ${
+                            allocationStyle === value
+                              ? "border-orange-400/45 bg-orange-500/15 text-orange-200"
+                              : "border-white/10 bg-white/[0.03] text-zinc-500 hover:text-zinc-200"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Risk</p>
+                      <div className="mt-2 grid gap-2">
+                        {[
+                          ["conservative", "Conservative"],
+                          ["moderate", "Moderate"],
+                          ["aggressive", "Aggressive"],
+                        ].map(([value, label]) => (
+                          <button
+                            key={value}
+                            onClick={() => setAllocationRisk(value as AllocationRisk)}
+                            className={`rounded-2xl border px-4 py-3 text-left text-xs font-black uppercase tracking-[0.12em] transition ${
+                              allocationRisk === value
+                                ? "border-green-400/35 bg-green-500/10 text-green-200"
+                                : "border-white/10 bg-white/[0.03] text-zinc-500 hover:text-zinc-200"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Experience</p>
+                      <div className="mt-2 grid gap-2">
+                        {[
+                          ["beginner", "Beginner"],
+                          ["intermediate", "Intermediate"],
+                          ["advanced", "Advanced"],
+                        ].map(([value, label]) => (
+                          <button
+                            key={value}
+                            onClick={() => setExperienceLevel(value as ExperienceLevel)}
+                            className={`rounded-2xl border px-4 py-3 text-left text-xs font-black uppercase tracking-[0.12em] transition ${
+                              experienceLevel === value
+                                ? "border-orange-400/35 bg-orange-500/10 text-orange-200"
+                                : "border-white/10 bg-white/[0.03] text-zinc-500 hover:text-zinc-200"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-[1.5rem] border border-white/10 bg-black/30 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">Suggested Deployment</p>
+                    <div className="mt-2 flex flex-wrap items-end gap-3">
+                      <h3 className="font-mono text-4xl font-black tracking-[-0.06em] text-white md:text-5xl">
+                        {mounted ? capitalAvailable.toLocaleString() : capitalAvailable}
+                      </h3>
+                      <span className="mb-1 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-zinc-400">
+                        {riskProfileLabel} · {allocationProfileLabel} · {experienceLabel}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-orange-400/20 bg-orange-500/10 px-4 py-3 text-right">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-orange-300">Max single position</p>
+                    <p className="mt-1 font-mono text-2xl font-black text-white">{adaptiveAllocationPlan.maxSinglePct}%</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  {adaptiveAllocationPlan.items.map((item) => (
+                    <div key={`${item.label}-${item.symbol}`} className="rounded-[1.2rem] border border-white/10 bg-white/[0.035] p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">{item.label}</p>
+                          <p className="mt-1 text-2xl font-black tracking-[-0.04em] text-white">{item.symbol}</p>
+                        </div>
+                        <div className="text-right font-mono">
+                          <p className="text-xl font-black text-white">${mounted ? item.amount.toLocaleString() : item.amount}</p>
+                          <p className="text-xs font-black text-orange-300">{item.pct}%</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-green-400" style={{ width: `${Math.min(100, item.pct)}%` }} />
+                      </div>
+                      <p className="mt-3 text-xs font-black uppercase tracking-[0.12em] text-green-300">{item.state}</p>
+                      <p className="mt-1 text-xs leading-5 text-zinc-500">{item.note}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_0.9fr]">
+                  <div className="rounded-2xl border border-green-400/15 bg-green-500/[0.06] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-green-300">HT Read</p>
+                    <p className="mt-2 text-sm leading-6 text-zinc-300">{adaptiveAllocationPlan.summary}</p>
+                  </div>
+                  <div className="rounded-2xl border border-orange-400/15 bg-orange-500/[0.06] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-orange-300">Risk Guardrail</p>
+                    <p className="mt-2 text-sm leading-6 text-zinc-300">{adaptiveRiskMessage}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-[1.35rem] border border-orange-400/20 bg-[radial-gradient(circle_at_12%_0%,rgba(249,115,22,0.16),transparent_32%),rgba(0,0,0,0.35)] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.18em] text-orange-300">HT Exit Assist™</p>
+                      <h4 className="mt-1 text-xl font-black tracking-[-0.04em] text-white">Profit plan before the emotions hit.</h4>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">{profitProtectionPlan.headline}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-right">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">Protect zone</p>
+                      <p className="mt-1 text-sm font-black text-orange-200">{profitProtectionPlan.protectZone}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    {profitProtectionPlan.tiers.map((tier) => (
+                      <div key={tier.label} className="rounded-2xl border border-white/10 bg-black/35 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">{tier.label}</p>
+                        <p className="mt-2 font-mono text-2xl font-black tracking-[-0.04em] text-white">{tier.range}</p>
+                        <p className="mt-2 text-xs leading-5 text-zinc-500">{tier.action}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+                    <div className="rounded-2xl border border-green-400/15 bg-green-500/[0.06] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-green-300">Scaling style</p>
+                      <p className="mt-2 text-sm leading-6 text-zinc-300">{profitProtectionPlan.trimStyle}</p>
+                    </div>
+                    <div className="rounded-2xl border border-red-400/15 bg-red-500/[0.05] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-red-300">Invalidation rule</p>
+                      <p className="mt-2 text-sm leading-6 text-zinc-300">{profitProtectionPlan.stopRule}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="mt-4 text-[11px] leading-5 text-zinc-600">
+                  HT provides adaptive market intelligence and sizing logic, not financial advice. Execution still belongs to the user.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+        <section id="portfolio-intelligence" className="mx-auto max-w-7xl px-5 pt-4 md:pt-5">
+          <motion.div
+            initial={{ opacity: 0, y: 28 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.08 }}
+            className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_82%_0%,rgba(34,197,94,0.14),transparent_30%),linear-gradient(135deg,rgba(255,255,255,0.055),rgba(255,255,255,0.018))] p-5 backdrop-blur-2xl md:p-6 ht-premium-card"
+          >
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(34,197,94,0.07),transparent_45%,rgba(255,106,0,0.06))]" />
+            <div className="relative grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+              <div className="rounded-[1.5rem] border border-white/10 bg-black/35 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-green-300">
+                      HT Portfolio Intelligence™
+                    </p>
+                    <h2 className="mt-2 text-3xl font-black tracking-[-0.05em] text-white md:text-4xl">
+                      Manage the money already in motion.
+                    </h2>
+                  </div>
+                  <span className="rounded-full border border-orange-400/20 bg-orange-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-orange-300">
+                    manual portfolio v1
+                  </span>
+                </div>
+
+                <p className="mt-3 text-sm leading-6 text-zinc-400">
+                  Add your holdings and cash. HT checks concentration, momentum exposure, cash flexibility, and which position deserves attention first.
+                </p>
+
+                <div className="mt-5 rounded-2xl border border-white/10 bg-black/40 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Holdings</p>
+                    <button
+                      onClick={addPortfolioHolding}
+                      className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-zinc-300 transition hover:border-orange-400/30 hover:text-orange-200"
+                    >
+                      Add ticker
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid gap-2">
+                    {portfolioHoldings.map((holding) => (
+                      <div key={holding.id} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                        <input
+                          value={holding.symbol}
+                          onChange={(event) => updatePortfolioHolding(holding.id, "symbol", event.target.value)}
+                          placeholder="Ticker"
+                          className="rounded-xl border border-white/10 bg-black/55 px-3 py-2 font-mono text-sm font-black uppercase text-white outline-none placeholder:text-zinc-700"
+                        />
+                        <div className="flex items-center rounded-xl border border-white/10 bg-black/55 px-3 py-2">
+                          <span className="font-mono text-sm font-black text-zinc-600">$</span>
+                          <input
+                            value={holding.amount}
+                            onChange={(event) => updatePortfolioHolding(holding.id, "amount", event.target.value)}
+                            inputMode="decimal"
+                            placeholder="Amount"
+                            className="ml-1 w-full bg-transparent font-mono text-sm font-black text-white outline-none placeholder:text-zinc-700"
+                          />
+                        </div>
+                        <button
+                          onClick={() => removePortfolioHolding(holding.id)}
+                          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 text-xs font-black text-zinc-500 transition hover:border-red-400/30 hover:text-red-300"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <label className="mt-4 block">
+                    <span className="text-xs font-black uppercase tracking-[0.16em] text-zinc-500">Cash reserve</span>
+                    <div className="mt-2 flex items-center rounded-2xl border border-white/10 bg-black/55 px-4 py-3">
+                      <span className="font-mono text-lg font-black text-zinc-600">$</span>
+                      <input
+                        value={cashInput}
+                        onChange={(event) => setCashInput(event.target.value)}
+                        inputMode="decimal"
+                        className="ml-2 w-full bg-transparent font-mono text-xl font-black text-white outline-none placeholder:text-zinc-700"
+                        placeholder="180"
+                      />
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-[1.5rem] border border-white/10 bg-black/30 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-zinc-500">Portfolio Read</p>
+                    <div className="mt-2 flex flex-wrap items-end gap-3">
+                      <h3 className="font-mono text-4xl font-black tracking-[-0.06em] text-white md:text-5xl">
+                        {mounted ? portfolioIntelligence.total.toLocaleString() : portfolioIntelligence.total}
+                      </h3>
+                      <span className="mb-1 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-zinc-400">
+                        {portfolioIntelligence.riskLevel} Risk · {portfolioIntelligence.cashHealth} Cash
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-green-400/20 bg-green-500/10 px-4 py-3 text-right">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-green-300">Cash flexibility</p>
+                    <p className="mt-1 font-mono text-2xl font-black text-white">{portfolioIntelligence.cashPct}%</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["Invested", mounted ? `$${portfolioIntelligence.invested.toLocaleString()}` : `$${portfolioIntelligence.invested}`, "market exposure"],
+                    ["Momentum Exposure", `${portfolioIntelligence.momentumPct}%`, "fast names"],
+                    ["Concentration", `${portfolioIntelligence.concentrationPct}%`, portfolioIntelligence.largestHolding?.symbol || "largest holding"],
+                  ].map(([label, value, note]) => (
+                    <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">{label}</p>
+                      <p className="mt-2 font-mono text-2xl font-black text-white">{value}</p>
+                      <p className="mt-1 text-xs font-bold text-zinc-500">{note}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-orange-400/15 bg-orange-500/[0.06] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-orange-300">Strongest Position</p>
+                    <p className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">
+                      {portfolioIntelligence.strongest?.symbol || "--"}
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-zinc-400">
+                      {portfolioIntelligence.strongest
+                        ? `${portfolioIntelligence.strongest.htScore}/99 HT Score · ${portfolioIntelligence.strongest.phase}`
+                        : "Add holdings to let HT rank the portfolio."}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-red-400/15 bg-red-500/[0.055] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-red-300">First Review / Trim Candidate</p>
+                    <p className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">
+                      {portfolioIntelligence.weakest?.symbol || "--"}
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-zinc-400">
+                      {portfolioIntelligence.weakest
+                        ? `${portfolioIntelligence.weakest.htScore}/99 HT Score · review if capital needs freeing.`
+                        : "No weak position detected yet."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_0.9fr]">
+                  <div className="rounded-2xl border border-green-400/15 bg-green-500/[0.06] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-green-300">Suggested Rebalance</p>
+                    <p className="mt-2 text-sm leading-6 text-zinc-300">{portfolioIntelligence.rebalance}</p>
+                  </div>
+                  <div className="rounded-2xl border border-orange-400/15 bg-orange-500/[0.06] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-orange-300">Emotional Risk Warning</p>
+                    <p className="mt-2 text-sm leading-6 text-zinc-300">{portfolioIntelligence.warning}</p>
+                  </div>
+                </div>
+
+                <p className="mt-4 text-[11px] leading-5 text-zinc-600">
+                  Portfolio Intelligence is a planning layer. HT can help detect risk, exposure, and sizing pressure, but it is not a licensed financial advisor.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+
+        <section id="watchtower" className="mx-auto max-w-7xl px-5 pt-8">
+          <motion.div
+            initial={{ opacity: 0, y: 28 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7 }}
+            className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_15%_0%,rgba(255,106,0,0.16),transparent_32%),linear-gradient(135deg,rgba(255,255,255,0.055),rgba(255,255,255,0.018))] p-5 backdrop-blur-2xl md:p-6 ht-premium-card"
+          >
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(255,106,0,0.09),transparent_44%,rgba(255,255,255,0.025))]" />
+            <div className="relative space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.26em] text-orange-300">
+                    HT Watchtower™
+                  </p>
+                  <h2 className="mt-2 text-3xl font-black tracking-[-0.05em] text-white md:text-4xl">
+                    Smart alerts that tell you what changed.
+                  </h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+                    Watchtower turns HT signals, rotation, portfolio risk, and crowd behavior into contextual alerts instead of dumb price pings.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-green-400/20 bg-green-500/10 px-4 py-3 text-right">
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-green-300">Active Alerts</p>
+                  <p className="mt-1 font-mono text-3xl font-black text-white">{watchtowerAlerts.length}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-5">
+                {watchtowerAlerts.map((alert) => {
+                  const toneClass =
+                    alert.tone === "green"
+                      ? "border-green-400/20 bg-green-500/[0.07] text-green-300"
+                      : alert.tone === "red"
+                        ? "border-red-400/20 bg-red-500/[0.07] text-red-300"
+                        : alert.tone === "orange"
+                          ? "border-orange-400/20 bg-orange-500/[0.08] text-orange-300"
+                          : "border-white/10 bg-white/[0.035] text-zinc-300";
+
+                  return (
+                    <div key={`${alert.severity}-${alert.symbol}`} className={`rounded-[1.35rem] border p-4 ${toneClass}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="rounded-full border border-white/10 bg-black/35 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-current">
+                          {alert.severity}
+                        </span>
+                        <span className="font-mono text-sm font-black text-white">{alert.symbol}</span>
+                      </div>
+                      <h3 className="mt-3 text-lg font-black tracking-[-0.03em] text-white">{alert.title}</h3>
+                      <p className="mt-2 text-xs leading-5 text-zinc-400">{alert.message}</p>
+                      <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 p-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">HT Action</p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-300">{alert.action}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Primary Watch</p>
+                  <p className="mt-2 text-2xl font-black text-white">{liveHeroTarget?.symbol || "--"}</p>
+                  <p className="mt-1 text-xs text-zinc-500">{liveHeroTarget ? getSignalEvolutionState(liveHeroTarget) : "Scanning"}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Rotation Watch</p>
+                  <p className="mt-2 text-2xl font-black text-white">{emergingNextSetup?.symbol || "None"}</p>
+                  <p className="mt-1 text-xs text-zinc-500">{emergingNextSetup ? getEmergingRead(emergingNextSetup) : "No forced secondary setup."}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Personalized Risk</p>
+                  <p className="mt-2 text-2xl font-black text-white">{riskProfileLabel}</p>
+                  <p className="mt-1 text-xs text-zinc-500">Alerts adapt to capital, style, risk, and portfolio exposure.</p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
         <section
           id="home"
-          className="mx-auto grid max-w-7xl gap-14 px-5 py-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:py-16"
+          className="hidden"
         >
           <motion.div
             initial={{ opacity: 0, y: 35 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8 }}
           >
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-orange-500/25 bg-orange-500/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-orange-400">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-orange-500/25 bg-orange-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-orange-400">
               <span className="h-2 w-2 rounded-full bg-orange-500 shadow-[0_0_18px_rgba(255,106,0,0.9)]" />
-              AI-Powered Stock Scanner
+              Attention Spike-Trader Operating System
             </div>
 
-            <h1 className="max-w-3xl text-4xl font-black leading-[0.95] tracking-tight sm:text-5xl md:text-6xl xl:text-7xl">
-              AI That Spots{" "}
+            <h1 className="max-w-3xl text-4xl font-black leading-[0.95] tracking-tight sm:text-5xl lg:text-6xl">
+              HT Labs Reads{" "}
               <span className="bg-gradient-to-r from-orange-400 via-orange-500 to-orange-700 bg-clip-text text-transparent">
-                Momentum
+                Attention Spike
               </span>{" "}
-              Before The Crowd.
+              Before The Crowd Moves.
             </h1>
 
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-400">
-              Real-time market scanning, live momentum rankings, personal
-              watchlists, and AI-powered setup analysis built for traders
-              hunting momentum before the crowd reacts. V26 turns the page into a
-              cleaner command center: one priority target, stronger confirmation
-              logic, sharper risk language, and a premium dashboard flow.
+            <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-400">
+              HT Labs compresses attention pressure, crowd rotation, signal quality, and trader psychology into one living operating system. Check the Top Conviction first, then use the scanner as support — not noise.
             </p>
 
-            <div className="mt-8 flex flex-col gap-4 sm:flex-row">
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
               <motion.button
                 onClick={() =>
                   document
-                    .getElementById("scanner")
+                    .getElementById("conviction-engine")
                     ?.scrollIntoView({ behavior: "smooth" })
                 }
-                className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-7 py-4 text-sm font-black text-white shadow-[0_0_35px_rgba(255,106,0,0.35)] transition"
+                className="rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white shadow-[0_0_30px_rgba(255,106,0,0.30)] transition"
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
               >
-                Run AI Scan →
+                Check Attention Spike →
               </motion.button>
 
               <motion.button
@@ -1509,19 +8394,19 @@ export default function Home() {
                     .getElementById("watchlist")
                     ?.scrollIntoView({ behavior: "smooth" })
                 }
-                className="rounded-2xl border border-orange-500/30 bg-white/[0.03] px-7 py-4 text-sm font-black text-white transition hover:border-orange-400 hover:bg-orange-500/10"
+                className="rounded-xl border border-orange-500/30 bg-white/[0.03] px-5 py-3 text-sm font-black text-white transition hover:border-orange-400 hover:bg-orange-500/10"
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
               >
-                View Watchlist
+                Build My Terminal
               </motion.button>
             </div>
 
-            <div className="mt-9 grid gap-4 sm:grid-cols-3">
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
               {[
-                ["⚡", "Real-Time Data", "Live market updates"],
-                ["🧠", "AI-Powered", "Smarter analysis"],
-                ["🎯", "Momentum Edge", "Ranked by strongest moves."],
+                ["⚡", "Live Pressure", "Attention flow updating"],
+                ["🧠", "AI War Room", "Crowd psychology reads"],
+                ["🎯", "Attention Spike Edge", "One focus before the noise."],
               ].map((item, index) => (
                 <motion.div
                   key={item[1]}
@@ -1530,7 +8415,7 @@ export default function Home() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.45, delay: 0.25 + index * 0.12 }}
                 >
-                  <div className="rounded-2xl bg-orange-500/10 p-3 text-xl text-orange-400">
+                  <div className="rounded-xl bg-orange-500/10 p-2.5 text-lg text-orange-400">
                     {item[0]}
                   </div>
                   <div>
@@ -1541,13 +8426,13 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="mt-7 grid gap-3 sm:grid-cols-3">
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
               {marketBadges.map((badge) => (
                 <div
                   key={badge.symbol}
-                  className="rounded-2xl border border-white/10 bg-black/35 p-4"
+                  className="rounded-xl border border-white/10 bg-black/35 p-3"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-start">
                     <p className="font-black">{badge.symbol}</p>
                     <p
                       className={`text-sm font-black ${
@@ -1568,41 +8453,41 @@ export default function Home() {
             initial={{ opacity: 0, y: 35, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.8, delay: 0.15 }}
-            className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 shadow-[0_0_70px_rgba(255,106,0,0.12)] backdrop-blur-xl"
+            className="rounded-[1.5rem] border border-orange-500/15 bg-zinc-950/65 p-4 shadow-[0_0_45px_rgba(255,106,0,0.10)] backdrop-blur-xl ht-compact-shell"
           >
-            <div className="mb-5 flex items-center justify-between">
+            <div className="mb-4 flex items-center justify-start">
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl border border-orange-500/20 bg-black p-2">
                   <img src="/logo.png" alt="HT Labs" className="h-10 w-auto" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black">Market Overview</h2>
+                  <h2 className="text-xl font-black">HT Command Snapshot</h2>
                   <p className="text-sm text-zinc-500">
-                    Real-time market insights and scanner overview.
+                    The quick-read layer for market pressure, rotation, and live signal context.
                   </p>
                 </div>
               </div>
 
               <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-xs font-black text-orange-400">
-                {isRefreshing ? "SCANNING" : "LIVE"}
+                {!mounted || isRefreshing ? "SCANNING" : "LIVE"}
               </div>
             </div>
 
-            <div className="mb-5 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-black/35 p-4">
+            <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-black/35 p-3">
                 <p className="text-xs text-zinc-500">Market Pulse</p>
                 <p className="mt-2 text-2xl font-black">{marketPulse}</p>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-black/35 p-4">
+              <div className="rounded-xl border border-white/10 bg-black/35 p-3">
                 <p className="text-xs text-zinc-500">Bullish / Bearish</p>
                 <p className="mt-2 text-2xl font-black">
                   {bullishCount}/{bearishCount}
                 </p>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-black/35 p-4">
+              <div className="rounded-xl border border-white/10 bg-black/35 p-3">
                 <p className="text-xs text-zinc-500">Last Updated</p>
                 <p className="mt-2 text-lg font-black">
-                  {lastUpdated ? lastUpdated.toLocaleTimeString() : "--"}
+                  {mounted && lastUpdated ? lastUpdated.toLocaleTimeString() : "--"}
                 </p>
               </div>
             </div>
@@ -1610,7 +8495,7 @@ export default function Home() {
             <div className="grid gap-3 sm:grid-cols-4">
               {[
                 ["Total Scanned", stocks.length || 0, "+ Live"],
-                ["High Momentum", hotStocks.length || 0, "±4% movers"],
+                ["High Attention Spike", hotStocks.length || 0, "±4% movers"],
                 ["Watchlist Hits", watchlist.length || 0, "saved"],
                 [
                   "Top Mover",
@@ -1636,15 +8521,15 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="mt-5 rounded-3xl border border-white/10 bg-black/45 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <p className="font-black">AI Setup Score</p>
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/45 p-4">
+              <div className="mb-4 flex items-center justify-start">
+                <p className="font-black">Pressure Quality</p>
                 <span className="rounded-lg border border-orange-500/20 px-2 py-1 text-xs text-orange-400">
                   1D
                 </span>
               </div>
 
-              <div className="flex h-40 items-end gap-2 rounded-2xl bg-gradient-to-t from-orange-500/10 to-transparent p-3">
+              <div className="flex h-28 items-end gap-2 rounded-xl bg-gradient-to-t from-orange-500/10 to-transparent p-3">
                 {[28, 34, 48, 42, 64, 55, 72, 46, 52, 68, 61, 84].map(
                   (height, index) => (
                     <motion.div
@@ -1654,14 +8539,14 @@ export default function Home() {
                       animate={{ height: `${height}%` }}
                       transition={{ duration: 0.7, delay: 0.25 + index * 0.04 }}
                     />
-                  )
+                  ),
                 )}
               </div>
             </div>
 
-            <div className="mt-5 rounded-3xl border border-white/10 bg-black/45 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <p className="font-black">Top Momentum Picks</p>
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/45 p-4">
+              <div className="mb-4 flex items-center justify-start">
+                <p className="font-black">Top Attention Spike Picks</p>
                 <button
                   onClick={() =>
                     document
@@ -1670,15 +8555,15 @@ export default function Home() {
                   }
                   className="text-xs font-black text-orange-400"
                 >
-                  Full Scanner →
+                  Open Scanner →
                 </button>
               </div>
 
               <div className="space-y-3">
-                {stocks.slice(0, 5).map((stock, index) => (
+                {htScoreLeaders.slice(0, 5).map((stock, index) => (
                   <motion.div
                     key={stock.symbol}
-                    className="grid grid-cols-[32px_1fr_90px_80px] items-center gap-3 rounded-2xl bg-white/[0.03] px-3 py-3 text-sm"
+                    className="grid grid-cols-[28px_1fr_82px_72px] items-center gap-2 rounded-xl bg-white/[0.03] px-3 py-2.5 text-sm"
                     initial={{ opacity: 0, x: 16 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.35, delay: index * 0.05 }}
@@ -1699,9 +8584,9 @@ export default function Home() {
                   </motion.div>
                 ))}
 
-                {stocks.length === 0 && (
+                {htScoreLeaders.length === 0 && (
                   <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-5 text-sm text-zinc-500">
-                    Scanner warming up. Quotes will populate automatically.
+                    HT score engine warming up. Pressure reads will populate automatically.
                   </div>
                 )}
               </div>
@@ -1709,150 +8594,942 @@ export default function Home() {
           </motion.div>
         </section>
 
+        <section id="daily-brief" className="mx-auto max-w-7xl px-5 py-4">
+          <div className="grid gap-3 rounded-[1.75rem] border border-white/[0.07] bg-black/20 p-4 backdrop-blur-xl md:grid-cols-4">
+            {[
+              ["Market Mood", dailyBriefing.mood],
+              ["First Watch", dailyBriefing.attentionSymbol],
+              [
+                "Risk Read",
+                hotStocks.length ? "Attention Spike active" : "Wait for confirmation",
+              ],
+              ["Workflow", getOnboardingStatus()],
+            ].map((item) => (
+              <div
+                key={item[0]}
+                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+              >
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                  {item[0]}
+                </p>
+                <p className="mt-2 text-lg font-black text-white">{item[1]}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
-        <section id="command-center" className="mx-auto max-w-7xl px-5 py-8">
+        <section id="premium-terminal" className="mx-auto max-w-7xl px-5 py-5">
           <motion.div
-            className="overflow-hidden rounded-[2rem] border border-orange-500/25 bg-zinc-950/85 shadow-[0_0_90px_rgba(255,106,0,0.14)] backdrop-blur-xl"
-            initial={{ opacity: 0, y: 25 }}
+            className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[radial-gradient(circle_at_20%_15%,rgba(255,106,0,0.18),transparent_28%),radial-gradient(circle_at_80%_20%,rgba(34,197,94,0.10),transparent_24%),linear-gradient(135deg,rgba(255,255,255,0.045),rgba(0,0,0,0.82)_42%,rgba(0,0,0,0.96))] p-4 shadow-[0_0_80px_rgba(255,106,0,0.10)] backdrop-blur-2xl md:p-5 ht-compact-shell"
+            initial={{ opacity: 0, y: 24 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55 }}
             viewport={{ once: true }}
           >
-            <div className="border-b border-white/10 bg-gradient-to-r from-orange-500/10 via-white/[0.03] to-transparent p-5">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">
-                    V26 Command Center
-                  </p>
-                  <h3 className="mt-2 text-4xl font-black tracking-tight md:text-5xl">
-                    One Screen. One Priority. Cleaner Decisions.
-                  </h3>
-                  <p className="mt-3 max-w-3xl text-sm font-bold leading-6 text-zinc-400">
-                    V26 compresses the scanner into a tighter trader workflow: market mood, priority target, confirmation stack, and risk rule before the user starts clicking random tickers.
-                  </p>
-                </div>
+            <div className="pointer-events-none absolute right-[-120px] top-[-140px] h-80 w-80 rounded-full bg-orange-500/15 blur-3xl" />
+            <div className="relative grid gap-4 xl:grid-cols-[0.95fr_1.05fr] xl:items-start">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.32em] text-orange-300">
+                  HT Command Center
+                </p>
+                <h3 className="mt-2 max-w-3xl text-3xl font-black leading-none tracking-tight md:text-5xl">
+                  One clear read. No dashboard noise.
+                </h3>
+                <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-zinc-400">
+                  HT Labs now behaves like a momentum-trader operating system: one Top Conviction, one rotation map, one noise filter, and one live signal integrity read built to be checked all day.
+                </p>
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:w-[520px]">
-                  <div className="rounded-2xl border border-white/10 bg-black/45 p-4">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">Readiness</p>
-                    <p className="mt-2 text-3xl font-black text-orange-300">{v26ReadinessScore}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/45 p-4">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">Status</p>
-                    <p className="mt-2 text-sm font-black text-green-300">{v26CommandStatus}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/45 p-4">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">Mode</p>
-                    <p className="mt-2 text-sm font-black text-white">{traderMode}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/45 p-4">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">Pulse</p>
-                    <p className="mt-2 text-sm font-black text-white">{marketPulse}</p>
-                  </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {premiumCommandMetrics.map((metric) => (
+                    <div key={metric[0]} className="rounded-xl border border-white/10 bg-black/35 p-3">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">{metric[0]}</p>
+                      <p className="mt-2 text-3xl font-black text-white">{metric[1]}</p>
+                      <p className="mt-1 text-xs font-bold text-orange-200">{metric[2]}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
 
-            <div className="grid gap-4 p-5 xl:grid-cols-[1.05fr_0.95fr]">
-              <div className="rounded-[1.75rem] border border-orange-500/25 bg-orange-500/5 p-5">
-                <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+              <div className="rounded-[1.5rem] border border-orange-500/20 bg-black/45 p-5 shadow-[inset_0_0_45px_rgba(255,106,0,0.06)] ht-compact-shell">
+                <div className="mb-4 flex items-center justify-start gap-3">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.25em] text-orange-400">Primary Target</p>
-                    <h4 className="mt-2 text-7xl font-black tracking-tight text-white">
-                      {priorityTarget?.symbol || "--"}
-                    </h4>
-                    <p className="mt-3 max-w-2xl text-sm font-bold leading-6 text-zinc-300">
-                      {priorityTarget ? getConvictionReason(priorityTarget) : "Waiting for a clean priority target."}
-                    </p>
+                    <p className="text-xs font-black uppercase tracking-[0.26em] text-zinc-500">Signal Strength</p>
+                    <p className="mt-1 text-xl font-black text-white">Operating focus stack</p>
                   </div>
-
-                  <div className="min-w-[230px] rounded-3xl border border-white/10 bg-black/45 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Decision</p>
-                    <p className="mt-2 text-2xl font-black text-green-300">
-                      {priorityTarget ? getDecisionClarity(priorityTarget) : "Standby"}
-                    </p>
-                    <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-orange-700 via-orange-500 to-green-400"
-                        style={{ width: `${Math.min(100, Math.max(8, v26ReadinessScore))}%` }}
-                      />
-                    </div>
-                    <p className="mt-3 text-xs font-bold leading-5 text-zinc-400">
-                      Command center confidence blends conviction, attention, and signal quality.
-                    </p>
-                  </div>
+                  <span className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs font-black text-green-300">
+                    LIVE
+                  </span>
                 </div>
 
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  {[
-                    ["Conviction", priorityTarget ? getConvictionScore(priorityTarget) : "--"],
-                    ["Attention", priorityTarget ? getAttentionScore(priorityTarget) : "--"],
-                    ["Signal Quality", priorityTarget ? getSignalQuality(priorityTarget) : "--"],
-                  ].map((item) => (
-                    <div key={item[0]} className="rounded-2xl border border-white/10 bg-black/40 p-4">
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">{item[0]}</p>
-                      <p className="mt-2 text-3xl font-black text-white">{item[1]}</p>
+                <div className="space-y-3">
+                  {premiumSignalBars.map(([label, value]) => (
+                    <div key={label}>
+                      <div className="mb-2 flex items-center justify-start text-xs font-black uppercase tracking-[0.18em]">
+                        <span className="text-zinc-500">{label}</span>
+                        <span className="text-white">{value}/99</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-gradient-to-r from-orange-600 via-orange-400 to-green-300" style={{ width: `${Math.min(99, Number(value))}%` }} />
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="mt-5 rounded-2xl border border-red-500/15 bg-red-500/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-red-300">Risk Rule</p>
-                  <p className="mt-2 text-sm font-black leading-6 text-white">{v26RiskRule}</p>
+                <div className="mt-5 grid gap-3">
+                  {premiumFocusStack.map((item) => (
+                    <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-300">{item.label}</p>
+                      <p className="mt-2 text-sm font-black text-white">{item.title}</p>
+                      <p className="mt-1 text-xs font-semibold leading-5 text-zinc-500">{item.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+
+
+        <section id="interactive-intelligence" className="mx-auto max-w-7xl px-5 py-5">
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.55 }}
+            className="rounded-[34px] border border-white/10 bg-white/[0.025] p-6 md:p-5 ht-compact-shell"
+          >
+            <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-start">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-orange-300/70">
+                  Interactive Intelligence
+                </p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-white md:text-4xl">
+                  Hover the read. Expand the reasoning.
+                </h2>
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-zinc-400">
+                  HT now explains why a state matters, what changed, and what would invalidate the read — without dumping more noise on the screen.
+                </p>
+              </div>
+
+              <div className="rounded-full border border-green-400/20 bg-green-500/10 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-green-300">
+                live behavior layer
+              </div>
+            </div>
+
+            <div className="grid gap-4 2xl:grid-cols-[1.05fr_0.95fr]">
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {interactiveInsightCards.map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      onMouseEnter={() => setHoveredInsight(card.id)}
+                      onMouseLeave={() => setHoveredInsight(null)}
+                      onClick={() =>
+                        setExpandedInsight((current) =>
+                          current === card.id ? null : card.id,
+                        )
+                      }
+                      className={`group rounded-2xl border p-5 text-left transition ${
+                        expandedInsight === card.id || hoveredInsight === card.id
+                          ? "border-orange-300/40 bg-orange-500/10"
+                          : "border-white/10 bg-white/[0.025] hover:border-orange-300/25 hover:bg-white/[0.045]"
+                      }`}
+                    >
+                      <div className="flex items-start justify-start gap-4">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
+                            {card.label}
+                          </p>
+                          <p className="mt-2 text-2xl font-black text-white">
+                            {card.value}
+                          </p>
+                        </div>
+
+                        <motion.span
+                          className="mt-1 h-2.5 w-2.5 rounded-full bg-orange-300"
+                          animate={{
+                            scale:
+                              expandedInsight === card.id || hoveredInsight === card.id
+                                ? [1, 1.35, 1]
+                                : 1,
+                            opacity:
+                              expandedInsight === card.id || hoveredInsight === card.id
+                                ? [0.55, 1, 0.55]
+                                : 0.45,
+                          }}
+                          transition={{
+                            duration: 1.6,
+                            repeat:
+                              expandedInsight === card.id || hoveredInsight === card.id
+                                ? Infinity
+                                : 0,
+                            ease: "easeInOut",
+                          }}
+                        />
+                      </div>
+
+                      <p className="mt-4 text-sm leading-6 text-zinc-400 group-hover:text-zinc-200">
+                        {expandedInsight === card.id || hoveredInsight === card.id
+                          ? card.note
+                          : "Hover or tap to reveal HT reasoning."}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-orange-400/15 bg-orange-500/[0.06] p-5">
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-300/70">
+                    Expanded Desk Read
+                  </p>
+                  <p className="mt-3 text-sm leading-7 text-zinc-300">
+                    {
+                      interactiveInsightCards.find(
+                        (card) => card.id === expandedInsight,
+                      )?.note || getInteractiveReasoning("why", convictionEngineTarget)
+                    }
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
+                <div className="mb-4 flex items-center justify-start">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">
+                      Live Status Shifts
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-400">
+                      Small changes that make the terminal feel aware.
+                    </p>
+                  </div>
+
+                  <p className="text-xs font-bold text-zinc-500">
+                    {mounted ? `updated ${8 + (terminalPulse % 11)}s ago` : "updating..."}
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  {liveStatusShifts.map((shift, index) => (
+                    <motion.div
+                      key={shift.label}
+                      whileHover={{ x: 4 }}
+                      className="rounded-2xl border border-white/10 bg-white/[0.025] p-4"
+                    >
+                      <div className="flex items-center justify-start gap-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                          {shift.label}
+                        </p>
+                        <p className="text-sm font-black uppercase tracking-[0.16em] text-orange-300">
+                          {shift.value}
+                        </p>
+                      </div>
+
+                      <p className="mt-2 text-sm leading-6 text-zinc-400">
+                        {shift.detail}
+                      </p>
+
+                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/5">
+                        <motion.div
+                          className="h-full rounded-full bg-gradient-to-r from-orange-500 to-green-400"
+                          animate={{
+                            width: [`${38 + index * 11}%`, `${62 + index * 8}%`, `${38 + index * 11}%`],
+                          }}
+                          transition={{
+                            duration: 4 + index * 0.45,
+                            repeat: Infinity,
+                            ease: "easeInOut",
+                          }}
+                        />
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+        <section id="living-intelligence" className="mx-auto max-w-7xl px-5 py-5">
+          <motion.div
+            className="relative rounded-[2rem] border border-orange-500/20 bg-[radial-gradient(circle_at_18%_18%,rgba(255,106,0,0.20),transparent_28%),radial-gradient(circle_at_78%_38%,rgba(34,197,94,0.10),transparent_26%),linear-gradient(135deg,rgba(255,255,255,0.04),rgba(0,0,0,0.86)_46%,rgba(0,0,0,0.98))] p-5 shadow-[0_0_110px_rgba(255,106,0,0.13)] backdrop-blur-2xl md:p-6 ht-compact-shell"
+            initial={{ opacity: 0, y: 26 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            viewport={{ once: true }}
+          >
+            <motion.div
+              className="pointer-events-none absolute right-[-140px] top-[-140px] h-96 w-96 rounded-full bg-orange-500/15 blur-3xl"
+              animate={{ scale: [1, 1.12, 1], opacity: [0.55, 0.9, 0.55] }}
+              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+            />
+            <motion.div
+              className="pointer-events-none absolute bottom-[-160px] left-[-120px] h-80 w-80 rounded-full bg-green-500/10 blur-3xl"
+              animate={{ scale: [1.05, 0.92, 1.05], opacity: [0.35, 0.75, 0.35] }}
+              transition={{ duration: 6.5, repeat: Infinity, ease: "easeInOut" }}
+            />
+
+            <div className="relative grid gap-6 2xl:grid-cols-[1.05fr_0.95fr] 2xl:items-start">
+              <div className="rounded-[1.5rem] border border-white/10 bg-black/35 p-5 shadow-[inset_0_0_45px_rgba(255,106,0,0.05)] ht-compact-shell">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-start">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.32em] text-orange-300">
+                      Live Market Intelligence
+                    </p>
+                    <h3 className="mt-2 text-4xl font-black leading-none tracking-tight md:text-6xl">
+                      The market breathes through Attention Spike.
+                    </h3>
+                    <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-zinc-400">
+                      HT Labs reads the tape as a living pressure system: the directive changes mood, the desk remembers previous pressure, and the pressure map shows where attention is concentrating before the crowd fully understands it.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-orange-400/25 bg-orange-500/10 px-4 py-3 text-right">
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-300">Atmosphere</p>
+                    <p className="mt-1 text-lg font-black text-white">{getPriorityFlowMode()}</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-[1.6rem] border border-orange-500/15 bg-black/40 p-5">
+                  <div className="mb-4 flex items-center justify-start gap-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.26em] text-zinc-500">Current desk state</p>
+                      <p className="mt-1 text-xl font-black text-white">{activeDeskPulse?.state || "Scanning"}</p>
+                    </div>
+                    <span className="rounded-full border border-green-500/25 bg-green-500/10 px-3 py-2 text-xs font-black text-green-300">
+                      BREATHING LIVE
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold leading-6 text-zinc-300">{getPriorityFlowAtmosphere()}</p>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {livingPressureMap.map((zone) => (
+                      <motion.div
+                        key={zone.zone}
+                        className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                        whileHover={{ y: -2 }}
+                      >
+                        <div className="flex items-start justify-start gap-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">{zone.zone}</p>
+                            <p className="mt-2 text-2xl font-black text-white">{zone.label}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-2xl font-black text-orange-300">{zone.score || "--"}</p>
+                            <p className="text-[8px] font-black uppercase tracking-[0.15em] text-zinc-600">HT Pressure</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                          <motion.div
+                            className="h-full rounded-full bg-gradient-to-r from-orange-600 via-orange-400 to-green-300"
+                            initial={{ width: "8%" }}
+                            whileInView={{ width: `${Math.min(99, Number(zone.score || 0))}%` }}
+                            transition={{ duration: 0.8 }}
+                            viewport={{ once: true }}
+                          />
+                        </div>
+                        <p className="mt-3 text-xs font-black uppercase tracking-[0.18em] text-orange-200">{zone.state}</p>
+                        <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500">{zone.note}</p>
+                      </motion.div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
               <div className="grid gap-4">
-                <div className="rounded-[1.75rem] border border-white/10 bg-black/35 p-5">
-                  <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-[1.5rem] border border-green-500/15 bg-black/45 p-5 ht-compact-shell">
+                  <div className="mb-4 flex items-center justify-start">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">Top 3 Routing</p>
-                      <h4 className="mt-1 text-2xl font-black">Priority Stack</h4>
+                      <p className="text-xs font-black uppercase tracking-[0.26em] text-green-300">AI Desk Memory</p>
+                      <p className="mt-1 text-xl font-black text-white">Continuity, not random commentary.</p>
                     </div>
-                    <span className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs font-black text-green-300">LIVE</span>
+                    <span className="h-3 w-3 animate-pulse rounded-full bg-green-400 shadow-[0_0_18px_rgba(74,222,128,0.9)]" />
                   </div>
-
                   <div className="space-y-3">
-                    {commandCenterLeaders.map((stock, index) => (
-                      <button
-                        key={`command-${stock.symbol}`}
-                        onClick={() => openAiModal(stock)}
-                        className="w-full rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-left transition hover:border-orange-500/40 hover:bg-orange-500/10"
+                    {aiDeskMemory.map((line, index) => (
+                      <motion.div
+                        key={line}
+                        className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                        initial={{ opacity: 0, x: 12 }}
+                        whileInView={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.35, delay: index * 0.08 }}
+                        viewport={{ once: true }}
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10 text-sm font-black text-orange-300">
-                              #{index + 1}
-                            </span>
-                            <div>
-                              <p className="text-lg font-black text-white">{stock.symbol}</p>
-                              <p className="text-xs font-bold text-zinc-500">{getConvictionLabel(stock)}</p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className={`text-sm font-black ${stock.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-                              {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(2)}%
-                            </p>
-                            <p className="text-xs text-zinc-500">Score {getConvictionScore(stock)}</p>
-                          </div>
-                        </div>
-                      </button>
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Memory {index + 1}</p>
+                        <p className="mt-2 text-sm font-semibold leading-6 text-zinc-300">{line}</p>
+                      </motion.div>
                     ))}
                   </div>
                 </div>
 
-                <div className="rounded-[1.75rem] border border-white/10 bg-black/35 p-5">
-                  <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">V26 Product Polish</p>
+                <div className="rounded-[1.5rem] border border-orange-500/15 bg-black/40 p-5 ht-compact-shell">
+                  <p className="text-xs font-black uppercase tracking-[0.26em] text-orange-300">Why this matters</p>
+                  <h4 className="mt-2 text-2xl font-black text-white">HT is not just ranking movers. It is interpreting pressure.</h4>
+                  <p className="mt-3 text-sm font-semibold leading-6 text-zinc-400">
+                    Price movement is obvious. Attention Spike is the behavioral layer underneath: who is noticing, whether participation is improving, where rotation is forming, and when the crowd is getting late.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+        <section id="priority-flow" className="mx-auto max-w-7xl px-5 py-5">
+          <motion.div
+            className="relative overflow-hidden rounded-[2.35rem] border border-orange-500/35 bg-[radial-gradient(circle_at_25%_20%,rgba(255,106,0,0.24),transparent_30%),linear-gradient(135deg,rgba(255,106,0,0.10),rgba(0,0,0,0.72)_45%,rgba(0,0,0,0.92))] p-5 shadow-[0_0_95px_rgba(255,106,0,0.20)] backdrop-blur-xl"
+            initial={{ opacity: 0, y: 30, scale: 0.985 }}
+            whileInView={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.65 }}
+            viewport={{ once: true }}
+          >
+            <div className="pointer-events-none absolute right-[-120px] top-[-120px] h-80 w-80 rounded-full bg-orange-500/20 blur-3xl" />
+            <div className="pointer-events-none absolute bottom-[-160px] left-[-120px] h-80 w-80 rounded-full bg-green-500/10 blur-3xl" />
+
+            <div className="relative mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-start">
+              <div>
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-orange-400/30 bg-orange-500/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.26em] text-orange-300">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-orange-400 shadow-[0_0_18px_rgba(255,106,0,0.9)]" />
+                  HT Top Conviction™
+                </div>
+
+                <h3 className="text-4xl font-black tracking-tight md:text-6xl">
+                  HT Top Conviction
+                </h3>
+
+                <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-zinc-400 md:text-base">
+                  The heartbeat of HT Labs: one live read built from attention pressure, conviction quality, participation, and crowd phase. This is where the operating system tells traders where to look first.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-xs font-black text-green-300">
+                {firstSignal?.status || "SIGNAL ENGINE LIVE"}
+              </div>
+            </div>
+
+            <div className="relative grid gap-4 2xl:grid-cols-[1.15fr_0.85fr]">
+              <div className="overflow-hidden rounded-[1.5rem] border border-orange-400/25 bg-black/45 p-5 shadow-[inset_0_0_45px_rgba(255,106,0,0.06)] ht-compact-shell">
+                <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-start">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.28em] text-orange-300">
+                      Live Focus Ticker
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap items-end gap-4">
+                      <h3 className="text-7xl font-black leading-none tracking-tight text-white md:text-8xl">
+                        {firstSignal?.stock.symbol || "--"}
+                      </h3>
+
+                      <div className="mb-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                          Move
+                        </p>
+                        <p
+                          className={`mt-1 text-2xl font-black ${
+                            firstSignal?.stock.change && firstSignal.stock.change >= 0
+                              ? "text-green-300"
+                              : "text-red-300"
+                          }`}
+                        >
+                          {firstSignal?.stock.change !== undefined
+                            ? `${firstSignal.stock.change >= 0 ? "+" : ""}${firstSignal.stock.change.toFixed(2)}%`
+                            : "--"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="mt-5 max-w-3xl text-lg font-black leading-7 text-white">
+                      {firstSignal?.language || "HT is scanning for the first clean pressure shift."}
+                    </p>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl border border-orange-500/20 bg-orange-500/10 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-300">
+                          Before-Crowd
+                        </p>
+                        <p className="mt-2 text-3xl font-black text-white">
+                          {firstSignal ? firstSignal.beforeCrowdScore : "--"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                          Crowd Status
+                        </p>
+                        <p className="mt-2 text-sm font-black text-green-300">
+                          {firstSignal?.crowdPhase || "Scanning"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                          Detected
+                        </p>
+                        <p className="mt-2 text-sm font-black text-white">
+                          {firstSignal?.timestamp || "Live"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid min-w-[220px] gap-3 sm:grid-cols-3 md:grid-cols-1">
+                    <div className="rounded-2xl border border-white/10 bg-black/50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                        Conviction
+                      </p>
+                      <p className="mt-2 text-4xl font-black text-orange-300">
+                        {firstSignal?.stock ? getConvictionScore(firstSignal.stock) : "--"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                        Attention
+                      </p>
+                      <p className="mt-2 text-4xl font-black text-white">
+                        {firstSignal?.stock ? getAttentionScore(firstSignal.stock) : "--"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                        Decision
+                      </p>
+                      <p className="mt-2 text-sm font-black text-green-300">
+                        {firstSignal?.stock ? getDecisionClarity(firstSignal.stock) : "--"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-green-500/15 bg-green-500/5 p-4">
+                  <p className="text-xs font-black uppercase tracking-[0.22em] text-green-300">
+                    HT Signal Rule
+                  </p>
+                  <p className="mt-2 text-sm font-bold leading-6 text-zinc-200">
+                    {firstSignal?.stock
+                      ? getConfirmationTrigger(firstSignal.stock)
+                      : "Wait for attention, conviction, and participation to align."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-[1.75rem] border border-white/10 bg-black/40 p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.25em] text-zinc-500">
+                    Why It Triggered
+                  </p>
+                  <p className="mt-3 text-sm font-bold leading-6 text-zinc-300">
+                    {firstSignal?.stock
+                      ? getConvictionReason(firstSignal.stock)
+                      : "HT is waiting for one ticker to separate from the board."}
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                  <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-zinc-500">
+                      Participation Quality
+                    </p>
+                    <p className="mt-2 text-sm font-black text-white">
+                      {firstSignal?.stock ? getVolumeAcceleration(firstSignal.stock) : "--"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-[1.5rem] border border-red-500/15 bg-red-500/5 p-4">
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-red-300">
+                      Invalidation
+                    </p>
+                    <p className="mt-2 text-xs font-bold leading-5 text-zinc-300">
+                      {firstSignal?.stock
+                        ? getInvalidationRule(firstSignal.stock)
+                        : "No signal to invalidate yet."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.5rem] border border-orange-500/15 bg-orange-500/5 p-4">
+                  <p className="text-xs font-black uppercase tracking-[0.22em] text-orange-300">
+                    Secondary Watch
+                  </p>
+                  <div className="mt-3 flex items-center justify-start gap-3">
+                    <div>
+                      <h4 className="text-3xl font-black text-white">
+                        {secondaryTarget?.symbol || "--"}
+                      </h4>
+                      <p className="mt-1 text-xs leading-5 text-zinc-400">
+                        {secondaryTarget
+                          ? "Potential rotation if Top Conviction pressure fades."
+                          : "No secondary setup yet."}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-xs font-black text-orange-300">
+                      NEXT
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+        <section id="signal-proof" className="mx-auto max-w-7xl px-5 py-4">
+          <div className="grid gap-3 rounded-[1.75rem] border border-white/10 bg-black/30 p-4 backdrop-blur-xl md:grid-cols-4">
+            {firstSignalProofLoop.map((item, index) => (
+              <motion.div
+                key={item.label}
+                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                initial={{ opacity: 0, y: 14 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: index * 0.06 }}
+                viewport={{ once: true }}
+              >
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                  {item.label}
+                </p>
+                <p className="mt-2 text-lg font-black text-white">{item.value}</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-zinc-500">
+                  {item.note}
+                </p>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+
+        <section id="signal-history" className="mx-auto max-w-7xl px-5 py-4">
+          <motion.div
+            className="overflow-hidden rounded-[1.5rem] border border-orange-500/20 bg-zinc-950/70 p-5 shadow-[0_0_70px_rgba(255,106,0,0.09)] backdrop-blur-xl ht-compact-shell"
+            initial={{ opacity: 0, y: 22 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            viewport={{ once: true }}
+          >
+            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-start">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-300">
+                  Proof of Edge
+                </p>
+                <h3 className="mt-1 text-3xl font-black md:text-4xl">
+                  Top Conviction History
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-zinc-500">
+                  The trust layer: every HT signal gets framed as pressure detected,
+                  status tracked, and outcome watched — so users feel the system learning in real time.
+                </p>
+              </div>
+
+              <div className="rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-xs font-black text-green-300">
+                PROOF LOOP ACTIVE
+              </div>
+            </div>
+
+            <div className="mb-4 grid gap-3 md:grid-cols-4">
+              {proofMetrics.map((metric) => (
+                <div
+                  key={metric[0]}
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                >
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                    {metric[0]}
+                  </p>
+                  <p className="mt-2 text-xl font-black text-white">{metric[1]}</p>
+                  <p className="mt-1 text-xs font-bold text-orange-300">{metric[2]}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-3">
+              {signalHistory.map((item, index) => (
+                <motion.div
+                  key={`${item.event}-${item.symbol}`}
+                  className="grid gap-3 rounded-2xl border border-white/10 bg-black/35 p-4 transition hover:border-orange-500/25 hover:bg-orange-500/[0.035] md:grid-cols-[110px_1fr_150px_170px] md:items-center"
+                  initial={{ opacity: 0, x: -12 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.35, delay: index * 0.05 }}
+                  viewport={{ once: true }}
+                >
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                      Ticker
+                    </p>
+                    <p className="mt-1 text-2xl font-black text-white">{item.symbol}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-black text-orange-200">{item.event}</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-zinc-500">
+                      {item.note}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                      Result
+                    </p>
+                    <p className="mt-1 text-sm font-black text-white">{item.result}</p>
+                  </div>
+
+                  <div className="flex justify-start md:justify-end">
+                    <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-xs font-black text-orange-200">
+                      {item.status}
+                    </span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        </section>
+
+        <section id="live-ht-desk" className="mx-auto max-w-7xl px-5 py-5">
+          <motion.div
+            className="relative overflow-hidden rounded-[2.25rem] border border-green-500/20 bg-[radial-gradient(circle_at_18%_18%,rgba(34,197,94,0.18),transparent_28%),radial-gradient(circle_at_88%_10%,rgba(255,106,0,0.14),transparent_26%),linear-gradient(135deg,rgba(5,5,5,0.72),rgba(0,0,0,0.94))] p-5 shadow-[0_0_90px_rgba(34,197,94,0.08)] backdrop-blur-xl"
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55 }}
+            viewport={{ once: true }}
+          >
+            <div className="pointer-events-none absolute left-[-120px] top-[-120px] h-72 w-72 rounded-full bg-green-500/12 blur-3xl" />
+            <div className="pointer-events-none absolute bottom-[-140px] right-[-120px] h-80 w-80 rounded-full bg-orange-500/12 blur-3xl" />
+
+            <div className="relative mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-start">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.3em] text-green-300">
+                  Live HT Desk
+                </p>
+                <h3 className="mt-1 text-3xl font-black md:text-5xl">
+                  Live HT Desk
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-zinc-500">
+                  A rotating desk feed that turns signals into a live habit loop: what HT sees, how the signal is evolving, and where attention is rotating next.
+                </p>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-xs font-black text-green-300">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-green-400" />
+                DESK PULSE LIVE
+              </div>
+            </div>
+
+            <div className="relative grid gap-4 2xl:grid-cols-[1.05fr_0.95fr]">
+              <motion.div
+                key={mounted ? `${activeDeskPulse?.tag}-${activeDeskPulse?.symbol}-${deskPulseIndex}` : "desk-pulse-init"}
+                className="rounded-[1.85rem] border border-green-500/20 bg-black/45 p-5"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35 }}
+              >
+                <div className="mb-5 flex items-start justify-start gap-4">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-green-300">
+                      {activeDeskPulse?.tag || "HT Desk"}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-end gap-3">
+                      <h4 className="text-6xl font-black leading-none tracking-tight text-white md:text-7xl">
+                        {activeDeskPulse?.symbol || "--"}
+                      </h4>
+                      <span className="mb-2 rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-xs font-black text-orange-200">
+                        {activeDeskPulse?.state || "Scanning"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 text-right">
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                      HT Score™
+                    </p>
+                    <p className="mt-2 text-4xl font-black text-green-300">
+                      {activeDeskPulse?.score || "--"}
+                    </p>
+                  </div>
+                </div>
+
+                <p className={`text-lg font-black leading-8 ${activeDeskPulse?.tone || "text-zinc-200"}`}>
+                  {activeDeskPulse?.message || "HT Desk is scanning for a clean pressure shift."}
+                </p>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["Top Conviction", firstSignal?.stock.symbol || "--", firstSignal?.status || "Scanning"],
+                    ["Lifecycle", firstSignal?.stock ? getSignalEvolutionState(firstSignal.stock) : "Waiting", "live state"],
+                    ["Next Rotation", secondaryTarget?.symbol || "--", secondaryTarget ? `${getHTScore(secondaryTarget)}/99` : "No read"],
+                  ].map((item) => (
+                    <div key={item[0]} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
+                        {item[0]}
+                      </p>
+                      <p className="mt-2 text-lg font-black text-white">{item[1]}</p>
+                      <p className="mt-1 text-xs font-bold text-zinc-500">{item[2]}</p>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+
+              <div className="space-y-3">
+                {liveIntelligenceFeed.map((item, index) => (
+                  <motion.div
+                    key={`${item.tag}-${item.symbol}`}
+                    className="grid grid-cols-[88px_1fr_72px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-green-500/25 hover:bg-green-500/[0.035]"
+                    initial={{ opacity: 0, x: 14 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.35, delay: index * 0.05 }}
+                    viewport={{ once: true }}
+                  >
+                    <div>
+                      <p className="text-[8px] font-black uppercase tracking-[0.15em] text-zinc-600">
+                        {item.tag}
+                      </p>
+                      <p className="mt-1 text-xl font-black text-white">{item.symbol}</p>
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className={`text-sm font-black ${item.tone}`}>{item.state}</p>
+                      <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-zinc-500">
+                        {item.message}
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-600">
+                        Score
+                      </p>
+                      <p className="mt-1 text-xl font-black text-green-300">{item.score}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
+            <div className="relative mt-4 grid gap-3 md:grid-cols-5">
+              {htScoreLeaders.map((stock, index) => (
+                <motion.div
+                  key={`ht-score-${stock.symbol}`}
+                  className="rounded-xl border border-white/10 bg-black/35 p-3"
+                  initial={{ opacity: 0, y: 12 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: index * 0.04 }}
+                  viewport={{ once: true }}
+                >
+                  <div className="flex items-center justify-start gap-3">
+                    <p className="font-black text-white">{stock.symbol}</p>
+                    <p className="text-sm font-black text-green-300">{getHTScore(stock)}</p>
+                  </div>
+                  <p className="mt-2 text-xs font-black text-orange-200">
+                    {getSignalEvolutionState(stock)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-semibold leading-4 text-zinc-500">
+                    {getCrowdPhase(stock)}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        </section>
+
+
+        <section id="signal-timeline" className="mx-auto max-w-7xl px-5 py-5">
+          <motion.div
+            className="relative overflow-hidden rounded-[2.25rem] border border-orange-500/20 bg-[radial-gradient(circle_at_20%_20%,rgba(255,106,0,0.18),transparent_30%),radial-gradient(circle_at_80%_10%,rgba(34,197,94,0.12),transparent_26%),linear-gradient(135deg,rgba(5,5,5,0.72),rgba(0,0,0,0.95))] p-5 shadow-[0_0_90px_rgba(255,106,0,0.10)] backdrop-blur-xl"
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55 }}
+            viewport={{ once: true }}
+          >
+            <div className="pointer-events-none absolute right-[-140px] top-[-120px] h-80 w-80 rounded-full bg-orange-500/14 blur-3xl" />
+            <div className="pointer-events-none absolute bottom-[-140px] left-[-120px] h-72 w-72 rounded-full bg-green-500/10 blur-3xl" />
+
+            <div className="relative mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-start">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-300">
+                  Premium Signal Core
+                </p>
+                <h3 className="mt-1 text-3xl font-black md:text-5xl">
+                  Signal Timeline Pro
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-zinc-500">
+                  A cleaner replay-style signal path: early detection, attention pressure, crowd arrival, expansion, and risk filter — built to make HT feel like a premium live terminal.
+                </p>
+              </div>
+
+              <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/20 bg-orange-500/10 px-4 py-2 text-xs font-black text-orange-200">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-orange-400" />
+                SIGNAL STORY LIVE
+              </div>
+            </div>
+
+            <div className="relative grid gap-4 2xl:grid-cols-[1.05fr_0.95fr]">
+              <div className="rounded-[1.85rem] border border-white/10 bg-black/40 p-5">
+                <div className="space-y-3">
+                  {signalTimeline.map((event, index) => (
+                    <motion.div
+                      key={`${event.phase}-${event.time}`}
+                      className="relative grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:grid-cols-[92px_1fr_82px] md:items-center"
+                      initial={{ opacity: 0, x: -12 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.35, delay: index * 0.05 }}
+                      viewport={{ once: true }}
+                    >
+                      <div className="absolute left-[25px] top-0 hidden h-full w-px bg-gradient-to-b from-orange-500/0 via-orange-500/25 to-orange-500/0 md:block" />
+                      <div className="relative z-10 flex items-center gap-3 md:block">
+                        <span className="inline-flex h-3 w-3 rounded-full bg-orange-400 shadow-[0_0_18px_rgba(255,106,0,0.9)]" />
+                        <p className="text-xs font-black text-zinc-400 md:mt-2">{event.time}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-black text-orange-200">{event.phase}</p>
+                        <p className="mt-1 text-xs font-black uppercase tracking-[0.18em] text-green-300">
+                          {event.status}
+                        </p>
+                        <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500">
+                          {event.detail}
+                        </p>
+                      </div>
+
+                      <div className="text-left md:text-right">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-600">
+                          Intensity
+                        </p>
+                        <p className="mt-1 text-2xl font-black text-white">{event.intensity}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4">
+                <div className="rounded-[1.85rem] border border-green-500/15 bg-green-500/[0.035] p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.26em] text-green-300">
+                    HT Heatmap Pro
+                  </p>
+                  <h4 className="mt-2 text-2xl font-black text-white">
+                    Attention Radar
+                  </h4>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {[
-                      ["Cleaner Hierarchy", "The user sees the main opportunity before the full scanner."],
-                      ["Sharper Risk Language", "Every target now comes with an action rule, not just a score."],
-                      ["Premium Flow", "Dashboard feels more like an app and less like a long landing page."],
-                      ["Conversion Ready", "The section gives people a reason to sign in and save setups."],
-                    ].map((item) => (
-                      <div key={item[0]} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                        <p className="font-black text-white">{item[0]}</p>
-                        <p className="mt-2 text-xs leading-5 text-zinc-500">{item[1]}</p>
+                    {attentionHeatmap.map((item) => (
+                      <div key={item.theme} className="rounded-xl border border-white/10 bg-black/35 p-3">
+                        <div className="flex items-center justify-start gap-3">
+                          <p className="text-sm font-black text-white">{item.theme}</p>
+                          <p className="text-lg font-black text-green-300">{item.score}</p>
+                        </div>
+                        <p className="mt-2 text-xs font-black text-orange-200">{item.state}</p>
+                        <p className="mt-1 text-[11px] font-semibold leading-4 text-zinc-500">
+                          {item.identity} · lead: {item.leader}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-[1.85rem] border border-orange-500/15 bg-orange-500/[0.035] p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.26em] text-orange-300">
+                    Alert Personalities
+                  </p>
+                  <div className="mt-4 space-y-3">
+                    {smartAlertPersonalities.map((alert) => (
+                      <div key={alert.title} className="rounded-xl border border-white/10 bg-black/35 p-3">
+                        <div className="flex items-center justify-start gap-3">
+                          <p className={`text-sm font-black ${alert.tone}`}>{alert.title}</p>
+                          <p className="text-sm font-black text-white">{alert.symbol}</p>
+                        </div>
+                        <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500">{alert.copy}</p>
                       </div>
                     ))}
                   </div>
@@ -1862,187 +9539,34 @@ export default function Home() {
           </motion.div>
         </section>
 
-
-        <section id="priority-flow" className="mx-auto max-w-7xl px-5 py-8">
+        <section id="market-narrative" className="mx-auto max-w-7xl px-5 py-5">
           <motion.div
-            className="rounded-[2rem] border border-orange-500/30 bg-zinc-950/80 p-5 shadow-[0_0_80px_rgba(255,106,0,0.16)] backdrop-blur-xl"
+            className="rounded-[1.5rem] border border-green-500/20 bg-zinc-950/75 p-5 shadow-[0_0_70px_rgba(34,197,94,0.07)] backdrop-blur-xl ht-compact-shell"
             initial={{ opacity: 0, y: 25 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55 }}
             viewport={{ once: true }}
           >
-            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">
-                  V26 Command Center Upgrade
-                </p>
-                <h3 className="mt-1 text-4xl font-black">
-                  Top Opportunity Right Now
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-500">
-                  The scanner is now routing attention toward the highest-conviction setup instead of making every signal feel equal.
-                </p>
-              </div>
-
-              <div className="rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-xs font-black text-green-400">
-                FLOW ACTIVE
-              </div>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className="rounded-[1.75rem] border border-orange-500/25 bg-orange-500/5 p-5">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
-                      Primary Focus
-                    </p>
-
-                    <h3 className="mt-2 text-6xl font-black tracking-tight text-white">
-                      {priorityTarget?.symbol || "--"}
-                    </h3>
-
-                    <p className="mt-3 max-w-2xl text-sm font-bold leading-6 text-zinc-300">
-                      {priorityTarget ? getPriorityReason(priorityTarget) : "Waiting for live opportunity."}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 md:w-[320px]">
-                    <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                        Conviction
-                      </p>
-                      <p className="mt-2 text-3xl font-black text-orange-300">
-                        {priorityTarget ? getConvictionScore(priorityTarget) : "--"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                        Decision
-                      </p>
-                      <p className="mt-2 text-sm font-black text-green-300">
-                        {priorityTarget ? getDecisionClarity(priorityTarget) : "--"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                        Attention
-                      </p>
-                      <p className="mt-2 text-3xl font-black text-white">
-                        {priorityTarget ? getAttentionScore(priorityTarget) : "--"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                        Signal
-                      </p>
-                      <p className="mt-2 text-3xl font-black text-white">
-                        {priorityTarget ? getSignalQuality(priorityTarget) : "--"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5 rounded-2xl border border-green-500/15 bg-green-500/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-green-400">
-                    AI Flow Directive
-                  </p>
-
-                  <p className="mt-2 text-sm font-black leading-6 text-white">
-                    {getFlowDirective()}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="rounded-[1.5rem] border border-white/10 bg-black/35 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    Secondary Watch
-                  </p>
-
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-3xl font-black text-white">
-                        {secondaryTarget?.symbol || "--"}
-                      </h4>
-
-                      <p className="mt-2 text-xs leading-5 text-zinc-400">
-                        {secondaryTarget ? getPriorityReason(secondaryTarget) : "Waiting for signal."}
-                      </p>
-                    </div>
-
-                    <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-xs font-black text-orange-300">
-                      WATCH
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-[1.5rem] border border-red-500/15 bg-red-500/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-red-400">
-                    Avoid / Danger
-                  </p>
-
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-3xl font-black text-white">
-                        {dangerTarget?.symbol || "--"}
-                      </h4>
-
-                      <p className="mt-2 text-xs leading-5 text-zinc-400">
-                        {dangerTarget ? getPriorityReason(dangerTarget) : "No active danger setup."}
-                      </p>
-                    </div>
-
-                    <span className="rounded-full border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-300">
-                      AVOID
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-[1.5rem] border border-white/10 bg-black/35 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    Attention Compression
-                  </p>
-
-                  <p className="mt-3 text-sm leading-6 text-zinc-400">
-                    Lower-quality setups are visually deprioritized so the trader sees the strongest opportunity first.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </section>
-
-
-        <section id="market-narrative" className="mx-auto max-w-7xl px-5 py-8">
-          <motion.div
-            className="rounded-[2rem] border border-green-500/20 bg-zinc-950/80 p-5 shadow-[0_0_80px_rgba(34,197,94,0.08)] backdrop-blur-xl"
-            initial={{ opacity: 0, y: 25 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55 }}
-            viewport={{ once: true }}
-          >
-            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-start">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.3em] text-green-400">
-                  V26 Command Center Upgrade
+                  {signalReplaySpotlight.symbol} Live Read Feed
                 </p>
                 <h3 className="mt-1 text-4xl font-black">
-                  Live Tape Commentary
+                  Live Desk Read
                 </h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-500">
-                  HT Labs now explains what the market is doing, why attention is shifting, and where trader focus is rotating.
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
+                  A tighter trading-desk style feed that explains what changed,
+                  what matters, and where attention is rotating.
                 </p>
               </div>
 
               <div className="rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-xs font-black text-green-400">
-                NARRATIVE LIVE
+                DESK LIVE
               </div>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="grid gap-4 2xl:grid-cols-[0.95fr_1.05fr]">
               <div className="rounded-[1.75rem] border border-white/10 bg-black/35 p-5">
                 <p className="text-xs uppercase tracking-[0.25em] text-green-400">
                   AI Market Read
@@ -2056,68 +9580,73 @@ export default function Home() {
                   {getMarketNarrativeBody()}
                 </p>
 
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                      Priority
-                    </p>
-                    <p className="mt-2 text-2xl font-black text-orange-300">
-                      {priorityTarget?.symbol || "--"}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                      Market Pulse
-                    </p>
-                    <p className="mt-2 text-2xl font-black text-white">
-                      {marketPulse}
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                      Hot Movers
-                    </p>
-                    <p className="mt-2 text-2xl font-black text-white">
-                      {hotStocks.length}
-                    </p>
-                  </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["Priority", priorityTarget?.symbol || "--", "text-orange-300"],
+                    ["Pulse", marketPulse, "text-white"],
+                    ["Hot", hotStocks.length, "text-white"],
+                  ].map((item) => (
+                    <div
+                      key={item[0]}
+                      className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                    >
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                        {item[0]}
+                      </p>
+                      <p className={`mt-2 text-2xl font-black ${item[2]}`}>
+                        {item[1]}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              <div className="space-y-3">
-                {narrativeFeed.map((item) => (
-                  <div
-                    key={item.label}
-                    className="rounded-[1.5rem] border border-white/10 bg-black/35 p-4"
-                  >
-                    <p className="text-xs uppercase tracking-[0.2em] text-green-400">
-                      {item.label}
+              <div className="rounded-[1.75rem] border border-white/10 bg-black/35 p-5">
+                <div className="mb-4 flex items-center justify-start gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">
+                      Live AI Commentary
                     </p>
-
-                    <p className="mt-2 text-sm font-black leading-6 text-white">
-                      {item.value}
-                    </p>
+                    <h4 className="mt-1 text-2xl font-black text-white">
+                      Trading Desk Feed
+                    </h4>
                   </div>
-                ))}
+                  <span className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs font-black text-green-300">
+                    UPDATING
+                  </span>
+                </div>
 
-                <div className="rounded-[1.5rem] border border-orange-500/15 bg-orange-500/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.2em] text-orange-400">
-                    Keep The Tab Open
-                  </p>
-
-                  <p className="mt-2 text-sm leading-6 text-zinc-300">
-                    The narrative updates as the scanner refreshes, making HT Labs feel more like a live trading desk than a static dashboard.
-                  </p>
+                <div className="space-y-3">
+                  {liveDeskFeed.map((item, index) => (
+                    <motion.div
+                      key={`${item.tag}-${index}`}
+                      className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                      initial={{ opacity: 0, x: 12 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.35, delay: index * 0.06 }}
+                      viewport={{ once: true }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-green-400" />
+                        <div>
+                          <p className={`text-xs font-black uppercase tracking-[0.2em] ${item.tone}`}>
+                            {item.tag}
+                          </p>
+                          <p className="mt-1 text-sm font-bold leading-6 text-zinc-200">
+                            {item.message}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </div>
             </div>
           </motion.div>
         </section>
 
-        <section id="features" className="mx-auto max-w-7xl px-5 py-10">
-          <div className="mb-8 text-center">
+        <section id="features" className="mx-auto max-w-7xl px-5 py-6">
+          <div className="mb-5 text-center">
             <p className="text-sm font-black uppercase tracking-[0.25em] text-orange-500">
               Why Traders Choose HT Labs
             </p>
@@ -2135,7 +9664,7 @@ export default function Home() {
               ],
               [
                 "🧠",
-                "AI Setup Score",
+                "Pressure Quality",
                 "Grade momentum setups by confidence, crowd strength, risk, and AI bias.",
               ],
               [
@@ -2175,31 +9704,32 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-7xl px-5 py-8">
-          <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <section className="mx-auto max-w-7xl px-5 py-5">
+          <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-start">
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-orange-400">
-                V25 Intelligence Layer
+                Market Psychology Layer
               </p>
-              <h3 className="text-3xl font-black">Catalysts & Social Heat</h3>
+              <h3 className="text-3xl font-black">Catalyst Intelligence</h3>
               <p className="mt-2 text-sm text-zinc-500">
-                Catalyst, sentiment, and setup intelligence built to help traders spot attention before the move gets crowded.
+                Catalyst, sentiment, and setup intelligence built to help
+                traders spot attention before the move gets crowded.
               </p>
             </div>
             <div className="rounded-full border border-orange-500/20 bg-orange-500/10 px-4 py-2 text-xs font-black text-orange-300">
-              Product Mode: V26 Command Center Upgrade
+              Product Mode: HT Labs Operating System
             </div>
           </div>
 
-          <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid gap-5 2xl:grid-cols-[1.1fr_0.9fr]">
             <motion.div
               initial={{ opacity: 0, y: 25 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
               viewport={{ once: true }}
-              className="rounded-[2rem] border border-white/10 bg-zinc-950/70 p-5"
+              className="rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 ht-compact-shell"
             >
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex items-center justify-start">
                 <p className="font-black">Catalyst Radar</p>
                 <span className="rounded-full border border-orange-500/20 px-3 py-1 text-xs font-black text-orange-400">
                   LIVE CATALYSTS
@@ -2210,9 +9740,9 @@ export default function Home() {
                 {catalystRadar.map((item) => (
                   <div
                     key={`${item.symbol}-${item.title}`}
-                    className="rounded-2xl border border-white/10 bg-black/35 p-4"
+                    className="rounded-xl border border-white/10 bg-black/35 p-3"
                   >
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start justify-start gap-4">
                       <div>
                         <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
                           {item.symbol}
@@ -2244,9 +9774,9 @@ export default function Home() {
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.08 }}
               viewport={{ once: true }}
-              className="rounded-[2rem] border border-white/10 bg-zinc-950/70 p-5"
+              className="rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 ht-compact-shell"
             >
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex items-center justify-start">
                 <p className="font-black">Social Heat</p>
                 <span className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-xs font-black text-green-400">
                   ATTENTION FLOW
@@ -2255,14 +9785,21 @@ export default function Home() {
 
               <div className="space-y-3">
                 {heatSignals.map((signal) => (
-                  <div key={signal.symbol} className="rounded-2xl border border-white/10 bg-black/35 p-4">
-                    <div className="flex items-center justify-between">
+                  <div
+                    key={signal.symbol}
+                    className="rounded-xl border border-white/10 bg-black/35 p-3"
+                  >
+                    <div className="flex items-center justify-start">
                       <div>
                         <p className="text-lg font-black">{signal.symbol}</p>
-                        <p className="text-xs text-zinc-500">{signal.sentiment}</p>
+                        <p className="text-xs text-zinc-500">
+                          {signal.sentiment}
+                        </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-black text-green-400">{signal.mentions}</p>
+                        <p className="text-sm font-black text-green-400">
+                          {signal.mentions}
+                        </p>
                         <p className="text-xs text-zinc-500">mentions</p>
                       </div>
                     </div>
@@ -2279,33 +9816,84 @@ export default function Home() {
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="rounded-[2rem] border border-white/10 bg-zinc-950/70 p-5">
-              <p className="text-xs uppercase tracking-[0.25em] text-orange-400">Top Gainers</p>
+            <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 ht-compact-shell">
+              <div className="flex items-center justify-start gap-3">
+                <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
+                  Top Movers
+                </p>
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">
+                  Live Rank
+                </span>
+              </div>
+
               <div className="mt-4 space-y-3">
-                {topGainers.map((stock, index) => (
-                  <div key={stock.symbol} className="flex items-center justify-between rounded-2xl bg-white/[0.03] px-4 py-3">
+                {topMovers.map((stock, index) => (
+                  <motion.button
+                    key={`mover-${stock.symbol}`}
+                    onClick={() => openAiModal(stock)}
+                    className="group flex w-full items-center justify-start rounded-2xl border border-white/5 bg-white/[0.03] px-4 py-3 text-left transition hover:border-orange-500/30 hover:bg-orange-500/10"
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.99 }}
+                  >
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-zinc-500">#{index + 1}</span>
-                      <span className="font-black">{stock.symbol}</span>
+                      <div>
+                        <span className="font-black text-white">{stock.symbol}</span>
+                        <p className="text-xs font-bold text-zinc-500">
+                          {getRiskLabel(stock)} · Score {getConvictionScore(stock)}
+                        </p>
+                      </div>
                     </div>
-                    <span className="font-black text-green-400">+{stock.change.toFixed(2)}%</span>
-                  </div>
+
+                    <div className="text-right">
+                      <span
+                        className={`font-black ${
+                          stock.change >= 0 ? "text-green-400" : "text-red-400"
+                        }`}
+                      >
+                        {stock.change >= 0 ? "+" : ""}
+                        {stock.change.toFixed(2)}%
+                      </span>
+                      <p className="text-xs text-zinc-500">${Number(stock.price || 0).toFixed(2)}</p>
+                    </div>
+                  </motion.button>
                 ))}
+
+                {topMovers.length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-4 text-sm text-zinc-500">
+                    Scanner warming up. Movers will populate automatically.
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="rounded-[2rem] border border-white/10 bg-zinc-950/70 p-5">
-              <p className="text-xs uppercase tracking-[0.25em] text-orange-400">Trade Discipline</p>
+            <div className="rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 ht-compact-shell">
+              <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
+                Trade Discipline
+              </p>
               <div className="mt-4 space-y-3">
-                {["No chase entries on vertical candles", "Wait for VWAP reclaim or higher-low setup", "Small size on extreme volatility names"].map((rule, index) => (
-                  <div key={rule} className="flex gap-3 rounded-2xl bg-white/[0.03] p-4 text-sm text-zinc-300">
-                    <span className="font-black text-orange-400">0{index + 1}</span>
+                {[
+                  "No chase entries on vertical candles",
+                  "Wait for VWAP reclaim or higher-low setup",
+                  "Small size on extreme volatility names",
+                ].map((rule, index) => (
+                  <div
+                    key={rule}
+                    className="flex gap-3 rounded-2xl bg-white/[0.03] p-4 text-sm text-zinc-300"
+                  >
+                    <span className="font-black text-orange-400">
+                      0{index + 1}
+                    </span>
                     <span>{rule}</span>
                   </div>
                 ))}
                 {topLosers[0] && (
                   <div className="rounded-2xl border border-red-500/10 bg-red-500/5 p-4 text-sm text-zinc-300">
-                    Weakest tape: <span className="font-black text-red-400">{topLosers[0].symbol}</span> {topLosers[0].change.toFixed(2)}%
+                    Weakest tape:{" "}
+                    <span className="font-black text-red-400">
+                      {topLosers[0].symbol}
+                    </span>{" "}
+                    {topLosers[0].change.toFixed(2)}%
                   </div>
                 )}
               </div>
@@ -2313,19 +9901,18 @@ export default function Home() {
           </div>
         </section>
 
-
-        <section className="mx-auto grid max-w-7xl gap-5 px-5 py-8 lg:grid-cols-3">
+        <section className="mx-auto grid max-w-7xl gap-5 px-5 py-8 2xl:grid-cols-3">
           <motion.div
-            className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl lg:col-span-2"
+            className="rounded-[1.5rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl 2xl:col-span-2 ht-compact-shell"
             initial={{ opacity: 0, y: 25 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55 }}
             viewport={{ once: true }}
           >
-            <div className="mb-5 flex items-center justify-between">
+            <div className="mb-4 flex items-center justify-start">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">
-                  V25 Alert Feed
+                  Pressure Alert Feed
                 </p>
                 <h3 className="mt-1 text-2xl font-black">Live Setup Alerts</h3>
               </div>
@@ -2338,7 +9925,7 @@ export default function Home() {
               {alertFeed.map((alert) => (
                 <div
                   key={`${alert.symbol}-${alert.time}`}
-                  className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/35 p-4"
+                  className="flex items-center justify-start gap-4 rounded-2xl border border-white/10 bg-black/35 p-4"
                 >
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2349,7 +9936,9 @@ export default function Home() {
                         {alert.trend}
                       </span>
                     </div>
-                    <p className="mt-2 font-black text-white">{alert.message}</p>
+                    <p className="mt-2 font-black text-white">
+                      {alert.message}
+                    </p>
                     <div className="mt-3 flex items-center gap-2">
                       <p className="text-xs text-zinc-500">{alert.time}</p>
 
@@ -2376,7 +9965,7 @@ export default function Home() {
           </motion.div>
 
           <motion.div
-            className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl"
+            className="rounded-[1.5rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl ht-compact-shell"
             initial={{ opacity: 0, y: 25 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, delay: 0.08 }}
@@ -2394,12 +9983,14 @@ export default function Home() {
                 ["AI / Semis", 92],
                 ["Quantum", 86],
                 ["Crypto Beta", 74],
-                ["Small-Cap Momentum", 88],
+                ["Small-Cap Attention Spike", 88],
               ].map((sector) => (
                 <div key={sector[0]}>
-                  <div className="mb-2 flex items-center justify-between text-sm">
+                  <div className="mb-2 flex items-center justify-start text-sm">
                     <span className="font-black text-white">{sector[0]}</span>
-                    <span className="font-black text-orange-300">{sector[1]}%</span>
+                    <span className="font-black text-orange-300">
+                      {sector[1]}%
+                    </span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-white/10">
                     <div
@@ -2413,26 +10004,24 @@ export default function Home() {
           </motion.div>
         </section>
 
-
-
-
-        <section className="mx-auto max-w-7xl px-5 py-8">
-          <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+        <section className="mx-auto max-w-7xl px-5 py-5">
+          <div className="grid gap-5 2xl:grid-cols-[1.15fr_0.85fr]">
             <motion.div
-              className="rounded-[2rem] border border-green-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl"
+              className="rounded-[1.5rem] border border-green-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl ht-compact-shell"
               initial={{ opacity: 0, y: 25 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55 }}
               viewport={{ once: true }}
             >
-              <div className="mb-5 flex items-center justify-between gap-3">
+              <div className="mb-5 flex items-center justify-start gap-3">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.3em] text-green-400">
-                    V25 Smart Alerts
+                    Smart Pressure Alerts
                   </p>
                   <h3 className="mt-1 text-3xl font-black">AI Alert Engine</h3>
                   <p className="mt-2 text-sm text-zinc-500">
-                    Alerts generated from setup score, catalyst presence, momentum pressure, and risk profile.
+                    Alerts generated from pressure score, catalyst presence,
+                    momentum pressure, and risk profile.
                   </p>
                 </div>
 
@@ -2445,9 +10034,9 @@ export default function Home() {
                 {alertFeed.slice(0, 4).map((alert) => (
                   <div
                     key={`engine-${alert.symbol}-${alert.time}`}
-                    className="rounded-2xl border border-white/10 bg-black/35 p-4"
+                    className="rounded-xl border border-white/10 bg-black/35 p-3"
                   >
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start justify-start gap-4">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-xs font-black uppercase tracking-[0.25em] text-green-400">
@@ -2478,7 +10067,7 @@ export default function Home() {
             </motion.div>
 
             <motion.div
-              className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl"
+              className="rounded-[1.5rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl ht-compact-shell"
               initial={{ opacity: 0, y: 25 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55, delay: 0.08 }}
@@ -2488,72 +10077,99 @@ export default function Home() {
                 <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">
                   Watchlist Intelligence
                 </p>
-                <h3 className="mt-1 text-2xl font-black">Saved Setup Monitor</h3>
+                <h3 className="mt-1 text-2xl font-black">
+                  Saved Setup Monitor
+                </h3>
                 <p className="mt-2 text-sm text-zinc-500">
                   Your saved symbols become the personal alert layer.
                 </p>
               </div>
 
               <div className="space-y-3">
-                {(watchlist.length ? watchlist : ["Add tickers"]).map((symbol) => {
-                  const savedStock = stocks.find((stock) => stock.symbol === symbol);
+                {(watchlist.length ? watchlist : ["Add tickers"]).map(
+                  (symbol) => {
+                    const savedStock = stocks.find(
+                      (stock) => stock.symbol === symbol,
+                    );
 
-                  return (
-                    <div
-                      key={`watch-intel-${symbol}`}
-                      className="rounded-2xl border border-white/10 bg-black/35 p-4"
-                    >
-                      {savedStock ? (
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="font-black text-white">{savedStock.symbol}</p>
-                            <p className="mt-1 text-xs text-zinc-500">
-                              {getAlertMessage(savedStock)}
-                            </p>
+                    return (
+                      <div
+                        key={`watch-intel-${symbol}`}
+                        className="rounded-xl border border-white/10 bg-black/35 p-3"
+                      >
+                        {savedStock ? (
+                          <div className="flex items-center justify-start gap-3">
+                            <div>
+                              <p className="font-black text-white">
+                                {savedStock.symbol}
+                              </p>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {getAlertMessage(savedStock)}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-black text-orange-300">
+                                {getSetupScore(savedStock)}/99
+                              </p>
+                              <p className="text-xs text-zinc-500">
+                                {getScoreTrend(savedStock)}
+                              </p>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="font-black text-orange-300">
-                              {getSetupScore(savedStock)}/99
-                            </p>
-                            <p className="text-xs text-zinc-500">
-                              {getScoreTrend(savedStock)}
-                            </p>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-sm text-zinc-500">
-                          Star tickers in the scanner to activate personal alerts.
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
+                        ) : (
+                          <p className="text-sm text-zinc-500">
+                            Star tickers in the scanner to activate personal
+                            alerts.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  },
+                )}
               </div>
             </motion.div>
           </div>
         </section>
 
-        <section className="mx-auto max-w-7xl px-5 py-8">
+        <section className="mx-auto max-w-7xl px-5 py-5">
           <motion.div
-            className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl"
+            className="rounded-[1.5rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl ht-compact-shell"
             initial={{ opacity: 0, y: 25 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55 }}
             viewport={{ once: true }}
           >
-            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-start">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">
                   Real News Engine
                 </p>
                 <h3 className="mt-1 text-3xl font-black">Latest Catalysts</h3>
                 <p className="mt-2 text-sm text-zinc-500">
-                  Pulling recent company headlines from the live news route.
+                  Headlines, volume shifts, and attention signals translated into watchable context.
                 </p>
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  {topMovers.slice(0, 6).map((stock) => (
+                    <div key={`catalyst-read-${stock.symbol}`} className="rounded-2xl border border-white/10 bg-zinc-950/70 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-black uppercase tracking-[0.28em] text-orange-300">{stock.symbol}</p>
+                        <span className="rounded-full border border-orange-400/20 bg-orange-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-orange-200">
+                          {getCatalystBadge(stock)}
+                        </span>
+                      </div>
+                      <h3 className="mt-3 text-base font-black text-white">{getCatalystFallbackTitle(stock)}</h3>
+                      <p className="mt-2 text-sm font-semibold leading-6 text-zinc-400">{getCatalystFallbackBody(stock)}</p>
+                      <div className="mt-4 rounded-xl border border-white/10 bg-black/35 px-3 py-2 text-xs font-bold text-zinc-300">
+                        Next: {getCatalystWatchNext(stock)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
               </div>
 
               <span className="rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-xs font-black text-green-400">
-                FINNHUB NEWS
+                LIVE + HT READ
               </span>
             </div>
 
@@ -2564,7 +10180,7 @@ export default function Home() {
                 return (
                   <div
                     key={`news-${stock.symbol}`}
-                    className="rounded-2xl border border-white/10 bg-black/35 p-4"
+                    className="rounded-xl border border-white/10 bg-black/35 p-3"
                   >
                     <p className="text-xs font-black uppercase tracking-[0.25em] text-orange-400">
                       {stock.symbol}
@@ -2584,7 +10200,8 @@ export default function Home() {
                       </>
                     ) : (
                       <p className="mt-3 text-sm leading-6 text-zinc-500">
-                        No recent catalyst found yet. HT Labs will keep scanning.
+                        No recent catalyst found yet. HT Labs will keep
+                        scanning.
                       </p>
                     )}
                   </div>
@@ -2594,235 +10211,22 @@ export default function Home() {
           </motion.div>
         </section>
 
-        <section id="account" className="mx-auto max-w-7xl px-5 py-8">
+        <section id="watchlist" className="mx-auto max-w-7xl px-5 py-5">
           <motion.div
-            className="grid gap-5 rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl lg:grid-cols-[0.9fr_1.1fr]"
+            className="rounded-[1.5rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl ht-compact-shell"
             initial={{ opacity: 0, y: 25 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55 }}
             viewport={{ once: true }}
           >
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">
-                V23 Account Layer
-              </p>
-              <h3 className="mt-2 text-3xl font-black">Cloud Trader Workspace</h3>
-              <p className="mt-3 text-sm leading-6 text-zinc-500">
-                Sign in to prepare HT Labs for cloud watchlists, saved setups, smart alerts,
-                and AI-powered personalized trader intelligence.
-              </p>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                {[
-                  ["Cloud Watchlists", session ? "Ready" : "Login Required"],
-                  ["Saved Alerts", "Next"],
-                  ["Personal Setups", "Next"],
-                ].map((item) => (
-                  <div
-                    key={item[0]}
-                    className="rounded-2xl border border-white/10 bg-black/35 p-4"
-                  >
-                    <p className="text-xs text-zinc-500">{item[0]}</p>
-                    <p className="mt-2 font-black text-orange-300">{item[1]}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-[1.75rem] border border-white/10 bg-black/40 p-5">
-              {session ? (
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.3em] text-green-400">
-                    Connected
-                  </p>
-                  <h4 className="mt-2 text-2xl font-black">Welcome Back</h4>
-                  <p className="mt-2 break-all text-sm text-zinc-400">
-                    {session.user.email}
-                  </p>
-
-                  <div className="mt-5 rounded-2xl border border-green-500/15 bg-green-500/10 p-4">
-                    <p className="text-sm font-black text-green-300">
-                      Auth is live. Cloud sync is ready to wire into Supabase tables next.
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={handleSignOut}
-                    className="mt-5 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white transition hover:opacity-90"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">
-                    Sign In / Sign Up
-                  </p>
-                  <h4 className="mt-2 text-2xl font-black">Unlock Cloud Mode</h4>
-
-                  <div className="mt-5 space-y-3">
-                    <input
-                      type="email"
-                      placeholder="Email"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-zinc-950/90 px-4 py-4 text-sm outline-none transition placeholder:text-zinc-700 focus:border-orange-500"
-                    />
-                    <input
-                      type="password"
-                      placeholder="Password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-zinc-950/90 px-4 py-4 text-sm outline-none transition placeholder:text-zinc-700 focus:border-orange-500"
-                    />
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <button
-                        onClick={() => handleAuth("signin")}
-                        disabled={authLoading}
-                        className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 text-sm font-black text-white transition disabled:opacity-50"
-                      >
-                        {authLoading ? "Loading..." : "Sign In"}
-                      </button>
-                      <button
-                        onClick={() => handleAuth("signup")}
-                        disabled={authLoading}
-                        className="rounded-2xl border border-orange-500/30 bg-orange-500/10 px-5 py-3 text-sm font-black text-orange-300 transition hover:bg-orange-500/20 disabled:opacity-50"
-                      >
-                        Create Account
-                      </button>
-                    </div>
-
-                    {authMessage && (
-                      <p className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-sm text-zinc-300">
-                        {authMessage}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        </section>
-
-
-        <section className="mx-auto max-w-7xl px-5 py-8">
-          <motion.div
-            className="rounded-[2rem] border border-green-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl"
-            initial={{ opacity: 0, y: 25 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55 }}
-            viewport={{ once: true }}
-          >
-            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.3em] text-green-400">
-                  Saved AI Setups
-                </p>
-                <h3 className="mt-1 text-3xl font-black">Setup History</h3>
-                <p className="mt-2 text-sm text-zinc-500">
-                  Save interesting AI setups and revisit their score, bias, and alert state later.
-                </p>
-              </div>
-
-              <span className="rounded-full border border-green-500/20 bg-green-500/10 px-4 py-2 text-xs font-black text-green-400">
-                {savedSetups.length} Saved
-              </span>
-            </div>
-
-            {savedSetups.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-white/10 bg-black/35 p-5 text-sm text-zinc-500">
-                No saved AI setups yet. Use the “Save Setup” button inside scanner cards to build your setup history.
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {savedSetups.map((symbol) => {
-                  const stock = stocks.find((item) => item.symbol === symbol);
-
-                  if (!stock) {
-                    return (
-                      <div
-                        key={`saved-${symbol}`}
-                        className="rounded-2xl border border-white/10 bg-black/35 p-4"
-                      >
-                        <p className="font-black text-white">{symbol}</p>
-                        <p className="mt-2 text-sm text-zinc-500">
-                          Waiting for quote refresh.
-                        </p>
-                      </div>
-                    );
-                  }
-
-                  const setupScore = getSetupScore(stock);
-
-                  return (
-                    <div
-                      key={`saved-${symbol}`}
-                      className="rounded-2xl border border-white/10 bg-black/35 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-black uppercase tracking-[0.25em] text-green-400">
-                            {stock.symbol}
-                          </p>
-                          <h4 className="mt-2 text-2xl font-black text-white">
-                            {setupScore}/99 · {getSetupGrade(setupScore)}
-                          </h4>
-                        </div>
-
-                        <button
-                          onClick={() => toggleSavedSetup(stock.symbol)}
-                          className="rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-black text-red-300"
-                        >
-                          Remove
-                        </button>
-                      </div>
-
-                      <p className="mt-3 text-sm leading-6 text-zinc-400">
-                        {getAlertMessage(stock)}
-                      </p>
-
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                          <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                            Trend
-                          </p>
-                          <p className="mt-1 text-sm font-black text-white">
-                            {getScoreTrend(stock)}
-                          </p>
-                        </div>
-                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                          <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                            Risk
-                          </p>
-                          <p className="mt-1 text-sm font-black text-white">
-                            {getRiskProfile(stock)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </motion.div>
-        </section>
-
-        <section id="watchlist" className="mx-auto max-w-7xl px-5 py-8">
-          <motion.div
-            className="rounded-[2rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl"
-            initial={{ opacity: 0, y: 25 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55 }}
-            viewport={{ once: true }}
-          >
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-4 flex items-center justify-start">
               <div>
                 <p className="text-xs uppercase tracking-[0.3em] text-orange-400">
                   Watchlist
                 </p>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Logged-in traders can sync watchlists across devices with Supabase cloud storage.
+                  Logged-in traders can sync watchlists across devices with
+                  Supabase cloud storage.
                 </p>
 
                 {session && (
@@ -2863,13 +10267,17 @@ export default function Home() {
           </motion.div>
         </section>
 
-        <section id="scanner" className="mx-auto max-w-7xl px-5 py-8 pb-24">
-          <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <section id="scanner" className="mx-auto max-w-7xl px-5 py-5 pb-16">
+          <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-start">
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-orange-400">
                 Scanner
               </p>
-              <h3 className="text-3xl font-black">Ranked Momentum Feed</h3>
+              <h3 className="text-3xl font-black">Ranked Attention Spike Feed</h3>
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-green-500/15 bg-green-500/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-green-300">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
+                Premium scan mode
+              </div>
               <p className="mt-2 text-sm text-zinc-500">
                 Auto-refreshes every 8 seconds.
               </p>
@@ -2932,11 +10340,11 @@ export default function Home() {
                   transition={{ duration: 0.45, delay: index * 0.05 }}
                   viewport={{ once: true }}
                   whileHover={{ y: -6, scale: 1.015 }}
-                  className="group relative overflow-hidden rounded-[2rem] border border-white/10 bg-zinc-950/80 p-5 shadow-xl shadow-black/30 transition hover:border-orange-500/40 hover:shadow-[0_0_45px_rgba(255,106,0,0.14)]"
+                  className="group relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 shadow-xl shadow-black/25 transition duration-300 hover:-translate-y-1 hover:border-orange-500/35 hover:bg-zinc-950/90 hover:shadow-[0_0_40px_rgba(255,106,0,0.12)] ht-compact-shell"
                 >
-                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-orange-700 via-orange-400 to-orange-700" />
+                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-400/80 to-transparent" />
 
-                  <div className="mb-5 flex items-start justify-between">
+                  <div className="mb-5 flex items-start justify-start">
                     <div className="flex items-center gap-3">
                       <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-orange-500/20 bg-orange-500/10 text-sm font-black text-orange-400">
                         #{index + 1}
@@ -2944,7 +10352,7 @@ export default function Home() {
 
                       <div>
                         <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
-                          Momentum
+                          Attention Spike
                         </p>
 
                         <h2 className="text-3xl font-black">{stock.symbol}</h2>
@@ -2985,14 +10393,6 @@ export default function Home() {
                     </div>
 
                     <div className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-xs font-black text-green-300">
-                      SIGNAL {getSignalQuality(stock)}
-                    </div>
-
-                    <div className="rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-1 text-xs font-black text-orange-300">
-                      ATTENTION {getAttentionScore(stock)}
-                    </div>
-
-                    <div className="rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-xs font-black text-green-300">
                       CONVICTION {getConvictionScore(stock)}
                     </div>
                   </div>
@@ -3015,9 +10415,9 @@ export default function Home() {
                   </div>
 
                   <div className="mt-5 rounded-2xl border border-white/10 bg-black/35 p-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-start">
                       <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
-                        AI Confidence
+                        Crowd Pressure
                       </p>
                       <p className="text-sm font-black text-orange-300">
                         {confidence}%
@@ -3031,7 +10431,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="mt-6 rounded-3xl border border-white/10 bg-gradient-to-r from-orange-500/10 to-orange-900/10 p-3">
+                  <div className="mt-5 rounded-2xl border border-white/10 bg-gradient-to-r from-orange-500/5 to-orange-900/5 p-3">
                     <MiniStockChart
                       symbol={stock.symbol}
                       price={stock.price}
@@ -3040,9 +10440,9 @@ export default function Home() {
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-green-500/15 bg-green-500/5 p-4">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center justify-start gap-3">
                       <p className="text-xs uppercase tracking-[0.2em] text-green-400">
-                        Signal Quality
+                        Signal Strength
                       </p>
                       <p className="text-xs font-black text-green-300">
                         {getSignalGrade(stock)}
@@ -3079,8 +10479,10 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="mt-4 rounded-2xl border border-orange-500/15 bg-orange-500/5 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-orange-400">Why It&apos;s Moving</p>
+                  <div className="mt-4 rounded-2xl border border-orange-500/10 bg-orange-500/[0.03] p-4">
+                    <p className="text-xs uppercase tracking-[0.2em] text-orange-400">
+                      Why It&apos;s Moving
+                    </p>
                     <p className="mt-2 text-sm leading-6 text-zinc-300">
                       {getWhyMoving(stock)}
                     </p>
@@ -3088,7 +10490,7 @@ export default function Home() {
 
                   {getTopNews(stock.symbol) && (
                     <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
-                      <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="mb-2 flex items-center justify-start gap-3">
                         <p className="text-xs uppercase tracking-[0.2em] text-orange-400">
                           Live Catalyst
                         </p>
@@ -3113,58 +10515,51 @@ export default function Home() {
                     </div>
                   )}
 
-                  <div className="mt-4 rounded-2xl border border-green-500/15 bg-green-500/5 p-4">
-                    <div className="flex items-center justify-between gap-3">
+                  <div className="mt-4 rounded-2xl border border-green-500/10 bg-green-500/[0.03] p-4">
+                    <div className="flex items-center justify-start gap-3">
                       <p className="text-xs uppercase tracking-[0.2em] text-green-400">
-                        AI Setup Intelligence
+                        Setup Snapshot
                       </p>
 
                       <div className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-black text-green-300">
-                        {getSetupScore(stock)}/99 · {getSetupGrade(getSetupScore(stock))}
+                        {getSetupGrade(getSetupScore(stock))} · {getSetupScore(stock)}/99
                       </div>
                     </div>
 
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                          Momentum Confidence
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                          Crowd
                         </p>
-                        <p className="mt-2 text-sm font-black text-white">
-                          {getMomentumConfidence(getSetupScore(stock))}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                          Crowd Strength
-                        </p>
-                        <p className="mt-2 text-sm font-black text-white">
+                        <p className="mt-1 text-xs font-black text-white">
                           {getCrowdStrength(stock)}
                         </p>
                       </div>
 
-                      <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                          Risk Profile
+                      <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                          Risk
                         </p>
-                        <p className="mt-2 text-sm font-black text-white">
+                        <p className="mt-1 text-xs font-black text-white">
                           {getRiskProfile(stock)}
                         </p>
                       </div>
 
-                      <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                          AI Bias
+                      <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                        <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                          Bias
                         </p>
-                        <p className="mt-2 text-sm font-black leading-5 text-white">
-                          {getAIBias(stock)}
+                        <p className="mt-1 text-xs font-black text-white">
+                          {getMomentumConfidence(getSetupScore(stock))}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-orange-400">AI Trade Plan</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-orange-400">
+                      AI Trade Plan
+                    </p>
                     <p className="mt-2 text-sm leading-6 text-zinc-400">
                       {getTradePlan(stock)}
                     </p>
@@ -3178,7 +10573,9 @@ export default function Home() {
                         : "border-white/10 bg-white/[0.03] text-zinc-300 hover:border-green-500/30 hover:bg-green-500/10 hover:text-green-300"
                     }`}
                   >
-                    {savedSetups.includes(stock.symbol) ? "Saved Setup ✓" : "Save Setup"}
+                    {savedSetups.includes(stock.symbol)
+                      ? "Saved Setup ✓"
+                      : "Save Setup"}
                   </button>
 
                   <motion.button
@@ -3200,41 +10597,43 @@ export default function Home() {
               [1, 2, 3].map((item) => (
                 <div
                   key={item}
-                  className="rounded-[2rem] border border-white/10 bg-zinc-950/70 p-5"
+                  className="rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 ht-compact-shell"
                 >
                   <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
                   <div className="mt-4 h-10 w-32 animate-pulse rounded bg-white/10" />
-                  <div className="mt-6 h-28 animate-pulse rounded-3xl bg-white/10" />
+                  <div className="mt-6 h-28 animate-pulse rounded-2xl bg-white/10" />
                 </div>
               ))}
           </div>
         </section>
 
         <footer className="border-t border-orange-500/10 bg-black/60 px-5 py-8">
-          <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-start">
             <img src="/logo.png" alt="HT Labs" className="h-12 w-auto" />
 
             <p className="text-sm text-zinc-500">
-              Track live momentum, catalysts, daily briefings, relative volume, signal quality, attention flow, saved AI setups, smart alerts, and cloud watchlists in real time.
+              Track live momentum, catalysts, daily briefings, relative volume,
+              signal quality, attention flow, saved AI setups, smart alerts, and
+              cloud watchlists in real time. Signals are educational research tools, not financial advice.
             </p>
           </div>
         </footer>
 
         {selectedStock && (
           <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 py-6 backdrop-blur-md"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.2 }}
           >
             <motion.div
-              className="w-full max-w-md overflow-hidden rounded-[2rem] border border-orange-500/30 bg-zinc-950 shadow-2xl shadow-orange-500/20"
+              className="max-h-[92vh] w-full max-w-2xl overflow-hidden rounded-[1.5rem] border border-orange-500/25 bg-zinc-950/95 shadow-2xl shadow-orange-500/15 ht-compact-shell"
               initial={{ opacity: 0, scale: 0.94, y: 24 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ duration: 0.25 }}
             >
-              <div className="border-b border-white/10 bg-orange-500/10 p-5">
-                <div className="flex items-center justify-between">
+              <div className="border-b border-white/10 bg-gradient-to-r from-orange-500/10 via-white/[0.03] to-transparent p-5">
+                <div className="flex items-center justify-start">
                   <div>
                     <p className="text-xs uppercase tracking-[0.3em] text-orange-400">
                       HT LABS AI SETUP
@@ -3254,7 +10653,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="p-5">
+              <div className="max-h-[78vh] overflow-y-auto p-5">
                 <div className="mb-4 grid grid-cols-2 gap-3">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <p className="text-xs uppercase text-zinc-500">Price</p>
@@ -3265,7 +10664,7 @@ export default function Home() {
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <p className="text-xs uppercase text-zinc-500">Momentum</p>
+                    <p className="text-xs uppercase text-zinc-500">Attention Spike</p>
 
                     <p
                       className={`mt-1 text-2xl font-black ${
@@ -3281,10 +10680,10 @@ export default function Home() {
                 </div>
 
                 <div className="mb-4 rounded-2xl border border-orange-500/20 bg-orange-500/10 p-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-start">
                     <div>
                       <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
-                        Momentum Score
+                        Attention Spike Score
                       </p>
                       <p className="mt-2 text-4xl font-black text-orange-300">
                         {getMomentumScore(selectedStock)}
@@ -3308,10 +10707,10 @@ export default function Home() {
                 </div>
 
                 <div className="mb-4 rounded-2xl border border-green-500/15 bg-green-500/5 p-4">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center justify-start gap-3">
                     <div>
                       <p className="text-xs uppercase tracking-[0.25em] text-green-400">
-                        V15 AI Setup Intelligence
+                        AI Setup Intelligence
                       </p>
                       <p className="mt-2 text-4xl font-black text-green-300">
                         {getSetupScore(selectedStock)}/99
@@ -3368,7 +10767,9 @@ export default function Home() {
                 </div>
 
                 <div className="mb-4 rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-orange-400">Why It&apos;s Moving</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
+                    Why It&apos;s Moving
+                  </p>
                   <p className="mt-2 text-sm leading-6 text-zinc-300">
                     {getWhyMoving(selectedStock)}
                   </p>
@@ -3391,13 +10792,35 @@ export default function Home() {
                 )}
 
                 <div className="mb-4 rounded-2xl border border-white/10 bg-black/30 p-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-orange-400">Suggested Trade Plan</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-orange-400">
+                    Suggested Trade Plan
+                  </p>
                   <p className="mt-2 text-sm leading-6 text-zinc-300">
                     {getTradePlan(selectedStock)}
                   </p>
                 </div>
 
-                <div className="rounded-3xl border border-orange-500/20 bg-orange-500/5 p-4">
+                <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["Confirmation", getConfirmationTrigger(selectedStock)],
+                    ["Invalidation", getInvalidationRule(selectedStock)],
+                    ["Trader Fit", getBestTraderFit(selectedStock)],
+                  ].map((item) => (
+                    <div
+                      key={item[0]}
+                      className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                    >
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                        {item[0]}
+                      </p>
+                      <p className="mt-2 text-xs font-bold leading-5 text-white">
+                        {item[1]}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="rounded-2xl border border-orange-500/15 bg-orange-500/[0.03] p-4">
                   {aiLoading && (
                     <div className="space-y-3">
                       <div className="h-4 w-32 animate-pulse rounded bg-orange-400/20"></div>
@@ -3438,10 +10861,8 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="mt-4 flex items-center justify-between border-t border-white/10 pt-4">
-                  <p className="text-xs text-zinc-500">
-                    Powered by HT Labs AI
-                  </p>
+                <div className="mt-4 flex items-center justify-start border-t border-white/10 pt-4">
+                  <p className="text-xs text-zinc-500">Powered by HT Labs AI</p>
 
                   <motion.button
                     onClick={() => setSelectedStock(null)}
