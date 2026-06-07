@@ -6,93 +6,51 @@ export async function POST(req: Request) {
     const { symbol, price, change } = body;
 
     if (!symbol) {
-      return NextResponse.json(
-        { analysis: "Missing stock symbol.", price: price ?? null, change: change ?? null },
-        { status: 400 }
-      );
+      return NextResponse.json({ analysis: "Missing stock symbol." }, { status: 400 });
     }
 
-    const prompt = `
-You are HEADTAP AI, a premium AI stock scanner assistant.
+    const prompt = `You are HT Labs AI, a premium stock intelligence assistant.
 
-Analyze this stock setup using ONLY the data provided.
+Analyze this stock setup concisely and clearly.
 
-Stock:
-Symbol: ${symbol}
+Stock: ${symbol}
 Price: $${price}
-Percent Change: ${change}%
+Change: ${change >= 0 ? "+" : ""}${change?.toFixed(2)}%
 
-Return the response in this exact format:
+Provide:
+1. What is driving this move (1-2 sentences)
+2. Key signal quality assessment (1-2 sentences)
+3. Risk level and what to watch for (1-2 sentences)
+4. One clear action directive (buy/watch/avoid/wait)
 
-BIAS:
-Bullish, Bearish, or Neutral
+Keep it direct, data-driven, and under 150 words. No fluff.`;
 
-CONFIDENCE:
-0-100%
-
-MOMENTUM:
-Explain the current momentum in 1-2 short sentences.
-
-ENTRY ZONE:
-Give a simple possible entry zone based on the current price.
-
-RISK LEVEL:
-Low, Medium, or High
-
-SETUP SUMMARY:
-Give a short premium-style trading setup summary.
-`;
-
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        input: prompt,
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 200,
+        temperature: 0.7,
       }),
     });
 
-    const data = await response.json();
-
     if (!response.ok) {
-      return NextResponse.json(
-        {
-          analysis:
-            data.error?.message ||
-            "OpenAI request failed. Check your API key or model.",
-          symbol,
-          price,
-          change,
-        },
-        { status: 500 }
-      );
+      const err = await response.json();
+      console.error("OpenAI error:", err);
+      return NextResponse.json({ analysis: "AI analysis unavailable right now." }, { status: 500 });
     }
 
-    const analysis =
-      data.output_text ||
-      data.output?.[0]?.content?.[0]?.text ||
-      data.output?.[1]?.content?.[0]?.text ||
-      "OpenAI responded, but no text was found.";
+    const data = await response.json();
+    const analysis = data.choices?.[0]?.message?.content || "No analysis returned.";
 
-    return NextResponse.json({
-      symbol,
-      price,
-      change,
-      analysis,
-    });
+    return NextResponse.json({ analysis, symbol, price, change });
   } catch (error) {
-    console.error("AI ROUTE ERROR:", error);
-
-    return NextResponse.json(
-      {
-        analysis: "AI route failed. Check terminal for details.",
-        price: null,
-        change: null,
-      },
-      { status: 500 }
-    );
+    console.error("AI route error:", error);
+    return NextResponse.json({ analysis: "AI analysis failed. Please try again." }, { status: 500 });
   }
 }
