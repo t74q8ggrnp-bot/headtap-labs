@@ -1,4 +1,12 @@
 // app/api/polygon-scanner/route.ts
+//
+// MANUAL / TEST SCANNER ONLY
+//
+// This route is intentionally read-only.
+// It scans the curated Polygon universe for diagnostics,
+// but it must NOT write into ht_signals.
+// The live homepage trusts ht_signals, and production publishing
+// belongs to /api/signal-writer only.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -203,9 +211,10 @@ function scoreTicker(snap: TickerSnapshot, hasInsiderBuy: boolean, hasFDAEvent: 
   return { htScore, momentumScore, volumeScore, crowdScore, trapScore, state, pattern, catalystScore };
 }
 
-async function writeToSupabase(snap: TickerSnapshot, scores: ReturnType<typeof scoreTicker>): Promise<void> {
+function buildTestPayload(snap: TickerSnapshot, scores: ReturnType<typeof scoreTicker>) {
   const now = new Date();
-  const payload = {
+
+  return {
     ticker: snap.ticker,
     price: snap.price,
     change_percent: snap.changePercent,
@@ -221,12 +230,6 @@ async function writeToSupabase(snap: TickerSnapshot, scores: ReturnType<typeof s
     signal_state: scores.state,
     scanned_at: now.toISOString(),
   };
-
-  const { error } = await getSupabase()
-    .from("ht_signals")
-    .upsert(payload, { onConflict: "ticker" });
-
-  if (error) console.error("[Supabase write error]", snap.ticker, error.message);
 }
 
 export async function GET(req: Request) {
@@ -259,11 +262,11 @@ export async function GET(req: Request) {
       return { snap, scores: scoreTicker(snap, insiderBuys.has(snap.ticker), hasFDAEvent, catalystKeywords), hasFDAEvent, catalystKeywords };
     });
 
-    const batches = [];
-    for (let i = 0; i < scored.length; i += 10) batches.push(scored.slice(i, i + 10));
-    for (const batch of batches) {
-      await Promise.allSettled(batch.map(({ snap, scores }) => writeToSupabase(snap, scores)));
-    }
+    // IMPORTANT:
+    // polygon-scanner is manual/test only.
+    // It must NOT write into ht_signals because ht_signals powers the live homepage.
+    // Production writes belong to /api/signal-writer only.
+    const testPayloads = scored.map(({ snap, scores }) => buildTestPayload(snap, scores));
 
     const topSignals = scored
       .filter(({ scores }) => scores.htScore >= 60 || scores.catalystScore >= 20)
@@ -286,26 +289,23 @@ export async function GET(req: Request) {
         hasInsiderBuy: insiderBuys.has(snap.ticker), catalystKeywords,
       }));
 
-    if (catalystForMemory.length > 0) {
-      try {
-        const memRes = await fetch(
-          `${process.env.VERCEL_URL ? "https://" + process.env.VERCEL_URL : "http://localhost:3000"}/api/signal-memory-writer`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ signals: catalystForMemory }) }
-        );
-        if (memRes.ok) {
-          const memData = await memRes.json();
-          console.log(`[Polygon Scanner] Signal Memory: ${memData.message}`);
-        }
-      } catch (memErr) {
-        console.warn("[Polygon Scanner] Signal memory write failed:", memErr);
-      }
-    }
+    // Signal memory writes are intentionally disabled here.
+    // This route is a scanner diagnostic, not a production publisher.
+    // Production signal memory should be fed by verified published signals only.
 
     return NextResponse.json({
-      success: true, scanned: snapshots.length, written: scored.length,
-      catalystScanned: catalystTickers.length, catalystMemoryLogged: catalystForMemory.length,
-      insiderBuyTickers: Array.from(insiderBuys), topSignals,
-      elapsed: `${Date.now() - startTime}ms`, timestamp: new Date().toISOString(),
+      success: true,
+      mode: "manual_test_read_only",
+      message: "polygon-scanner scanned successfully but did not write to ht_signals. Production publishing belongs to /api/signal-writer.",
+      scanned: snapshots.length,
+      written: 0,
+      wouldHaveWritten: testPayloads.length,
+      catalystScanned: catalystTickers.length,
+      catalystMemoryLogged: 0,
+      insiderBuyTickers: Array.from(insiderBuys),
+      topSignals,
+      elapsed: `${Date.now() - startTime}ms`,
+      timestamp: new Date().toISOString(),
     });
 
   } catch (error) {
