@@ -2,7 +2,17 @@ import { NextResponse } from "next/server";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 
-type Quote = { price: number; change: number; volume: number; prevVolume: number; prevClose: number };
+// avgVolume: 10-day average daily volume — better baseline for relative volume
+// than a single previous day (which can itself be unusual). Populated from
+// Yahoo when available; Polygon snapshot doesn't expose an average volume field.
+type Quote = {
+  price: number;
+  change: number;
+  volume: number;
+  prevVolume: number;
+  prevClose: number;
+  avgVolume: number; // 10-day avg — use this as the relative volume denominator
+};
 
 function getLastTradingDate(): string {
   const now = new Date();
@@ -27,7 +37,9 @@ function getPrevTradingDate(): string {
   return date.toISOString().split("T")[0];
 }
 
-async function fetchPolygonGroupedDaily(date: string): Promise<Record<string, { close: number; volume: number; open: number }>> {
+async function fetchPolygonGroupedDaily(
+  date: string
+): Promise<Record<string, { close: number; volume: number; open: number }>> {
   const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${date}?adjusted=true&apiKey=${POLYGON_KEY}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Grouped daily failed: ${res.status}`);
@@ -46,23 +58,95 @@ async function fetchPolygonSnapshot(symbols: string[]): Promise<Record<string, Q
   const data = await res.json();
   const result: Record<string, Quote> = {};
   for (const t of data?.tickers ?? []) {
-    const price = Number(t?.day?.c || t?.prevDay?.c || 0);
+    // Price priority: lastTrade.p → day.c → prevDay.c
+    // lastTrade.p is the real-time last executed trade price.
+    // day.c updates periodically during market hours and can lag.
+    // prevDay.c is yesterday's close — genuine last resort only.
+    const price = Number(t?.lastTrade?.p || t?.day?.c || t?.prevDay?.c || 0);
     const prevClose = Number(t?.prevDay?.c || 0);
-    const change = prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : Number(t?.todaysChangePerc || 0);
-    if (price > 0) result[t.ticker] = { price, change, volume: Number(t?.day?.v || 0), prevVolume: Number(t?.prevDay?.v || 0), prevClose };
+    const change = prevClose > 0
+      ? ((price - prevClose) / prevClose) * 100
+      : Number(t?.todaysChangePerc || 0);
+
+    // Volume: current day volume and previous day volume from Polygon.
+    // avgVolume starts at 0 here — Yahoo pass below will fill it in for
+    // tickers that go through the fallback, or we'll use prevDay.v as proxy.
+    const currentVolume = Number(t?.day?.v || 0);
+    const prevDayVolume = Number(t?.prevDay?.v || 0);
+
+    if (price > 0) {
+      result[t.ticker] = {
+        price,
+        change,
+        volume: currentVolume,
+        prevVolume: prevDayVolume,
+        prevClose,
+        // Use prevDay.v as initial avgVolume proxy — Yahoo will overwrite
+        // with the real 10-day average for any ticker it covers.
+        avgVolume: prevDayVolume,
+      };
+    }
   }
   return result;
 }
 
 async function fetchYahooBulk(symbols: string[]): Promise<Record<string, Quote>> {
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(",")}&fields=regularMarketPrice,regularMarketChangePercent,regularMarketVolume,regularMarketPreviousClose`;
+  // Request averageDailyVolume10Day explicitly — this is the right baseline
+  // for relative volume. A single previous day's volume can itself be unusual
+  // and would make today look normal when it isn't (or vice versa).
+  const fields = [
+    "regularMarketPrice",
+    "regularMarketChangePercent",
+    "regularMarketVolume",
+    "regularMarketPreviousClose",
+    "averageDailyVolume10Day",
+  ].join(",");
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(",")}&fields=${fields}`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" });
   if (!res.ok) throw new Error("Yahoo failed");
   const result: Record<string, Quote> = {};
   for (const q of (await res.json())?.quoteResponse?.result ?? []) {
-    result[q.symbol] = { price: Number(q.regularMarketPrice ?? 0), change: Number(q.regularMarketChangePercent ?? 0), volume: Number(q.regularMarketVolume ?? 0), prevVolume: 0, prevClose: Number(q.regularMarketPreviousClose ?? 0) };
+    const currentVol = Number(q.regularMarketVolume ?? 0);
+    const avgVol = Number(q.averageDailyVolume10Day ?? 0);
+    const prevClose = Number(q.regularMarketPreviousClose ?? 0);
+    result[q.symbol] = {
+      price: Number(q.regularMarketPrice ?? 0),
+      change: Number(q.regularMarketChangePercent ?? 0),
+      volume: currentVol,
+      prevVolume: prevClose > 0 ? avgVol : 0, // prevVolume kept for back-compat
+      prevClose,
+      avgVolume: avgVol, // real 10-day average — use this for rvol
+    };
   }
   return result;
+}
+
+// After Polygon and Yahoo both run, merge avgVolume from Yahoo into Polygon
+// results so every ticker gets the best available volume baseline.
+async function enrichWithYahooAvgVolume(
+  merged: Record<string, Quote>,
+  symbols: string[]
+): Promise<void> {
+  // Only fetch Yahoo avg volume for tickers where avgVolume is still 0 or
+  // where we only have prevDay.v (a single-day proxy). Run in batches of 50.
+  const needsEnrichment = symbols.filter(s => merged[s] && merged[s].avgVolume === merged[s].prevVolume);
+  if (!needsEnrichment.length) return;
+
+  for (let i = 0; i < needsEnrichment.length; i += 50) {
+    const batch = needsEnrichment.slice(i, i + 50);
+    try {
+      const fields = "regularMarketVolume,averageDailyVolume10Day,regularMarketPreviousClose";
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${batch.join(",")}&fields=${fields}`;
+      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" });
+      if (!res.ok) continue;
+      for (const q of (await res.json())?.quoteResponse?.result ?? []) {
+        const avgVol = Number(q.averageDailyVolume10Day ?? 0);
+        if (avgVol > 0 && merged[q.symbol]) {
+          merged[q.symbol].avgVolume = avgVol;
+        }
+      }
+    } catch { /* silent — enrichment is best-effort */ }
+  }
 }
 
 export async function POST(req: Request) {
@@ -74,9 +158,14 @@ export async function POST(req: Request) {
     const merged: Record<string, Quote> = {};
 
     if (POLYGON_KEY) {
+      // Primary: Polygon snapshot (real-time price + today/prev day volume)
       for (let i = 0; i < symbols.length; i += 100) {
-        try { Object.assign(merged, await fetchPolygonSnapshot(symbols.slice(i, i + 100))); } catch {}
+        try {
+          Object.assign(merged, await fetchPolygonSnapshot(symbols.slice(i, i + 100)));
+        } catch {}
       }
+
+      // Fallback for any tickers Polygon missed
       const missing = symbols.filter(s => !merged[s] || merged[s].price === 0);
       if (missing.length > 0) {
         try {
@@ -89,17 +178,30 @@ export async function POST(req: Request) {
             const prev = prevDay[symbol];
             if (last?.close > 0) {
               const prevClose = prev?.close || last.open || 0;
-              merged[symbol] = { price: last.close, change: prevClose > 0 ? ((last.close - prevClose) / prevClose) * 100 : 0, volume: last.volume, prevVolume: prev?.volume || 0, prevClose };
+              merged[symbol] = {
+                price: last.close,
+                change: prevClose > 0 ? ((last.close - prevClose) / prevClose) * 100 : 0,
+                volume: last.volume,
+                prevVolume: prev?.volume || 0,
+                prevClose,
+                avgVolume: prev?.volume || 0, // will be overwritten by Yahoo enrichment
+              };
             }
           }
         } catch (err) { console.warn("Grouped daily failed", err); }
       }
+
+      // Enrich all Polygon results with Yahoo's 10-day avg volume
+      await enrichWithYahooAvgVolume(merged, symbols);
     }
 
+    // Full Yahoo fallback for anything still missing
     const stillMissing = symbols.filter(s => !merged[s] || merged[s].price === 0);
     if (stillMissing.length > 0) {
       for (let i = 0; i < stillMissing.length; i += 100) {
-        try { Object.assign(merged, await fetchYahooBulk(stillMissing.slice(i, i + 100))); } catch {}
+        try {
+          Object.assign(merged, await fetchYahooBulk(stillMissing.slice(i, i + 100)));
+        } catch {}
       }
     }
 

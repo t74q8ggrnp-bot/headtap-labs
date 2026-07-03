@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
+const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
       user_id: body.userId ?? null,
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from("ht_market_behavior")
       .insert(payload)
       .select("id")
@@ -73,8 +73,7 @@ export async function GET(req: Request) {
 
   try {
     if (mode === "patterns") {
-      // Pull all completed signals (not pending)
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from("ht_market_behavior")
         .select("*")
         .neq("outcome", "pending")
@@ -91,11 +90,9 @@ export async function GET(req: Request) {
         });
       }
 
-      // Day of week analysis
       const dayStats = DAY_NAMES.map((dayName, dayIndex) => {
         const daySignals = data.filter((s) => s.day_of_week === dayIndex);
         if (daySignals.length === 0) return null;
-
         const winners = daySignals.filter((s) => s.outcome === "winner").length;
         const winRate = Math.round((winners / daySignals.length) * 100);
         const avgGain1d = daySignals
@@ -104,7 +101,6 @@ export async function GET(req: Request) {
         const avgGain3d = daySignals
           .filter((s) => s.gain_3d !== null)
           .reduce((sum, s, _, arr) => sum + s.gain_3d / arr.length, 0);
-
         return {
           day: dayName,
           signals: daySignals.length,
@@ -114,7 +110,6 @@ export async function GET(req: Request) {
         };
       }).filter(Boolean);
 
-      // Session analysis
       const sessionStats = ["pre_market", "open", "mid_session", "power_hour"].map((session) => {
         const sessionSignals = data.filter((s) => s.market_session === session);
         if (sessionSignals.length < 2) return null;
@@ -123,7 +118,6 @@ export async function GET(req: Request) {
         return { session: session.replace("_", " "), signals: sessionSignals.length, winRate };
       }).filter(Boolean);
 
-      // Pattern analysis
       const patternStats = [...new Set(data.map((s) => s.pattern))].map((pattern) => {
         const patternSignals = data.filter((s) => s.pattern === pattern);
         if (patternSignals.length < 2) return null;
@@ -135,10 +129,8 @@ export async function GET(req: Request) {
         return { pattern, signals: patternSignals.length, winRate, avgGain: Math.round(avgGain * 10) / 10 };
       }).filter(Boolean).sort((a: any, b: any) => b.winRate - a.winRate);
 
-      // Generate plain english insights
       const insights: string[] = [];
 
-      // Best day insight
       const sortedDays = [...dayStats].sort((a: any, b: any) => b.winRate - a.winRate);
       if (sortedDays.length >= 2) {
         const best = sortedDays[0] as any;
@@ -148,7 +140,6 @@ export async function GET(req: Request) {
           insights.push(`${worst.day} signals underperform by ${best.winRate - worst.winRate}% compared to ${best.day}.`);
       }
 
-      // Best session insight
       const sortedSessions = [...sessionStats].sort((a: any, b: any) => b.winRate - a.winRate);
       if (sortedSessions.length >= 2) {
         const bestSession = sortedSessions[0] as any;
@@ -156,14 +147,12 @@ export async function GET(req: Request) {
           insights.push(`${bestSession.session.replace("_", " ")} signals outperform with ${bestSession.winRate}% win rate.`);
       }
 
-      // Best pattern insight
       if (patternStats.length >= 2) {
         const bestPattern = patternStats[0] as any;
         if (bestPattern.signals >= 3)
           insights.push(`${bestPattern.pattern} setups win ${bestPattern.winRate}% of the time with avg ${bestPattern.avgGain > 0 ? "+" : ""}${bestPattern.avgGain}% gain.`);
       }
 
-      // Social vs volume insight
       const highSocial = data.filter((s) => s.social_score >= 60);
       const lowSocial = data.filter((s) => s.social_score < 30);
       if (highSocial.length >= 3 && lowSocial.length >= 3) {
@@ -173,7 +162,6 @@ export async function GET(req: Request) {
           insights.push(`Social momentum signals outperform volume-only signals by ${socialWinRate - volWinRate}%.`);
       }
 
-      // Overall win rate
       const totalWinners = data.filter((s) => s.outcome === "winner").length;
       const overallWinRate = Math.round((totalWinners / data.length) * 100);
       insights.push(`Overall HT signal win rate: ${overallWinRate}% across ${data.length} tracked signals.`);

@@ -1,15 +1,14 @@
+// app/api/opportunity-ticker/route.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { scoreOpportunity } from "../opportunities/route";
 
-const supabase = createClient(
+const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// GET /api/opportunity-ticker?ticker=GME
-// GET /api/opportunity-ticker?ticker=GME&mode=explain
-// GET /api/opportunity-ticker?ticker=GME&mode=history
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const ticker = searchParams.get("ticker")?.toUpperCase().trim();
@@ -20,7 +19,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { data: scanRows } = await supabase
+    const { data: scanRows } = await getSupabase()
       .from("ht_scan_log")
       .select("*")
       .eq("ticker", ticker)
@@ -71,7 +70,7 @@ export async function GET(req: Request) {
     }
 
     if (mode === "history") {
-      const { data: history } = await supabase
+      const { data: history } = await getSupabase()
         .from("ht_market_behavior")
         .select("signaled_at, ht_score, signal_state, pattern, price_at_signal, gain_1d, gain_3d, gain_5d, outcome")
         .eq("ticker", ticker)

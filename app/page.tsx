@@ -16,6 +16,18 @@ type Stock = {
   change: number;
   volume?: number;
   prevVolume?: number;
+  // Polygon-enriched fields from ht_signals
+  relativeVolume?: number;
+  catalystScore?: number;
+  htSignalScore?: number;
+  momentumScore?: number;
+  crowdScore?: number;
+  trapScore?: number;
+  signalState?: string;
+  signalPattern?: string;
+  hasFDAEvent?: boolean;
+  hasInsiderBuy?: boolean;
+  changePercent?: number;
 };
 
 type MarketBadge = {
@@ -143,7 +155,7 @@ const defaultStarterTickers = [
 
 const broadMarketUniverse = [
   // Index / market pulse
-  "SPY", "QQQ", "IWM", "DIA", "VTI", "XLK", "XLF", "XLE", "XLI", "XLV", "XLY", "XLC", "SMH", "ARKK", "TQQQ", "SQQQ",
+  "SPY", "QQQ", "IWM", "DIA", "VTI", "XLK", "XLF", "XLE", "XLI", "XLV", "XLY", "XLC", "SMH", "ARKK",
 
   // Mega-cap / institutional leaders
   "AAPL", "MSFT", "NVDA", "GOOGL", "GOOG", "META", "AMZN", "TSLA", "NFLX", "AVGO", "ORCL", "CRM", "ADBE", "NOW", "UBER", "SHOP",
@@ -171,6 +183,29 @@ const broadMarketUniverse = [
 
   // Healthcare / biotech large-cap pulse
   "LLY", "NVO", "MRNA", "PFE", "MRK", "JNJ", "ABBV", "UNH", "ISRG", "TMDX",
+
+  // Defense / aerospace — real momentum movers
+  "AVAV", "KTOS", "RCAT", "DFEN", "HII", "NOC", "GD", "TDG", "AXON", "CACI", "SAIC", "LDOS",
+
+  // Quality mid-cap tech with real momentum history
+  "FTNT", "ZS", "OKTA", "GTLB", "CFLT", "MDB", "ESTC", "BILL", "HUBS", "SPRK",
+  "TTD", "TRADE", "APP", "APPLOVIN", "IREN", "CLBT", "CLOV", "CIFR", "APLD",
+
+  // Healthcare mid-cap momentum
+  "INSP", "ALGN", "IRTC", "NVCR", "ATRC", "PCVX", "BHVN", "ACAD", "RARE",
+  "SUPN", "ITCI", "HRMY", "PRAX", "TVTX",
+
+  // Industrial / clean energy momentum
+  "ENPH", "SEDG", "FSLR", "ARRY", "RUN", "NOVA", "STEM", "FLNC", "GNRC",
+  "CHPT", "BLNK", "EVGO", "PTRA",
+
+  // Retail / consumer mid-cap movers
+  "PTON", "CHWY", "ETSY", "W", "REAL", "CPNG", "SE", "GRAB", "DIDI",
+  "CART", "IBEX", "SKIN", "CURV",
+
+  // Small-cap special situations / catalyst-prone
+  "SIGA", "FULC", "URGN", "KALA", "NUVL", "JANX", "ERAS", "IMVT",
+  "CGON", "IRON", "KRUS", "BROS", "CAVA",
 ];
 
 const marketUniverse = Array.from(new Set([...defaultStarterTickers, ...broadMarketUniverse]));
@@ -181,6 +216,285 @@ const scannerFilters: { label: string; value: ScannerFilter }[] = [
   { label: "Bullish", value: "bullish" },
   { label: "Watchlist", value: "watchlist" },
 ];
+
+
+// ── MobileCardDetail ──────────────────────────────────────────────────────────
+// Per-swipe-card detail section. Extracted here so its internal variables
+// (read, stance, exits, isGreen) are properly scoped to this component and
+// cannot bleed into the Before The Crowd hero card or any other section.
+// All data it needs is passed explicitly as props — no captured closure state.
+// ──────────────────────────────────────────────────────────────────────────────
+interface MobileCardDetailProps {
+  current: Stock;
+  mobileCards: Stock[];
+  mobileCardIndex: number;
+  isHeroCard: boolean;
+  convictionLeaders: Stock[];
+  emergingRadarCandidates: { stock: Stock; radarScore: number }[];
+  watchlist: string[];
+  setMobileCardIndex: (fn: ((i: number) => number) | number) => void;
+  setSelectedStock: (s: Stock) => void;
+  toggleWatchlist: (sym: string) => void;
+  getHTScore: (s: Stock) => number;
+  getRelativeVolume: (s: Stock) => number;
+  getAttentionScore: (s: Stock) => number;
+  getContinuationStrengthScore: (s: Stock) => number;
+  getTrapRiskScore: (s: Stock) => number;
+  getEntryQualityScore: (s: Stock) => number;
+  detectPatternSignal: (s: Stock) => { name: string };
+  getSimpleConvictionRead: (s: Stock) => { state: string; score: number };
+  getHTStance: (s: Stock) => { label: string; desc: string; color: string; bg: string };
+  getContinuationWindows: (s: Stock) => { conservative: string };
+  getBackgroundOpportunityEngine: (s: Stock) => { crowdSaturationScore: number };
+}
+
+function MobileCardDetail({
+  current,
+  mobileCards,
+  mobileCardIndex,
+  isHeroCard,
+  convictionLeaders,
+  emergingRadarCandidates,
+  watchlist,
+  setMobileCardIndex,
+  setSelectedStock,
+  toggleWatchlist,
+  getHTScore,
+  getRelativeVolume,
+  getAttentionScore,
+  getContinuationStrengthScore,
+  getTrapRiskScore,
+  getEntryQualityScore,
+  detectPatternSignal,
+  getSimpleConvictionRead,
+  getHTStance,
+  getContinuationWindows,
+  getBackgroundOpportunityEngine,
+}: MobileCardDetailProps) {
+  // All vars here describe `current` (the swiped card), never the hero card.
+  const read = getSimpleConvictionRead(current);
+  const stance = getHTStance(current);
+  const exits = getContinuationWindows(current);
+  const isGreen = current.change >= 0;
+
+  return (
+    <>
+                  <div className="relative px-4 pt-4 pb-3 flex-shrink-0">
+
+                    {/* Swipe indicator + Live badge */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex gap-1.5">
+                          {mobileCards.slice(0, 8).map((_, i) => (
+                            <button
+                              key={i}
+                              onClick={() => setMobileCardIndex(i)}
+                              className={`h-1 rounded-full transition-all ${i === mobileCardIndex ? "w-6 bg-orange-400" : "w-2 bg-white/20"}`}
+                            />
+                          ))}
+                        </div>
+                        <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600">
+                          {mobileCardIndex + 1} of {mobileCards.length} · swipe for more
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                        <span className="text-[10px] font-black uppercase tracking-[0.14em] text-green-400">Live</span>
+                      </div>
+                    </div>
+
+                    {/* 1. Ranking */}
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-400 mb-2">
+                      {isHeroCard ? "HT Top Signal" : `#${mobileCardIndex + 1} Active Read`}
+                    </p>
+
+                    {/* 2. TICKER — only show if different from BTC hero above */}
+                    {!isHeroCard && (
+                      <h1 className="font-mono text-[5.5rem] font-black uppercase leading-[0.82] tracking-[-0.12em] text-white">
+                        {current.symbol}
+                      </h1>
+                    )}
+                    {isHeroCard && (
+                      <h1 className="font-mono text-[3rem] font-black uppercase leading-[0.9] tracking-[-0.08em] text-white">
+                        {current.symbol} — Signal Detail
+                      </h1>
+                    )}
+
+                    {/* 3. Stage badge */}
+                    <div className="mt-3 inline-flex items-center rounded-2xl border border-white/15 bg-white/[0.06] px-4 py-2">
+                      <p className="text-base font-black text-white">{read.state}</p>
+                    </div>
+
+                    {/* 4. WHY NOW — one sentence */}
+                    <p className="mt-2 text-sm font-semibold text-zinc-400 leading-5">
+                      {(() => {
+                        const rvol = getRelativeVolume(current);
+                        const attention = getAttentionScore(current);
+                        const crowd = getBackgroundOpportunityEngine(current).crowdSaturationScore;
+                        if (read.state.includes("Crowd Igniting"))
+                          return `Volume is ${rvol}x normal and crowd participation is accelerating.`;
+                        if (read.state.includes("Quiet Accumulation"))
+                          return `Buying pressure is building quietly while attention remains low.`;
+                        if (read.state.includes("Pressure"))
+                          return `Momentum is building before it becomes obvious to everyone.`;
+                        if (read.state.includes("Momentum Wave"))
+                          return `The move is holding and buyers continue to show up.`;
+                        if (read.state.includes("Breakout"))
+                          return `Setup is approaching a key trigger — volume confirmation needed.`;
+                        if (read.state.includes("Avoid") || read.state.includes("Trap"))
+                          return `Risk is too elevated for a clean entry right now.`;
+                        if (read.state.includes("Buyers Needed"))
+                          return `Price is dropping. Wait for buyers to step in with volume.`;
+                        if (read.state.includes("Pullback"))
+                          return `Good setup — a cleaner entry will come after it settles.`;
+                        if (read.state.includes("Exhaustion"))
+                          return `The move is extended. Entering here means buying late.`;
+                        if (read.state.includes("Attention"))
+                          return `Interest is increasing without signs of crowd saturation.`;
+                        return `HT is watching for one more confirmation before acting.`;
+                      })()}
+                    </p>
+
+                    {/* 5. Price + Change — only show if different from BTC hero */}
+                    {!isHeroCard && (
+                      <div className="mt-4 flex items-center gap-3">
+                        <span className="font-mono text-2xl font-black text-white">${current.price.toFixed(2)}</span>
+                        <span className={`font-mono text-xl font-black ${isGreen ? "text-green-400" : "text-red-400"}`}>
+                          {isGreen ? "+" : ""}{current.change.toFixed(2)}%
+                        </span>
+                      </div>
+                    )}
+
+                    {/* 6. Conviction score — only show if different from BTC hero */}
+                    {!isHeroCard && <div className="mt-3">
+                      <div className="inline-flex flex-col rounded-2xl border border-orange-400/25 bg-orange-500/10 px-4 py-3">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-4xl font-black text-orange-300">{getHTScore(current)}</span>
+                          <span className="text-sm font-black uppercase text-orange-400">Conviction</span>
+                        </div>
+                        <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-500">
+                          {getHTScore(current) >= 90 ? "Top Active Read Right Now" :
+                           getHTScore(current) >= 80 ? "High Rated Setup" :
+                           getHTScore(current) >= 70 ? "Active Watch" :
+                           "Developing Setup"}
+                        </p>
+                      </div>
+                      <p className="mt-2 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-600">
+                        Entry Quality:{" "}
+                        <span className={getEntryQualityScore(current) >= 78 ? "text-green-400" : getEntryQualityScore(current) >= 62 ? "text-yellow-400" : "text-zinc-600"}>
+                          {getEntryQualityScore(current) >= 78 ? "Strong" : getEntryQualityScore(current) >= 62 ? "Fair" : "Weak"}
+                        </span>
+                      </p>
+                    </div>}
+                  </div>
+
+                  {/* Why HT Likes This */}
+                  <div className="px-4 pb-3 flex-shrink-0">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300 mb-2.5">Why HT Likes This</p>
+                      <div className="space-y-1.5">
+                        {[
+                          { good: getRelativeVolume(current) >= 2, text: getRelativeVolume(current) >= 2 ? "Volume is accelerating" : "Volume is not yet elevated" },
+                          { good: getAttentionScore(current) >= 65, text: getAttentionScore(current) >= 65 ? "Crowd attention is increasing" : "Crowd has not noticed yet" },
+                          { good: getContinuationStrengthScore(current) >= 60, text: getContinuationStrengthScore(current) >= 60 ? "Price structure remains clean" : "Price structure needs to hold" },
+                          { good: getTrapRiskScore(current) < 55, text: getTrapRiskScore(current) < 55 ? "Low reversal risk" : "Watch for potential reversal" },
+                        ].map(({ good, text }) => (
+                          <div key={text} className="flex items-center gap-2.5">
+                            <span className={`text-sm font-black ${good ? "text-green-400" : "text-zinc-700"}`}>{good ? "✓" : "×"}</span>
+                            <p className={`text-sm font-semibold ${good ? "text-zinc-200" : "text-zinc-600"}`}>{text}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CTAs */}
+                  <div className="px-4 pb-3 flex-shrink-0">
+                    <button
+                      onClick={() => setSelectedStock(current)}
+                      className="w-full rounded-2xl bg-orange-500 py-4 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[0_0_20px_rgba(249,115,22,0.28)]"
+                    >
+                      View Full Analysis →
+                    </button>
+                    <button
+                      onClick={() => toggleWatchlist(current.symbol)}
+                      className="mt-2 w-full rounded-2xl border border-white/10 bg-transparent py-3 text-sm font-black uppercase tracking-[0.08em] text-zinc-500"
+                    >
+                      {watchlist.includes(current.symbol) ? "✓ In Watchlist" : "Add to Watchlist ☆"}
+                    </button>
+                  </div>
+
+                  {/* HT Decision */}
+                  <div className="px-4 pb-4 flex-shrink-0">
+                    <div className={`rounded-2xl border p-5 ${stance.bg}`}>
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 mb-1">HT Decision</p>
+                      <p className={`text-3xl font-black ${stance.color}`}>{stance.label}</p>
+                      <p className="mt-2 text-sm font-semibold text-zinc-300">{stance.desc}</p>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl bg-black/30 p-3">
+                          <p className="text-[9px] font-black uppercase text-green-400">Target</p>
+                          <p className="mt-1 font-mono text-lg font-black text-green-300">{exits.conservative}</p>
+                        </div>
+                        <div className="rounded-xl bg-black/30 p-3">
+                          <p className="text-[9px] font-black uppercase text-red-400">Exit If</p>
+                          <p className="mt-1 text-xs font-black text-red-300">Volume drops below normal</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Before The Crowd */}
+                  <div className="px-4 pb-6 flex-shrink-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300 mb-3">👁 What HT Is Watching</p>
+                    <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none]">
+                      {emergingRadarCandidates.slice(0, 6).map(({ stock, radarScore }) => (
+                        <button
+                          key={stock.symbol}
+                          onClick={() => setSelectedStock(stock)}
+                          className="shrink-0 rounded-2xl border border-cyan-300/20 bg-cyan-400/[0.04] p-4 w-36"
+                        >
+                          <p className="font-mono text-xl font-black text-white">{stock.symbol}</p>
+                          <p className={`mt-1 font-mono text-sm font-black ${stock.change >= 0 ? "text-green-300" : "text-red-300"}`}>
+                            {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(1)}%
+                          </p>
+                          <p className="mt-1.5 text-[9px] font-black uppercase text-cyan-300">{radarScore}% conf</p>
+                          <p className="mt-0.5 text-[9px] font-semibold text-zinc-500">Early watch</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Today's Battlefield */}
+                  <div className="px-4 pb-24 flex-shrink-0">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-300 mb-3">Today's Battlefield</p>
+                    <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none]">
+                      {convictionLeaders.slice(0, 10).map((stock) => {
+                        const pattern = detectPatternSignal(stock).name;
+                        const emoji =
+                          stock.change < 0 ? "📉" :
+                          pattern === "Quiet Accumulation" ? "👀" :
+                          pattern === "Crowd Ignition" ? "🔥" :
+                          pattern === "Continuation Stack" ? "🌊" :
+                          getHTScore(stock) >= 85 ? "🔥" : "⚡";
+                        return (
+                          <button
+                            key={stock.symbol}
+                            onClick={() => setSelectedStock(stock)}
+                            className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 w-28"
+                          >
+                            <p className="font-mono text-base font-black text-white">{stock.symbol}</p>
+                            <p className="mt-1 text-lg">{emoji}</p>
+                            <p className={`mt-1 font-mono text-xs font-black ${stock.change >= 0 ? "text-green-300" : "text-red-300"}`}>
+                              {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(1)}%
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+    </>
+  );
+}
 
 export default function Home() {
   // build: v149-auth-stability-v120-behavior
@@ -210,6 +524,55 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [mobileCardIndex, setMobileCardIndex] = useState(0);
 
+  // ATR cache — keyed by ticker symbol.
+  // Only fetched when active top pick changes. Never refetched on 30s refresh.
+  type ATRData = {
+    atr14: number;
+    support: number;
+    resistance: number;
+    volatility20d: number;
+    fetchedAt: number; // timestamp for stale detection
+  };
+  const [atrCache, setAtrCache] = useState<Record<string, ATRData>>({});
+
+  // Trade framework result — computed from ATR + engine data
+  type TradeFramework = {
+    uptideMin: number;   // % upside lower bound
+    uptideMax: number;   // % upside upper bound
+    riskZone: number;    // % downside
+    rr: number;          // risk/reward ratio (upside mid / risk)
+    confidence: "High" | "Moderate" | "Early" | "Speculative";
+    horizon: string;     // "Multi-day", "1–3 days", "Intraday", "Event-driven"
+    sentence: string;    // one-line explanation
+    isLive: boolean;     // false when market is closed
+  };
+  const [smFramework, setSMFramework] = useState<TradeFramework | null>(null);
+  const [btcFramework, setBTCFramework] = useState<TradeFramework | null>(null);
+
+  // Morning Market Context
+  type MarketContext = {
+    spy: { price: number; change: number; rvol: number };
+    qqq: { price: number; change: number; rvol: number };
+    iwm: { price: number; change: number; rvol: number };
+    vix: { price: number; change: number } | null;
+    mood: string;
+    moodColor: string;
+    volumeEnv: string;
+    avgRvol: number;
+  };
+  const [marketCtx, setMarketCtx] = useState<MarketContext | null>(null);
+
+  // Decision Trace — computed alongside frameworks, shows engine reasoning
+  type DecisionTrace = {
+    opportunityScore: number;
+    confidence: "High" | "Moderate" | "Early" | "Speculative";
+    primaryDrivers: string[];
+    rejectedAlternatives: { symbol: string; reason: string }[];
+    candidatesEvaluated: number;
+  };
+  const [smTrace, setSMTrace] = useState<DecisionTrace | null>(null);
+  const [btcTrace, setBTCTrace] = useState<DecisionTrace | null>(null);
+
   // HT Alert System
   type HTAlert = {
     id: string;
@@ -223,7 +586,6 @@ export default function Home() {
   };
   const [alerts, setAlerts] = useState<HTAlert[]>([]);
   const [alertsOpen, setAlertsOpen] = useState(false);
-  const [alertsLastChecked, setAlertsLastChecked] = useState<Date | null>(null);
   const prevAlertTickers = useRef<Set<string>>(new Set());
 
   const generateAlerts = (currentStocks: Stock[]) => {
@@ -237,7 +599,6 @@ export default function Home() {
       const rvol = getRelativeVolume(stock);
       const crowd = getBackgroundOpportunityEngine(stock).crowdSaturationScore;
       const pattern = detectPatternSignal(stock).name;
-      const social = socialIntel[ticker];
       const isDown = stock.change < 0;
       const recovery = getRecoveryScore(stock);
 
@@ -247,7 +608,6 @@ export default function Home() {
       const alertId = `btc-${ticker}`;
       const momId = `mom-${ticker}`;
       const recId = `rec-${ticker}`;
-      const socId = `soc-${ticker}`;
 
       // ── ALERT THRESHOLDS ─────────────────────────────
       // These are intentionally strict. The bell should mean something.
@@ -298,21 +658,7 @@ export default function Home() {
         });
         prevAlertTickers.current.add(recId);
       }
-      // Social Surge — must be meaningful acceleration, not background noise
-      // socialScore >= 70, ht >= 65, not crowded
-      else if (social && social.socialScore >= 70 && ht >= 65 && !isDown && crowd < 60 && !prevAlertTickers.current.has(socId)) {
-        newAlerts.push({
-          id: `${socId}-${now.getTime()}`,
-          ticker,
-          type: "social",
-          title: `🧲 Attention Accelerating — ${ticker}`,
-          message: `${ticker} social momentum hit ${social.socialScore}/100. ${social.signals[0] ?? "Unusual attention building before price fully reacts."}`,
-          confidence: ht,
-          timestamp: now,
-          read: false,
-        });
-        prevAlertTickers.current.add(socId);
-      }
+
     }
 
     if (newAlerts.length > 0) {
@@ -323,21 +669,7 @@ export default function Home() {
   const [mobileTab, setMobileTab] = useState<"home" | "convictions" | "scanner" | "watchlist" | "profile">("home");
 
   // Social Momentum Layer
-  type SocialIntel = {
-    ticker: string;
-    socialScore: number;
-    beforeCrowdScore: number;
-    crowdStage: number;
-    crowdStageLabel: string;
-    crowdStageEmoji: string;
-    signals: string[];
-    acceleration: number;
-    mentionVelocity: string;
-    stocktwits?: { mentions: number; sentiment: string; watchlistCount: number; trending: boolean };
-    reddit?: { mentions: number; posts: number; subreddits: string[] };
-    news?: { articles: number; velocity: number };
-  };
-  const [socialIntel, setSocialIntel] = useState<Record<string, SocialIntel>>({});
+
 
   // Premarket Intelligence
   type PremarketMover = {
@@ -439,46 +771,115 @@ export default function Home() {
     riskNote: string;
     signals: string[];
     isBeforeCrowd: boolean;
+    catalystScore?: number;
+    catalystTags?: string[];
+    relativeVolume?: number;
+    crowdStage?: number;
+    _convictionTier?: string;
+    _isCatalyst?: boolean;
   };
   const [apiMomentum, setApiMomentum] = useState<APIOpportunity | null>(null);
   const [apiRecovery, setApiRecovery] = useState<APIOpportunity | null>(null);
-  const [apiOpportunitiesLoaded, setApiOpportunitiesLoaded] = useState(false);
+  const [apiCatalyst, setApiCatalyst] = useState<APIOpportunity | null>(null);
+
+  // Bull/Bear case state — generated when top conviction ticker changes
+  type BullBearData = {
+    ticker: string;
+    onRadar: string;
+    bullCase: string[];
+    bearCase: string[];
+    crowdFocus: string;
+    htRead: string;
+    newsCount: number;
+    timestamp: string;
+  };
+  const [bullBearData, setBullBearData] = useState<BullBearData | null>(null);
+  const [bullBearLoading, setBullBearLoading] = useState(false);
+  const [bullBearTicker, setBullBearTicker] = useState<string>("");
+  const [bullBearExpanded, setBullBearExpanded] = useState(false);
 
   const fetchAPIOpportunities = async () => {
     try {
-      const [momRes, recRes] = await Promise.all([
+      const [momRes, recRes, catRes] = await Promise.all([
         fetch("/api/opportunities?type=momentum&limit=5"),
         fetch("/api/opportunities?type=recovery&limit=5"),
+        fetch("/api/opportunities?type=catalyst&limit=3"),
       ]);
+      // Collect all candidates from all three endpoints
+      const allCandidates: any[] = [];
+
       if (momRes.ok) {
         const data = await momRes.json();
-        // Filter out exhaustion risk and watch types from momentum
-        const validMomentum = (data.opportunities ?? []).find(
+        const valid = (data.opportunities ?? []).filter(
           (o: any) => !o.stage.includes("Exhaustion") && o.opportunityType !== "watch" && o.opportunityScore >= 30
         );
-        if (validMomentum) setApiMomentum(validMomentum);
+        allCandidates.push(...valid);
       }
       if (recRes.ok) {
         const data = await recRes.json();
         if (data.opportunities?.[0]) setApiRecovery(data.opportunities[0]);
       }
-      setApiOpportunitiesLoaded(true);
+      if (catRes.ok) {
+        const data = await catRes.json();
+        // Catalyst signals always included — sorted by catalystScore desc
+        const catSignals = (data.opportunities ?? []).filter((o: any) => o.catalystScore >= 20);
+        catSignals.forEach((o: any) => { o._isCatalyst = true; });
+        if (catSignals[0]) setApiCatalyst(catSignals[0]);
+        allCandidates.push(...catSignals);
+      }
+
+      // ── Rank all candidates — catalyst signals get strong boost ──
+      const rankSignal = (o: any): number => {
+        let score = 0;
+        score += (o.opportunityScore ?? 0) * 0.30;
+        score += (o.confidence ?? 0) * 0.20;
+        // Catalyst signals get a hard 40pt boost — they are always high priority
+        score += o._isCatalyst ? 40 : 0;
+        score += Math.min(25, (o.catalystScore ?? 0));
+        score += (o.momentumScore ?? 0) * 0.10;
+        score -= (o.attentionScore ?? 50) * 0.05;
+        score -= (o.riskScore ?? 50) * 0.03;
+        return Math.round(score);
+      };
+
+      if (allCandidates.length > 0) {
+        const ranked = [...allCandidates].sort((a, b) => rankSignal(b) - rankSignal(a));
+        // Only set apiMomentum if the top candidate actually exists in stocks
+        // and passes the SM gate — prevents HOOD and other crowded stocks
+        // from getting in through the back door
+        const topConviction = ranked.find(c => {
+          const stock = stocks.find(s => s.symbol === c.ticker);
+          if (!stock) return false;
+          const saturation = (stock as any).crowdScore ?? 50;
+          const isCrowded = saturation > 65;
+          const isPermanentlySaturated = [
+            "META","AAPL","MSFT","GOOGL","GOOG","AMZN","NVDA","TSLA",
+            "SPY","QQQ","IWM","DIA","VTI","XLK","XLF","XLE","SMH","ARKK",
+            "JPM","BAC","GS","MS","WFC","V","MA","WMT","COST","JNJ","UNH","LLY","NVO",
+          ].includes(stock.symbol);
+          return !isCrowded && !isPermanentlySaturated;
+        }) ?? ranked[0];
+
+        const convScore = rankSignal(topConviction);
+        topConviction._convictionTier = convScore >= 80
+          ? "Top Conviction"
+          : convScore >= 60
+          ? "High Opportunity"
+          : convScore >= 40
+          ? "Early Watch"
+          : "Watchlist";
+        setApiMomentum(topConviction);
+      } else if (allCandidates.length === 0) {
+        // Nothing qualified — clear hero
+        setApiMomentum(null);
+      }
+
     } catch (e) {
       console.warn("API opportunities fetch failed:", e);
     }
   };
 
-  const fetchSocialIntel = async (ticker: string) => {
-    if (socialIntel[ticker]) return; // already fetched
-    try {
-      const res = await fetch(`/api/social-intel?ticker=${ticker}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setSocialIntel(prev => ({ ...prev, [ticker]: data }));
-    } catch (e) {
-      console.warn("Social intel failed for", ticker, e);
-    }
-  };
+
 
   // HT Change Log — tracks what changed between scans
   type ChangeLogEntry = {
@@ -494,7 +895,6 @@ export default function Home() {
   const [authMessage, setAuthMessage] = useState("");
   const [searchStatus, setSearchStatus] = useState("Search any ticker to pull it into HT instantly.");
   const [cloudSyncMessage, setCloudSyncMessage] = useState("");
-  const [signalMemoryMessage, setSignalMemoryMessage] = useState("Signal memory waiting for login.");
   const [signalMemoryInsight, setSignalMemoryInsight] = useState<SignalMemoryInsight | null>(null);
   const lastSignalMemoryKey = useRef("");
   const lastOutcomeEvaluationKey = useRef("");
@@ -885,11 +1285,8 @@ export default function Home() {
     const ht = getHTScore(stock);
     const move = stock.change;
     const attention = getAttentionScore(stock);
-    const social = socialIntel[stock.symbol];
-
     const parts: string[] = [];
     if (rvol >= 2) parts.push(`Volume is ${rvol.toFixed(1)}x average.`);
-    if (social?.socialScore >= 40) parts.push(`Social mentions increased ${social.acceleration > 0 ? Math.round(social.acceleration) + "%" : "significantly"}.`);
     if (move >= 3) parts.push(`Price is up ${move.toFixed(1)}% with structure intact.`);
     if (attention >= 75) parts.push(`Market attention remains elevated.`);
     if (ht >= 85) parts.push(`HT confidence is ${ht}% — momentum continues to accelerate.`);
@@ -908,23 +1305,20 @@ export default function Home() {
   };
 
   const getRelativeVolume = (stock: Stock) => {
-    // Use real volume data if available from Polygon
+    // Priority 1: Use pre-computed relativeVolume from ht_signals (Polygon data)
+    if (stock.relativeVolume && stock.relativeVolume > 0) {
+      return Number(Math.min(10, Math.max(0.1, stock.relativeVolume)).toFixed(1));
+    }
+
+    // Priority 2: Compute from raw volume if available
     if (stock.volume && stock.volume > 0 && stock.prevVolume && stock.prevVolume > 0) {
       const rvol = stock.volume / stock.prevVolume;
       return Number(Math.min(10, Math.max(0.1, rvol)).toFixed(1));
     }
 
-    // Fallback: estimate from price change when real volume not available
+    // Priority 3: Estimate from price change (last resort — no Polygon data available)
     const move = Math.abs(stock.change);
-    const symbolBoosts: Record<string, number> = {
-      SNAL: 6.8, RGTI: 5.2, QBTS: 5.0, LUNR: 4.9, IOVA: 4.7,
-      QUBT: 4.4, RKLB: 4.1, IONQ: 3.9, SOUN: 3.8, ACHR: 3.6,
-      MSTR: 3.2, COIN: 3.0, PLTR: 2.6, HOOD: 2.4, NVDA: 2.1,
-    };
-
-    return Number(
-      (symbolBoosts[stock.symbol] || Math.max(0.8, 1 + move / 3)).toFixed(1),
-    );
+    return Number(Math.max(0.8, 1 + move / 3).toFixed(1));
   };
 
   const getGapSignal = (stock: Stock) => {
@@ -949,23 +1343,27 @@ export default function Home() {
   };
 
   const getAttentionScore = (stock: Stock) => {
+    // Use Polygon-backed crowdScore from ht_signals when available
+    if (stock.crowdScore && stock.crowdScore > 0) {
+      const isSaved = watchlist.includes(stock.symbol) || savedSetups.includes(stock.symbol);
+      const catalystBoost = (stock.catalystScore ?? 0) >= 20 ? 10 : 0;
+      return Math.min(99, Math.max(35, Math.round(stock.crowdScore + (isSaved ? 5 : 0) + catalystBoost)));
+    }
+
+    // Fallback: compute from price/volume when ht_signals not available
     const rvol = getRelativeVolume(stock);
     const move = Math.abs(stock.change);
     const hasNews = Boolean(getNewsArticles(stock.symbol)[0]?.headline);
     const newsVelocity = getNewsVelocityScore(stock);
-    const isSaved =
-      watchlist.includes(stock.symbol) || savedSetups.includes(stock.symbol);
+    const isSaved = watchlist.includes(stock.symbol) || savedSetups.includes(stock.symbol);
 
     let score = 45;
-
     score += Math.min(24, move * 2);
     score += Math.min(18, rvol * 3);
-
     if (hasNews) score += 8;
     if (newsVelocity >= 75) score += 7;
     if (newsVelocity >= 60) score += 4;
     if (isSaved) score += 5;
-    if (stock.symbol === "SNAL" || stock.symbol === "QUBT") score += 6;
 
     return Math.min(99, Math.max(35, Math.round(score)));
   };
@@ -1710,6 +2108,8 @@ export default function Home() {
     internal_reason: string;
     status: SignalMemoryStatus;
   };
+
+
 
   type CrowdSaturationLevel =
     | "Low Saturation"
@@ -2965,6 +3365,17 @@ export default function Home() {
     const reclaimPenalty = stock.change < 0 ? 14 : 0;
     const gatePenalty = qualityGate === "Reject" ? 26 : qualityGate === "Caution" ? 10 : 0;
 
+    // Full market discoveries arrive with ht_signals enrichment data.
+    // Give them a direct opportunity bonus based on their actual rvol and
+    // price movement so they can compete with known stocks that have full
+    // pressure stack data computed from historical signals.
+    const isNewDiscovery = rvol >= 2 && move >= 1 && (
+      participation < 20 || continuation < 20 || entryQuality < 20
+    );
+    const discoveryBonus = isNewDiscovery
+      ? Math.min(35, (rvol >= 5 ? 25 : rvol >= 3 ? 18 : 12) + (move >= 10 ? 10 : move >= 5 ? 6 : 3))
+      : 0;
+
     return Math.round(
       ht * 0.2 +
         signal * 0.14 +
@@ -2976,7 +3387,8 @@ export default function Home() {
         Math.min(10, rvol * 1.7) +
         Math.min(8, freshness * 0.65) +
         moveBonus +
-        cleanPatternBoost -
+        cleanPatternBoost +
+        discoveryBonus -
         extensionPenalty -
         reclaimPenalty -
         gatePenalty,
@@ -3726,12 +4138,508 @@ export default function Home() {
   };
 
   const getHTScore = (stock: Stock) => {
-    return buildPressureStack(stock).convictionScore;
+    try {
+      const stack = buildPressureStack(stock);
+      const base = stack.convictionScore;
+
+      // Catalyst bonus — uses only data already on the stock object or
+      // synchronously computed from newsIntel. Does NOT call
+      // getBackgroundOpportunityEngine which reads async newsIntel state
+      // and made getHTScore non-deterministic (same stock, different calls,
+      // different scores depending on newsIntel population order).
+      const newsCatalystScore = getNewsCatalystScore(stock);
+      const catalystRaw = Math.max(
+        stock.catalystScore ?? 0,
+        newsCatalystScore >= 55 ? newsCatalystScore * 0.4 : 0
+      );
+
+      // Use pressure stack's own continuation/participation data for multiplier
+      // These are synchronous and always available — no async state dependency.
+      const isStrongContinuation = stack.continuationStrength >= 75;
+      const isModerateUp = stack.continuationStrength >= 55;
+      const catalystMultiplier = isStrongContinuation ? 1.35 : isModerateUp ? 1.15 : 1.0;
+
+      const catalystBonus = catalystRaw > 0
+        ? Math.min(25, catalystRaw * 0.28 * catalystMultiplier)
+        : 0;
+
+      const qualityPenalty =
+        stack.qualityGate === "Reject" ? 18 :
+        stack.qualityGate === "Caution" ? 8 :
+        (stack.trapRiskScore ?? 0) >= 70 ? 6 : 0;
+
+      const total = base + catalystBonus - qualityPenalty;
+      if (!isFinite(total)) return 0;
+      return Math.min(100, Math.max(0, Math.round(total)));
+    } catch {
+      return 0; // broken data should never pass any gate
+    }
   };
 
-  const getHTOpportunityScore = (stock: Stock) => {
-    return buildPressureStack(stock).opportunityScore;
+
+  // ── PIPELINE REDESIGN ────────────────────────────────────────────────────
+  // Old: Universe → Score Everything → Highest Score Wins
+  // New: Universe → Eligibility Gate → getOpportunityScore → Rank → Winner
+  //
+  // Two separate gates. Two separate ranking philosophies.
+  // Catalyst score is a first-class variable in both.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Stocks that are permanently saturated by institutional ownership and
+  // global awareness. These can never qualify for Before The Crowd.
+  // A catalyst exception exists: if catalystScore >= 55 AND it's a real
+  // event (FDA/Earnings/M&A), even a mega-cap can qualify for BTC.
+  const PERMANENTLY_SATURATED = new Set([
+    // Mega-cap tech
+    "META","AAPL","MSFT","GOOGL","GOOG","AMZN","NVDA","TSLA","NFLX","AVGO",
+    "ORCL","CRM","ADBE","NOW","UBER","SHOP","ARM","QCOM","INTC","MU",
+    // Major ETFs — never a discovery opportunity
+    "SPY","QQQ","IWM","DIA","VTI","VTK","XLK","XLF","XLE","XLI","XLV",
+    "XLY","XLC","SMH","ARKK","GLD","SLV","TLT","HYG",
+    // Major financials
+    "JPM","BAC","GS","MS","WFC","V","MA","AXP","SCHW","BRK","BRK.B",
+    // Major consumer / healthcare
+    "WMT","COST","TGT","NKE","DIS","SBUX","JNJ","UNH","PFE","MRK",
+    "ABBV","LLY","NVO","ISRG",
+    // Major energy / industrial
+    "XOM","CVX","CAT","GE","BA","LMT","RTX",
+    // High-profile retail favorites — permanently crowded, always watched
+    // These stocks have millions of retail followers and should never
+    // appear as "Before The Crowd" or early SM opportunities
+    "HOOD","MSTR","COIN","GME","AMC","PLTR","RDDT","RIVN","SOFI",
+  ]);
+
+  // ── Spot Momentum eligibility gate ───────────────────────────────────────
+  // SM should only consider stocks where something is actually happening today.
+  // Stable large caps with no movement do not represent asymmetric opportunity.
+  const qualifiesForSpotMomentum = (stock: Stock): boolean => {
+    try {
+      const rvol = getRelativeVolume(stock);
+      const absChange = Math.abs(stock.change ?? 0);
+      const score = getHTScore(stock);
+      const hce = isHighConvictionEvent(stock);
+      const saturation = getBackgroundOpportunityEngine(stock).crowdSaturationScore;
+      const stack = buildPressureStack(stock);
+      const extensionRisk = getExtensionRiskScore(stock);
+
+      // Hard floor
+      if (score < 50) return false;
+
+      // A crowded stock is not a Spot Momentum opportunity.
+      // Crowded means the crowd already arrived — there is no early edge.
+      // This applies regardless of how much the stock moved today.
+      if (saturation > 65 && !hce) return false;
+
+      // Also block heavily extended moves without a catalyst
+      if (extensionRisk >= 75 && !hce) return false;
+
+      // HCE always qualifies regardless of crowd/extension
+      if (hce) return (stock.catalystScore ?? 0) >= 35;
+
+      // ETFs never win SM
+      const isETF = ["SPY","QQQ","IWM","DIA","VTI","SMH","ARKK","XLK","XLF","XLE","XLI","XLV","XLY","XLC"].includes(stock.symbol);
+      if (isETF) return false;
+
+      // Hard exclusion — stocks that are permanently famous regardless of
+      // what the computed saturation score says. These will never be
+      // early opportunities. Period.
+      const isAlwaysCrowded = [
+        // Meme/retail favorites
+        "HOOD","GME","AMC","MSTR","COIN","RDDT","RIVN","SOFI","DJT",
+        // Mega-cap tech — billions of people know these stocks
+        "AAPL","MSFT","GOOGL","GOOG","META","AMZN","NVDA","TSLA","NFLX",
+        "AVGO","ORCL","CRM","ADBE","PLTR","AMD",
+        // Mega-cap semis and hardware
+        "TSM","INTC","QCOM","ARM","ASML","MU","AMAT","LRCX","KLAC",
+        // Major financials and consumer
+        "JPM","BAC","GS","V","MA","WMT","COST","DIS","NKE",
+      ].includes(stock.symbol);
+      if (isAlwaysCrowded && !hce) return false;
+
+      // No minimum price filter — a stock at $0.21 with real volume
+      // is a legitimate opportunity (OTLK ran from $0.21 to $1.60+).
+      // Volume is the quality gate, not price.
+      // Minimum average daily volume — must be liquid enough to trade
+      const avgVol = stock.prevVolume ?? 0;
+      if (avgVol > 0 && avgVol < 50000 && !hce) return false;
+
+      // Must have real activity
+      return rvol >= 1.15 || absChange >= 0.8;
+    } catch { return false; }
   };
+
+  // ── Before The Crowd eligibility gate ────────────────────────────────────
+  // BTC requires genuine early positioning. Two layers:
+  // Layer 1 — Permanent exclusion (mega caps, major ETFs)
+  //   Exception: real catalyst (FDA/Earnings/M&A) with score >= 55 can override
+  // Layer 2 — Dynamic checks (saturation, volume, pattern)
+  const qualifiesForBeforeTheCrowd = (stock: Stock): boolean => {
+    try {
+      const rvol = getRelativeVolume(stock);
+      const engine = getBackgroundOpportunityEngine(stock);
+      const saturation = engine.crowdSaturationScore;
+      const pattern = detectPatternSignal(stock).name;
+      const hce = isHighConvictionEvent(stock);
+      const catalystRaw = stock.catalystScore ?? 0;
+      const score = getHTScore(stock);
+
+      // Must have a baseline score
+      if (score < 50) return false;
+
+      // Layer 1 — Permanent exclusion check
+      if (PERMANENTLY_SATURATED.has(stock.symbol)) {
+        // Only exception: extraordinary catalyst (FDA/M&A/Earnings) with strong score
+        // even then, saturation must still be reasonable
+        if (hce && catalystRaw >= 55 && saturation < 60) return true;
+        return false; // Permanently saturated, no exception
+      }
+
+      // Layer 2 — Dynamic eligibility
+      // HCE with any reasonable activity qualifies
+      if (hce && catalystRaw >= 35 && rvol >= 0.9) return true;
+
+      // Non-HCE: must have real volume AND early saturation
+      if (rvol >= 1.3 && saturation < 45) return true;
+
+      // Pattern-based qualification — these patterns signal genuine early discovery
+      if ((pattern === "Quiet Accumulation" || pattern === "Pressure Coil") && saturation < 55) return true;
+
+      return false;
+    } catch { return false; }
+  };
+
+  // ── getOpportunityScore — unified ranking signal ──────────────────────────
+  // Replaces raw HT Score as the sort key for both engines.
+  // Incorporates: HT Score, catalyst quality, crowd earliness,
+  // activity level, and market cap awareness.
+  //
+  // This is what determines which stock wins when multiple candidates qualify.
+  const getOpportunityScore = (stock: Stock, mode: "spot_momentum" | "before_the_crowd"): number => {
+    try {
+      const htScore = getHTScore(stock);
+      const rvol = getRelativeVolume(stock);
+      const absChange = Math.abs(stock.change ?? 0);
+      const engine = getBackgroundOpportunityEngine(stock);
+      const saturation = engine.crowdSaturationScore;
+      const catalystRaw = stock.catalystScore ?? 0;
+      const hce = isHighConvictionEvent(stock);
+      const hceCat = getHCECategory(stock);
+      const stack = buildPressureStack(stock);
+      const isMegaCap = PERMANENTLY_SATURATED.has(stock.symbol);
+      const extensionRisk = getExtensionRiskScore(stock);
+      const rrQuality = getRiskRewardQualityScore(stock);
+
+      // ── Base: HT Score — structural quality of the stock ───────────────
+      // HT Score answers: "Is this stock structurally strong right now?"
+      // Opportunity Score answers: "Is this the best tradeable opportunity?"
+      let score = htScore;
+
+      // ── Catalyst weight — scaled by event type ──────────────────────────
+      // FDA/PDUFA highest — binary outcome, massive moves, known date
+      // M&A next — price locked in, clear catalyst
+      // Earnings — high impact but two-sided
+      // Commercial/Analyst — real but smaller magnitude
+      // Catalyst boosts opportunity but does NOT override risk signals
+      if (hce && catalystRaw > 0) {
+        const catalystWeight =
+          hceCat === "FDA / PDUFA" ? 0.55 :
+          hceCat === "Acquisition / Merger" ? 0.45 :
+          hceCat === "Earnings" ? 0.40 :
+          hceCat === "Regulatory / Legal" ? 0.38 :
+          hceCat === "Commercial Event" ? 0.28 :
+          hceCat === "Analyst Event" ? 0.20 :
+          0.25;
+        score += Math.min(28, catalystRaw * catalystWeight);
+      } else if (catalystRaw >= 30) {
+        // Sub-HCE catalyst — still adds signal, smaller weight
+        score += Math.min(8, catalystRaw * 0.12);
+      }
+
+      // ── Crowd earliness bonus ────────────────────────────────────────────
+      // BTC mode weights this much more — it's the core thesis
+      if (saturation < 35) score += mode === "before_the_crowd" ? 14 : 5;
+      else if (saturation < 45) score += mode === "before_the_crowd" ? 9 : 3;
+      else if (saturation < 55) score += mode === "before_the_crowd" ? 4 : 1;
+      else if (saturation > 70) score -= mode === "before_the_crowd" ? 12 : 4;
+      else if (saturation > 80) score -= mode === "before_the_crowd" ? 18 : 8;
+
+      // ── Activity confirmation — reward real movement ─────────────────────
+      // A stock with no movement should never win over one that's actually moving
+      if (rvol >= 3.0) score += 10;
+      else if (rvol >= 2.0) score += 7;
+      else if (rvol >= 1.5) score += 4;
+      else if (rvol >= 1.2) score += 2;
+      else if (rvol < 0.8) score -= 8;
+
+      if (absChange >= 5) score += 6;
+      else if (absChange >= 2) score += 3;
+      else if (absChange >= 0.5) score += 1;
+      else if (absChange < 0.2 && !hce) score -= 6; // flat with no catalyst = no opportunity
+
+      // ── Extension risk penalty ───────────────────────────────────────────
+      // Extended moves have less remaining opportunity — penalize proportionally
+      // HCE stocks get a lighter penalty (extended moves on FDA can still run)
+      if (extensionRisk >= 85) score -= hce ? 8 : 18;
+      else if (extensionRisk >= 75) score -= hce ? 5 : 12;
+      else if (extensionRisk >= 65) score -= hce ? 2 : 7;
+      else if (extensionRisk < 30) score += 4; // low extension = more room
+
+      // ── Risk/Reward quality ──────────────────────────────────────────────
+      // Higher R/R quality = better opportunity, scaled modestly
+      if (rrQuality >= 80) score += 8;
+      else if (rrQuality >= 65) score += 4;
+      else if (rrQuality < 35) score -= 6;
+      else if (rrQuality < 20) score -= 12;
+
+      // ── Liquidity quality proxy ──────────────────────────────────────────
+      // Very low-priced stocks (<$1) have spread/liquidity issues
+      // Very high volume with tiny price = risk of manipulation
+      const price = stock.price ?? 0;
+      if (price < 1) score -= 10;
+      else if (price < 2) score -= 5;
+      else if (price > 5 && rvol >= 1.2) score += 2; // liquid + active = quality
+
+      // ── Market cap / awareness penalty ───────────────────────────────────
+      // Mega-caps that somehow passed the gate still rank much lower
+      // Ensures small genuine opportunities beat large stable stocks
+      if (isMegaCap) score -= 20;
+      else if (["TSLA","COIN","HOOD","MSTR","PLTR"].includes(stock.symbol)) score -= 4;
+
+      // ── Pattern quality ──────────────────────────────────────────────────
+      const pattern = detectPatternSignal(stock).name;
+      if (pattern === "Pressure Coil") score += 8;
+      else if (pattern === "Quiet Accumulation") score += 6;
+      else if (pattern === "Continuation Stack") score += 4;
+      else if (pattern === "Exhaustion Risk") score -= 14;
+
+      // ── Structural risk penalties ────────────────────────────────────────
+      if (stack.qualityGate === "Reject") score -= 15;
+      else if (stack.qualityGate === "Caution") score -= 5;
+      if (stack.trapRiskScore >= 78 && !hce) score -= 10;
+      else if (stack.trapRiskScore >= 65 && !hce) score -= 5;
+
+      return Math.min(150, Math.max(0, Math.round(score)));
+    } catch { return 0; }
+  };
+
+  // ── DECISION TRACE ───────────────────────────────────────────────────────
+  // Pure function. Answers three questions for every pick:
+  //   Why this stock? → primaryDrivers
+  //   Why now?        → opportunityScore + confidence
+  //   Why not others? → rejectedAlternatives
+  //
+  // This is what separates HT Labs from a scanner.
+  // A scanner shows data. A decision engine explains its reasoning.
+  // ─────────────────────────────────────────────────────────────────────────
+  const buildDecisionTrace = (
+    winner: Stock,
+    allStocks: Stock[],
+    mode: "spot_momentum" | "before_the_crowd"
+  ): {
+    opportunityScore: number;
+    confidence: "High" | "Moderate" | "Early" | "Speculative";
+    primaryDrivers: string[];
+    rejectedAlternatives: { symbol: string; reason: string }[];
+    candidatesEvaluated: number;
+  } => {
+    try {
+      const oppScore = getOpportunityScore(winner, mode);
+      const confidence: "High" | "Moderate" | "Early" | "Speculative" =
+        oppScore >= 100 ? "High" : oppScore >= 80 ? "Moderate" : oppScore >= 65 ? "Early" : "Speculative";
+
+      const htScore = getHTScore(winner);
+      const rvol = getRelativeVolume(winner);
+      const saturation = getBackgroundOpportunityEngine(winner).crowdSaturationScore;
+      const catalystRaw = winner.catalystScore ?? 0;
+      const hce = isHighConvictionEvent(winner);
+      const hceCat = getHCECategory(winner);
+      const extensionRisk = getExtensionRiskScore(winner);
+      const rrQuality = getRiskRewardQualityScore(winner);
+      const pattern = detectPatternSignal(winner).name;
+      const stack = buildPressureStack(winner);
+      const absChange = Math.abs(winner.change ?? 0);
+
+      // ── Primary Drivers — what made this stock win ──────────────────────
+      const drivers: { label: string; magnitude: number }[] = [];
+
+      // HT Score base quality
+      if (htScore >= 80) drivers.push({ label: `HT Score ${htScore} — strong structural quality`, magnitude: htScore * 0.3 });
+      else if (htScore >= 65) drivers.push({ label: `HT Score ${htScore} — solid setup quality`, magnitude: htScore * 0.2 });
+
+      // Catalyst — most impactful single factor
+      if (hce && catalystRaw > 0) {
+        const catLabel =
+          hceCat === "FDA / PDUFA" ? `FDA/PDUFA catalyst — binary outcome event` :
+          hceCat === "Earnings" ? `Earnings catalyst — high-impact event` :
+          hceCat === "Acquisition / Merger" ? `M&A catalyst — price target event` :
+          hceCat === "Regulatory / Legal" ? `Regulatory catalyst active` :
+          hceCat === "Commercial Event" ? `Commercial catalyst — partnership/contract` :
+          hceCat === "Analyst Event" ? `Analyst upgrade driving attention` :
+          `Verified catalyst event (score ${catalystRaw})`;
+        drivers.push({ label: catLabel, magnitude: catalystRaw * 0.55 });
+      } else if (catalystRaw >= 30) {
+        drivers.push({ label: `Catalyst signal present — score ${catalystRaw}`, magnitude: catalystRaw * 0.15 });
+      }
+
+      // Crowd saturation
+      if (saturation < 35) drivers.push({ label: `Crowd saturation ${saturation} — very early window open`, magnitude: mode === "before_the_crowd" ? 14 : 6 });
+      else if (saturation < 45) drivers.push({ label: `Crowd saturation ${saturation} — early positioning available`, magnitude: mode === "before_the_crowd" ? 9 : 3 });
+
+      // Volume activity
+      if (rvol >= 3.0) drivers.push({ label: `Relative volume ${rvol.toFixed(1)}× — unusual activity detected`, magnitude: 10 });
+      else if (rvol >= 2.0) drivers.push({ label: `Relative volume ${rvol.toFixed(1)}× above baseline`, magnitude: 7 });
+      else if (rvol >= 1.5) drivers.push({ label: `Volume ${rvol.toFixed(1)}× above average`, magnitude: 4 });
+
+      // Price action
+      if (absChange >= 5) drivers.push({ label: `Price ${winner.change >= 0 ? "+" : ""}${winner.change?.toFixed(1)}% — strong price confirmation`, magnitude: 6 });
+      else if (absChange >= 2) drivers.push({ label: `Price ${winner.change >= 0 ? "+" : ""}${winner.change?.toFixed(1)}% — active movement`, magnitude: 3 });
+
+      // Pattern
+      if (pattern === "Pressure Coil") drivers.push({ label: "Pressure Coil — breakout tension building before ignition", magnitude: 8 });
+      else if (pattern === "Quiet Accumulation") drivers.push({ label: "Quiet Accumulation — smart money positioning detected", magnitude: 6 });
+      else if (pattern === "Continuation Stack") drivers.push({ label: "Continuation Stack — momentum layering confirmed", magnitude: 4 });
+
+      // R/R quality
+      if (rrQuality >= 80) drivers.push({ label: "Risk/reward quality — favorable asymmetric setup", magnitude: 8 });
+      else if (rrQuality >= 65) drivers.push({ label: "Risk/reward quality — acceptable entry conditions", magnitude: 4 });
+
+      // Low extension (positive signal)
+      if (extensionRisk < 30) drivers.push({ label: "Low extension risk — significant room remaining", magnitude: 5 });
+
+      const primaryDrivers = drivers
+        .sort((a, b) => b.magnitude - a.magnitude)
+        .slice(0, 4)
+        .map(d => d.label);
+
+      // ── Rejected Alternatives — why not others ──────────────────────────
+      const rejectedAlternatives: { symbol: string; reason: string }[] = [];
+      const gate = mode === "spot_momentum" ? qualifiesForSpotMomentum : qualifiesForBeforeTheCrowd;
+
+      // Check notable stocks a trader would wonder about
+      const notableSymbols = ["META","NVDA","AAPL","MSFT","GOOGL","AMZN","TSLA","SPY","QQQ"];
+      for (const sym of notableSymbols) {
+        if (sym === winner.symbol) continue;
+        if (rejectedAlternatives.length >= 2) break;
+        const stock = allStocks.find(s => s.symbol === sym);
+        if (!stock) continue;
+
+        if (PERMANENTLY_SATURATED.has(sym)) {
+          rejectedAlternatives.push({ symbol: sym, reason: "Permanently saturated — not a discovery opportunity" });
+        } else if (!gate(stock)) {
+          const absChg = Math.abs(stock.change ?? 0);
+          const rvolS = getRelativeVolume(stock);
+          rejectedAlternatives.push({
+            symbol: sym,
+            reason: absChg < 0.5 && rvolS < 1.1
+              ? "No meaningful activity — flat with normal volume"
+              : "Did not meet eligibility threshold",
+          });
+        } else {
+          const theirScore = getOpportunityScore(stock, mode);
+          const diff = oppScore - theirScore;
+          if (diff > 5) {
+            const theirExt = getExtensionRiskScore(stock);
+            const theirSat = getBackgroundOpportunityEngine(stock).crowdSaturationScore;
+            const theirRvol = getRelativeVolume(stock);
+            const reason =
+              theirExt >= 75 ? `Extension risk elevated — less remaining opportunity` :
+              theirSat > 65 ? `Crowd saturation ${theirSat} — window narrowing` :
+              theirRvol < 1.0 ? `Volume insufficient to confirm setup` :
+              `Opportunity score ${theirScore} vs ${oppScore} — lower conviction`;
+            rejectedAlternatives.push({ symbol: sym, reason });
+          }
+        }
+      }
+
+      // Add runner-up from actual candidate pool
+      const runnerUp = allStocks
+        .filter(s => s.symbol !== winner.symbol && gate(s))
+        .map(s => ({ stock: s, score: getOpportunityScore(s, mode) }))
+        .sort((a, b) => b.score - a.score)[0];
+
+      if (runnerUp && !rejectedAlternatives.find(r => r.symbol === runnerUp.stock.symbol)) {
+        const theirExt = getExtensionRiskScore(runnerUp.stock);
+        const theirSat = getBackgroundOpportunityEngine(runnerUp.stock).crowdSaturationScore;
+        const diff = oppScore - runnerUp.score;
+        const reason =
+          diff > 25 ? `Opportunity score ${runnerUp.score} — significantly lower conviction` :
+          theirExt >= 70 ? `Extension risk reducing remaining opportunity` :
+          theirSat > 60 ? `Crowd more saturated (${theirSat}) — later in window` :
+          `Opportunity score ${runnerUp.score} vs ${oppScore}`;
+        rejectedAlternatives.push({ symbol: runnerUp.stock.symbol, reason });
+      }
+
+      // Count candidates the gate actually evaluated
+      const candidatesEvaluated = allStocks.filter(gate).length;
+
+      return {
+        opportunityScore: oppScore,
+        confidence,
+        primaryDrivers,
+        rejectedAlternatives: rejectedAlternatives.slice(0, 3),
+        candidatesEvaluated,
+      };
+    } catch {
+      return {
+        opportunityScore: 0,
+        confidence: "Speculative",
+        primaryDrivers: [],
+        rejectedAlternatives: [],
+        candidatesEvaluated: 0,
+      };
+    }
+  };
+
+
+  // Shows top 5 candidates with full score breakdown so we can verify
+  // the engine is making the right decisions. Logs to console only.
+  const logSelectionDebug = (
+    candidates: Stock[],
+    winner: Stock | null,
+    mode: "spot_momentum" | "before_the_crowd",
+    gate: (s: Stock) => boolean
+  ) => {
+    if (typeof window === "undefined") return; // server only
+    if (!window.location.hostname.includes("localhost")) return; // dev only
+    try {
+      const qualified = candidates.filter(gate);
+      const ranked = qualified
+        .map(s => ({
+          symbol: s.symbol,
+          htScore: getHTScore(s),
+          catalystScore: s.catalystScore ?? 0,
+          oppScore: getOpportunityScore(s, mode),
+          saturation: getBackgroundOpportunityEngine(s).crowdSaturationScore,
+          rvol: getRelativeVolume(s).toFixed(2),
+          hce: isHighConvictionEvent(s),
+          isMegaCap: PERMANENTLY_SATURATED.has(s.symbol),
+          passedGate: gate(s),
+        }))
+        .sort((a, b) => b.oppScore - a.oppScore)
+        .slice(0, 5);
+
+      const metaData = candidates.find(s => s.symbol === "META");
+      if (metaData) {
+        const metaGate = gate(metaData);
+        console.log(`[HT ${mode.toUpperCase()}] META debug:`, {
+          passedGate: metaGate,
+          htScore: getHTScore(metaData),
+          catalystScore: metaData.catalystScore ?? 0,
+          oppScore: getOpportunityScore(metaData, mode),
+          saturation: getBackgroundOpportunityEngine(metaData).crowdSaturationScore,
+          rvol: getRelativeVolume(metaData).toFixed(2),
+          isMegaCap: PERMANENTLY_SATURATED.has("META"),
+          reason: metaGate ? "PASSED gate (unexpected)" : "BLOCKED by eligibility gate",
+        });
+      }
+
+      console.log(`[HT ${mode.toUpperCase()}] Top 5 candidates:`, ranked);
+      console.log(`[HT ${mode.toUpperCase()}] Winner: ${winner?.symbol ?? "NONE"} | oppScore: ${winner ? getOpportunityScore(winner, mode) : 0} | htScore: ${winner ? getHTScore(winner) : 0}`);
+    } catch (e) {
+      console.warn("[HT debug] logging error:", e);
+    }
+  };
+
 
   const getBehaviorNarrative = (stock: Stock) => {
     const stack = buildPressureStack(stock);
@@ -3973,7 +4881,6 @@ export default function Home() {
 
   const saveTopConvictionToMemory = async (stock: Stock) => {
     if (!session?.user?.id) {
-      setSignalMemoryMessage("Signal memory waiting for login.");
       return;
     }
 
@@ -3997,12 +4904,10 @@ export default function Home() {
 
       if (lookupError) {
         console.error("SIGNAL MEMORY LOOKUP ERROR:", lookupError);
-        setSignalMemoryMessage("Signal memory table needs setup.");
         return;
       }
 
       if (recentExisting && recentExisting.length > 0) {
-        setSignalMemoryMessage(`Signal memory already tracking ${payload.symbol}.`);
         return;
       }
 
@@ -4010,14 +4915,35 @@ export default function Home() {
 
       if (error) {
         console.error("SIGNAL MEMORY INSERT ERROR:", error);
-        setSignalMemoryMessage("Signal memory table needs setup.");
         return;
       }
-
-      setSignalMemoryMessage(`Signal memory tracking ${payload.symbol}.`);
     } catch (error) {
       console.error("SIGNAL MEMORY SAVE ERROR:", error);
-      setSignalMemoryMessage("Signal memory save failed.");
+    }
+  };
+
+
+  // ── Before The Crowd pick logging ──
+  const logBeforeCrowdPick = async (stock: Stock) => {
+    if (!session?.user?.id) return;
+    try {
+      const score = getHTScore(stock);
+      const { error } = await supabase.from("ht_before_crowd_log").insert({
+        user_id: session.user.id,
+        symbol: stock.symbol,
+        picked_at: new Date().toISOString(),
+        entry_price: Number(stock.price || 0),
+        change_percent: Number(stock.change || 0),
+        ht_score: score,
+        outcome_status: null,
+        price_after_1d: null,
+        price_after_3d: null,
+        price_after_5d: null,
+        graded_at: null,
+      });
+      if (error) console.warn("[BTC Log]:", error.message);
+    } catch (err) {
+      console.warn("[BTC Log] Error:", err);
     }
   };
 
@@ -4167,7 +5093,6 @@ export default function Home() {
       }
 
       if (updates > 0) {
-        setSignalMemoryMessage(`Signal memory graded ${updates} outcome update${updates === 1 ? "" : "s"}.`);
       }
     } catch (error) {
       console.error("SIGNAL OUTCOME EVALUATION ERROR:", error);
@@ -5169,6 +6094,562 @@ export default function Home() {
 
   const convictionEngineTarget = firstSignal?.stock || priorityTarget || htScoreLeaders[0] || topStock;
   const topConviction = convictionEngineTarget;
+
+  // ── Single source of truth for "Before The Crowd" ticker selection ──
+  // Mirrors the eligibility logic used by the hero card itself (HT Score ≥ 65
+  // AND Stage is Early/Developing). Computing this once here — instead of
+  // separately inside the JSX — is what keeps the bull/bear fetch and the
+  // displayed ticker in sync. Previously the fetch was keyed off
+  // convictionEngineTarget while the card displayed a different, independently
+  // resolved candidate, so the data only matched by coincidence and would
+  // flash in/out as they drifted apart on re-render.
+  //
+  // Pure highest-score-wins: scans every eligible stock (API catalyst targets
+  // ═══════════════════════════════════════════════════════════════════
+  // SELECTION ENGINE — separate from the scoring engine.
+  //
+  // The scoring engine (getHTScore / buildPressureStack) measures signal
+  // quality objectively. This engine answers a different question:
+  // "Which stock best represents Before The Crowd right now?"
+  //
+  // Philosophy: Before The Crowd = best asymmetric opportunity before
+  // widespread participation, not simply the highest score today.
+  //
+  // Rules (in order):
+  // 1. High-Conviction Events (verified catalyst, catalystScore ≥ 40,
+  //    clear event label from ht_signals) are evaluated first.
+  // 2. Among HCE candidates, highest HT Score wins.
+  // 3. If no HCE qualifies, fall back to highest HT Score ≥ 65.
+  // 4. Hysteresis: current winner keeps its slot unless a challenger
+  //    is materially better for 2 consecutive refreshes.
+  //    — Momentum challenger needs 5+ point lead × 2 refreshes.
+  //    — HCE can only displace another HCE with 10+ point lead.
+  //    — Any stock dropping below 65 or losing catalyst status
+  //      allows immediate replacement.
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ── High-Conviction Event detection ─────────────────────────────────
+  // Single source of truth. Event-quality based, not sector based.
+  // To add a new event type: add its label to HIGH_CONVICTION_EVENT_LABELS.
+  // selectTopContender calls this — logic lives here, nowhere else.
+
+  const CATALYST_SCORE_MIN = 40; // below this = keyword noise, not a verified event
+
+  // Labels written by signal-writer into ht_signals.state from real Polygon News.
+  // Not guessed from price/volume — must come from a recognized article keyword.
+  const HIGH_CONVICTION_EVENT_LABELS = new Set([
+    // Biotech / drug development
+    "FDA Event",
+    "FDA Catalyst Active",
+    "PDUFA Date",
+    // Corporate actions
+    "Earnings Catalyst",
+    "M&A Activity",
+    "Acquisition",
+    "Merger Vote",
+    // Regulatory / legal
+    "Regulatory Event",
+    "Court Ruling",
+    // Commercial / product
+    "Major Contract",
+    "Product Launch",
+    "Partnership",
+    // Analyst / institutional
+    "Analyst Upgrade",
+  ]);
+
+  type HCECategory =
+    | "FDA / PDUFA"
+    | "Earnings"
+    | "Acquisition / Merger"
+    | "Regulatory / Legal"
+    | "Commercial Event"
+    | "Analyst Event"
+    | "Verified Catalyst";
+
+  // Returns the event category string if HCE, null if not.
+  // Use this when you need the category label, isHighConvictionEvent when you only need boolean.
+  const getHCECategory = (stock: Stock): HCECategory | null => {
+    const hasScore = (stock.catalystScore ?? 0) >= CATALYST_SCORE_MIN;
+    if (!hasScore) return null;
+
+    if (stock.hasFDAEvent) return "FDA / PDUFA";
+
+    const label = stock.signalState ?? "";
+    if (!HIGH_CONVICTION_EVENT_LABELS.has(label)) return null;
+
+    if (label === "FDA Event" || label === "FDA Catalyst Active" || label === "PDUFA Date") return "FDA / PDUFA";
+    if (label === "Earnings Catalyst") return "Earnings";
+    if (label === "M&A Activity" || label === "Acquisition" || label === "Merger Vote") return "Acquisition / Merger";
+    if (label === "Regulatory Event" || label === "Court Ruling") return "Regulatory / Legal";
+    if (label === "Major Contract" || label === "Product Launch" || label === "Partnership") return "Commercial Event";
+    if (label === "Analyst Upgrade") return "Analyst Event";
+    return "Verified Catalyst";
+  };
+
+  const isHighConvictionEvent = (stock: Stock): boolean => getHCECategory(stock) !== null;
+
+  // ── Before The Crowd reason bullets ──────────────────────────────────
+  // Returns 3–5 short user-facing bullets explaining why HT Labs selected
+  // this stock. Used in both desktop and mobile hero cards.
+  // Language: short, premium, not overly technical.
+  const getBeforeCrowdReason = (stock: Stock): string[] => {
+    const hceCategory = getHCECategory(stock);
+    const rvol = getRelativeVolume(stock);
+    const saturation = getBackgroundOpportunityEngine(stock).crowdSaturationScore;
+    const score = getHTScore(stock);
+    const bullets: string[] = [];
+
+    // Lead with catalyst if HCE
+    if (hceCategory) {
+      if (hceCategory === "FDA / PDUFA") bullets.push("Verified FDA catalyst window detected.");
+      else if (hceCategory === "Earnings") bullets.push("Earnings catalyst approaching.");
+      else if (hceCategory === "Acquisition / Merger") bullets.push("Corporate action event identified.");
+      else if (hceCategory === "Regulatory / Legal") bullets.push("Regulatory decision window active.");
+      else if (hceCategory === "Commercial Event") bullets.push("Near-term commercial catalyst confirmed.");
+      else if (hceCategory === "Analyst Event") bullets.push("Institutional conviction signal present.");
+      else bullets.push("Verified time-defined catalyst detected.");
+    }
+
+    // Volume signal
+    if (rvol >= 2.5) bullets.push(`Volume running ${rvol.toFixed(1)}× above normal.`);
+    else if (rvol >= 1.4) bullets.push("Volume expanding ahead of price.");
+
+    // Crowd position
+    if (saturation < 35) bullets.push("Crowd participation still early.");
+    else if (saturation < 55) bullets.push("Momentum building before broad participation.");
+
+    // Price direction
+    if (stock.change > 3) bullets.push("Bullish pressure outweighing selling.");
+    else if (stock.change > 0) bullets.push("Price holding structure above support.");
+    else if (stock.change < 0) bullets.push("Selling pressure may be exhausting.");
+
+    // Score confidence
+    if (score >= 80) bullets.push("Setup above HT Labs high-conviction threshold.");
+    else if (score >= 65) bullets.push("Setup clears HT Labs minimum threshold.");
+
+    return bullets.slice(0, 5);
+  };
+
+
+
+  // ═══════════════════════════════════════════════════════════════════
+  // TRADE FRAMEWORK ENGINE
+  // Pure function — no state, no async, no side effects.
+  // Answers: "If someone discovered this stock right now, what does
+  // the current opportunity look like?"
+  //
+  // Inputs: stock (live), atrData (cached per ticker).
+  // Output: percentage-based window, risk zone, R/R, horizon, sentence.
+  // ═══════════════════════════════════════════════════════════════════
+  const buildTradeFramework = (
+    stock: Stock,
+    atrData: { atr14: number; support: number; resistance: number; volatility20d: number } | null,
+    isMarketLive: boolean
+  ): {
+    uptideMin: number;
+    uptideMax: number;
+    riskZone: number;
+    rr: number;
+    confidence: "High" | "Moderate" | "Early" | "Speculative";
+    horizon: string;
+    sentence: string;
+    isLive: boolean;
+  } | null => {
+    try {
+      if (!stock.price || stock.price <= 0) return null;
+
+      const stack = buildPressureStack(stock);
+      const engine = getBackgroundOpportunityEngine(stock);
+      const rvol = getRelativeVolume(stock);
+      const score = getHTScore(stock);
+      const saturation = engine.crowdSaturationScore;
+      const hce = isHighConvictionEvent(stock);
+      const hceCat = getHCECategory(stock);
+      const pattern = detectPatternSignal(stock).name;
+
+      const price = stock.price;
+
+      // ── Upside window base ──────────────────────────────────────────
+      // Primary: ATR-anchored if we have real historical data
+      // Fallback: volatility estimate from price action and extension
+      let baseUpside: number;
+
+      if (atrData && atrData.atr14 > 0) {
+        // Days forward driven by continuation strength
+        const daysForward =
+          stack.continuationStrength >= 70 ? 3 :
+          stack.continuationStrength >= 50 ? 2 : 1;
+        baseUpside = (atrData.atr14 * daysForward / price) * 100;
+      } else {
+        // Fallback: estimate from rvol and price action
+        baseUpside = Math.max(3, rvol * 2.5 + Math.abs(stock.change) * 0.5);
+      }
+
+      // Opportunity multipliers
+      let upsideMult = 1.0;
+      if (hce) upsideMult *= 1.6;                          // catalyst = wider window
+      if (pattern === "Pressure Coil") upsideMult *= 1.4;
+      if (pattern === "Quiet Accumulation") upsideMult *= 1.3;
+      if (saturation < 35) upsideMult *= 1.3;              // very early crowd
+      else if (saturation < 50) upsideMult *= 1.1;
+      if (saturation > 65) upsideMult *= 0.6;              // crowd already in
+      if (rvol >= 3) upsideMult *= 1.15;
+
+      // Compression from extension
+      const extRisk = stack.extensionRisk;
+      if (extRisk >= 78) upsideMult *= 0.45;               // heavily extended
+      else if (extRisk >= 65) upsideMult *= 0.7;
+      else if (extRisk >= 50) upsideMult *= 0.85;
+
+      const upsideMid = Math.max(2, baseUpside * upsideMult);
+      const uptideMin = Number((upsideMid * 0.65).toFixed(1));
+      const uptideMax = Number((upsideMid * 1.35).toFixed(1));
+
+      // ── Risk zone ───────────────────────────────────────────────────
+      // Always tighter than reward — that's the core philosophy
+      let baseRisk: number;
+
+      if (atrData && atrData.atr14 > 0) {
+        baseRisk = (atrData.atr14 * 0.8 / price) * 100;
+      } else {
+        baseRisk = Math.max(2, upsideMid * 0.38);
+      }
+
+      let riskMult = 1.0;
+      if (stack.trapRiskScore > 75) riskMult *= 1.5;
+      else if (stack.trapRiskScore > 60) riskMult *= 1.25;
+      if (stack.qualityGate === "Reject") riskMult *= 1.6;
+      else if (stack.qualityGate === "Caution") riskMult *= 1.3;
+      if (pattern === "Exhaustion Risk") riskMult *= 1.4;
+
+      const riskZone = Number(Math.max(1.5, baseRisk * riskMult).toFixed(1));
+
+      // ── R/R ratio ───────────────────────────────────────────────────
+      const upsideMidpoint = (uptideMin + uptideMax) / 2;
+      const rr = Number((upsideMidpoint / riskZone).toFixed(1));
+
+      // ── Confidence ──────────────────────────────────────────────────
+      const confidence: "High" | "Moderate" | "Early" | "Speculative" =
+        score >= 80 ? "High" :
+        score >= 70 ? "Moderate" :
+        score >= 65 ? "Early" : "Speculative";
+
+      // ── Time horizon ────────────────────────────────────────────────
+      const horizon =
+        hce ? `Event-driven${hceCat ? ` · ${hceCat}` : ""}` :
+        stock.change < -2 ? "Speculative · Setup not confirmed" :
+        stack.continuationStrength >= 70 && saturation < 50 ? "Multi-day" :
+        stack.continuationStrength >= 50 ? "1–3 days" :
+        extRisk >= 70 ? "Intraday · Extended" : "1–3 days";
+
+      // ── One sentence ────────────────────────────────────────────────
+      const sentence =
+        extRisk >= 78 ? "Window is compressed — setup is extended above baseline." :
+        hce ? `Window supported by unresolved ${hceCat ?? "catalyst"}.` :
+        saturation < 35 ? "Wide window — crowd participation remains very early." :
+        saturation < 50 ? "Window supported by early crowd position." :
+        saturation > 70 ? "Crowd has arrived — window is narrowing." :
+        stack.trapRiskScore > 70 ? "Risk zone elevated — trap risk signals present." :
+        pattern === "Pressure Coil" ? "Coil pattern suggests breakout window is near." :
+        pattern === "Quiet Accumulation" ? "Accumulation pattern supports a patient entry window." :
+        stack.continuationStrength >= 70 ? "Strong continuation supports a multi-day window." :
+        "Window reflects current momentum with moderate continuation.";
+
+      return {
+        uptideMin,
+        uptideMax,
+        riskZone,
+        rr,
+        confidence,
+        horizon,
+        sentence,
+        isLive: isMarketLive,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+
+  // Asks: "Does the current momentum leader still deserve to remain?"
+  // Returns 0–100. Display only — does NOT override hysteresis.
+  // ═══════════════════════════════════════════════════════════════════
+  const evaluateMomentumEndurance = (stock: Stock): number => {
+    try {
+      const stack = buildPressureStack(stock);
+      const engine = getBackgroundOpportunityEngine(stock);
+      let endurance = 100;
+      if (engine.accelerationLabel === "Fading / Late") endurance -= 25;
+      if (stack.participationQuality < 40) endurance -= 20;
+      if (stack.trapRiskScore > 75) endurance -= 25;
+      if (getRelativeVolume(stock) < 1.0) endurance -= 20;
+      if (stack.continuationStrength < 35) endurance -= 15;
+      return Math.min(100, Math.max(0, Math.round(endurance)));
+    } catch { return 75; }
+  };
+
+  const getMomentumEnduranceLabel = (score: number, htScore?: number): string => {
+    // Never say "Momentum Confirmed" when HT Score is weak
+    if (htScore !== undefined && htScore < 65) {
+      return htScore >= 55 ? "Early Setup" : "Monitoring";
+    }
+    if (score >= 80) return "Momentum Confirmed";
+    if (score >= 65) return "Momentum Holding";
+    if (score >= 50) return "Momentum Cooling";
+    return "Momentum Weakening";
+  };
+
+  // ═══════════════════════════════════════════════════════════════════
+  // BEFORE THE CROWD — THESIS ENDURANCE ENGINE
+  // Every qualifying thesis starts at 100. Deductions remove conviction.
+  // The stock that loses the least conviction wins.
+  // ═══════════════════════════════════════════════════════════════════
+
+  const evaluateThesisEndurance = (stock: Stock): number => {
+    try {
+      const rvol = getRelativeVolume(stock);
+      const engine = getBackgroundOpportunityEngine(stock);
+      const stack = buildPressureStack(stock);
+      const saturation = engine.crowdSaturationScore;
+      const pattern = detectPatternSignal(stock).name;
+      const hce = isHighConvictionEvent(stock);
+      let conviction = 100;
+      if (saturation > 65) conviction -= 25;
+      if (rvol < 1.1) conviction -= 20;
+      if (pattern === "Exhaustion Risk") conviction -= 20;
+      if (stack.trapRiskScore > 70 && !hce) conviction -= 15;
+      if (hce && getNewsVelocityScore(stock) < 30) conviction -= 10;
+      if (stack.qualityGate === "Reject") conviction -= 20;
+      else if (stack.qualityGate === "Caution") conviction -= 10;
+      return Math.min(100, Math.max(0, Math.round(conviction)));
+    } catch { return 60; }
+  };
+
+  const selectBeforeTheCrowd = (stocks: Stock[]): Stock | null => {
+    const pool = stocks.filter(qualifiesForBeforeTheCrowd);
+    if (pool.length === 0) {
+      logSelectionDebug(stocks, null, "before_the_crowd", qualifiesForBeforeTheCrowd);
+      return null;
+    }
+    const winner = pool
+      .map(stock => ({ stock, score: getOpportunityScore(stock, "before_the_crowd") }))
+      .sort((a, b) => b.score - a.score)[0].stock;
+    logSelectionDebug(stocks, winner, "before_the_crowd", qualifiesForBeforeTheCrowd);
+    return winner;
+  };
+
+  const getThesisEnduranceLabel = (conviction: number): string => {
+    if (conviction >= 80) return "Strong Before The Crowd";
+    if (conviction >= 65) return "Developing Before The Crowd";
+    if (conviction >= 50) return "Early Watch";
+    return "Speculative Watch";
+  };
+
+  const getThesisEnduranceReason = (stock: Stock): string[] => {
+    const rvol = getRelativeVolume(stock);
+    const engine = getBackgroundOpportunityEngine(stock);
+    const stack = buildPressureStack(stock);
+    const saturation = engine.crowdSaturationScore;
+    const pattern = detectPatternSignal(stock).name;
+    const hce = isHighConvictionEvent(stock);
+    const hceCategory = getHCECategory(stock);
+    const bullets: string[] = [];
+    if (hce && hceCategory) bullets.push(`${hceCategory} catalyst window still open.`);
+    if (saturation <= 40) bullets.push("Crowd participation remains early with minimal saturation.");
+    else if (saturation <= 55) bullets.push("Crowd still building — broad participation has not arrived.");
+    if (rvol >= 1.5) bullets.push(`Volume remains ${rvol.toFixed(1)}× above normal.`);
+    if (pattern === "Quiet Accumulation") bullets.push("Quiet accumulation pattern intact.");
+    else if (pattern === "Pressure Coil") bullets.push("Pressure coil pattern continuing to build.");
+    else if (pattern !== "Exhaustion Risk") bullets.push("No signs of exhaustion detected.");
+    if (stack.qualityGate === "Pass") bullets.push("Passed HT Labs quality screening.");
+    if (stack.trapRiskScore <= 50) bullets.push("Risk profile remains within acceptable range.");
+    return bullets.slice(0, 5);
+  };
+
+  // Takes the eligible pool (already filtered to HT Score ≥ 65)
+  // and returns the best Top Contender per HT Labs philosophy.
+  const selectTopContender = (pool: Stock[]): Stock | null => {
+    if (pool.length === 0) return null;
+
+    const hceCandidates = pool
+      .filter(isHighConvictionEvent)
+      .sort((a, b) => getOpportunityScore(b, "spot_momentum") - getOpportunityScore(a, "spot_momentum"));
+
+    const momentumCandidates = pool
+      .filter(s => !isHighConvictionEvent(s))
+      .sort((a, b) => getOpportunityScore(b, "spot_momentum") - getOpportunityScore(a, "spot_momentum"));
+
+    const winner = hceCandidates.length > 0 ? hceCandidates[0] : (momentumCandidates[0] || null);
+    logSelectionDebug(pool, winner, "spot_momentum", qualifiesForSpotMomentum);
+    return winner;
+  };
+
+  // Hysteresis state — lives outside the memo so React can't corrupt it
+  // by re-running the memo multiple times. The memo reads these refs but
+  // never writes them — only the effect below writes them.
+  const topContenderRef = useRef<Stock | null>(null);
+  const challengerRef = useRef<{ symbol: string; consecutiveLeadCount: number } | null>(null);
+  // ── SM CANDIDATE POOL — single shared helper ─────────────────────────────
+  // Both the memo and the effect call this. One function = one gate = one
+  // scoring method = one set of thresholds. They can never drift apart.
+  const getSMCandidatePool = (stockList: Stock[]) => {
+    // SM winner comes ONLY from the scored stock universe.
+    // apiMomentum is intentionally excluded here — it feeds the
+    // SM winner comes ONLY from the scored stock universe.
+    // apiMomentum is intentionally excluded here.
+    // If nothing passes the gate — return empty pool.
+    // The engine will show an honest empty state rather than force a weak pick.
+    const eligiblePool = stockList.filter(qualifiesForSpotMomentum);
+    return { pool: stockList, effectivePool: eligiblePool };
+  };
+
+  const getSMHysteresisThresholds = (currentIsHCE: boolean, challengerIsHCE: boolean) => {
+    if (currentIsHCE && !challengerIsHCE) return { requiredLead: 25, requiredStreak: 5 };
+    if (currentIsHCE && challengerIsHCE)  return { requiredLead: 15, requiredStreak: 3 };
+    return { requiredLead: 15, requiredStreak: 4 };
+  };
+
+  // Memo: reads refs, never writes them. Returns which stock to display.
+  const resolvedBeforeCrowdTarget: Stock | null = useMemo(() => {
+    const { pool, effectivePool } = getSMCandidatePool(stocks);
+    const candidate = selectTopContender(effectivePool);
+    const current = topContenderRef.current;
+
+    if (!current) return candidate;
+
+    // Only keep the current pick if it STILL passes the eligibility gate.
+    // If it no longer qualifies (e.g. TSM from previous session when market
+    // was more active), release it and show the new candidate.
+    const currentStillInPool = effectivePool.find(s => s.symbol === current.symbol);
+    if (!currentStillInPool) return candidate;
+    if (!candidate || candidate.symbol === current.symbol) return current;
+
+    const currentScore = getOpportunityScore(currentStillInPool, "spot_momentum");
+    const challengerScore = getOpportunityScore(candidate, "spot_momentum");
+    const { requiredLead, requiredStreak } = getSMHysteresisThresholds(
+      isHighConvictionEvent(currentStillInPool),
+      isHighConvictionEvent(candidate)
+    );
+
+    if (challengerScore - currentScore >= requiredLead) {
+      const prevStreak = challengerRef.current?.symbol === candidate.symbol
+        ? challengerRef.current.consecutiveLeadCount : 0;
+      if (prevStreak + 1 >= requiredStreak) return candidate;
+    }
+    return current;
+  }, [stocks]);
+
+  // Effect: writes refs after render. Same pool, same thresholds as memo above.
+  useEffect(() => {
+    const { effectivePool } = getSMCandidatePool(stocks);
+    const candidate = selectTopContender(effectivePool);
+    const current = topContenderRef.current;
+
+    if (!current || !effectivePool.find(s => s.symbol === current.symbol)) {
+      topContenderRef.current = candidate;
+      challengerRef.current = null;
+      return;
+    }
+    if (!candidate || candidate.symbol === current.symbol) {
+      challengerRef.current = null;
+      return;
+    }
+
+    const currentStock = effectivePool.find(s => s.symbol === current.symbol)!;
+    const currentScore = getOpportunityScore(currentStock, "spot_momentum");
+    const challengerScore = getOpportunityScore(candidate, "spot_momentum");
+    const { requiredLead, requiredStreak } = getSMHysteresisThresholds(
+      isHighConvictionEvent(currentStock),
+      isHighConvictionEvent(candidate)
+    );
+
+    if (challengerScore - currentScore >= requiredLead) {
+      const prevStreak = challengerRef.current?.symbol === candidate.symbol
+        ? challengerRef.current.consecutiveLeadCount : 0;
+      const newStreak = prevStreak + 1;
+      challengerRef.current = { symbol: candidate.symbol, consecutiveLeadCount: newStreak };
+      if (newStreak >= requiredStreak) {
+        topContenderRef.current = candidate;
+        challengerRef.current = null;
+      }
+    } else {
+      challengerRef.current = null;
+    }
+  }, [stocks]);
+
+  // Before The Crowd — thesis endurance selection result
+  const resolvedBeforeTheCrowdTarget: Stock | null = useMemo(() => {
+    const btcWinner = selectBeforeTheCrowd(stocks);
+
+    // If BTC picks the same stock as SM, that IS the Dual Engine Confirmation.
+    // In that case, BTC also surfaces the next best qualifying candidate
+    // so the two cards always answer different questions when possible.
+    const smWinner = resolvedBeforeCrowdTarget;
+    if (btcWinner && smWinner && btcWinner.symbol === smWinner.symbol) {
+      // Try to find the next best BTC candidate
+      const nextBest = selectBeforeTheCrowd(
+        stocks.filter(s => s.symbol !== btcWinner.symbol)
+      );
+      // If a genuine second candidate exists, show it on the BTC card.
+      // If not, show the same stock — Dual Engine Confirmation is the story.
+      return nextBest ?? btcWinner;
+    }
+
+    return btcWinner;
+  }, [stocks, resolvedBeforeCrowdTarget]);
+
+  const beforeTheCrowdConviction: number = useMemo(() => {
+    return resolvedBeforeTheCrowdTarget
+      ? evaluateThesisEndurance(resolvedBeforeTheCrowdTarget)
+      : 0;
+  }, [resolvedBeforeTheCrowdTarget]);
+
+  const isDualEngineConfirmation = Boolean(
+    resolvedBeforeCrowdTarget &&
+    resolvedBeforeTheCrowdTarget &&
+    resolvedBeforeCrowdTarget.symbol === resolvedBeforeTheCrowdTarget.symbol
+  );
+
+  // Bull/Bear effect — runs when the resolved Before The Crowd ticker changes
+  const btcTickerForAnalysis = resolvedBeforeCrowdTarget?.symbol ?? "";
+  useEffect(() => {
+    if (!btcTickerForAnalysis || btcTickerForAnalysis === bullBearTicker) return;
+    setBullBearLoading(true);
+    setBullBearExpanded(false);
+    fetch(`/api/bull-bear?ticker=${btcTickerForAnalysis}`)
+      .then(res => res.json())
+      .then(data => {
+        setBullBearData(data);
+        setBullBearTicker(btcTickerForAnalysis);
+      })
+      .catch(err => console.warn("[Bull-Bear] fetch failed:", err))
+      .finally(() => setBullBearLoading(false));
+  }, [btcTickerForAnalysis]);
+
+  // When selectedStock opens and its ticker doesn't match current bull/bear data,
+  // fetch bull/bear for it so the mobile detail sheet always has content.
+  useEffect(() => {
+    if (!selectedStock) return;
+    if (selectedStock.symbol === bullBearTicker) return; // already have it
+    setBullBearLoading(true);
+    fetch(`/api/bull-bear?ticker=${selectedStock.symbol}`)
+      .then(res => res.json())
+      .then(data => {
+        setBullBearData(data);
+        setBullBearTicker(selectedStock.symbol);
+      })
+      .catch(err => console.warn("[Bull-Bear] selectedStock fetch failed:", err))
+      .finally(() => setBullBearLoading(false));
+  }, [selectedStock?.symbol]);
+
+  // HT Score / Stage logging — fires whenever the resolved pick changes,
+  // capturing the full score breakdown so it can be checked against the
+  // ticker's actual forward performance later.
+  useEffect(() => {
+    if (!resolvedBeforeCrowdTarget) return;
+    logBeforeCrowdPick(resolvedBeforeCrowdTarget);
+  }, [resolvedBeforeCrowdTarget?.symbol, session?.user?.id]);
 
   const getBreakoutProbability = (stock: Stock) => {
     const ht = getHTScore(stock);
@@ -6758,52 +8239,161 @@ export default function Home() {
 
 
   const fetchStockUniverse = async (symbols: string[]): Promise<Stock[]> => {
-    try {
-      const res = await fetch("/api/bulk-quote", {
+    // Step 1: Fetch Polygon bulk quotes first — this is the fast path.
+    // ht-signals-feed (Supabase) runs in parallel but we don't wait for it
+    // before rendering. Signals enrich the data when they arrive.
+    const [bulkRes, signalsRes] = await Promise.allSettled([
+      fetch("/api/bulk-quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbols }),
-      });
+      }),
+      // Fire signals fetch but don't block on it — always fresh, no cache
+      fetch("/api/ht-signals-feed", { cache: "no-store" }).catch(() => null),
+    ]);
 
-      if (!res.ok) throw new Error("Bulk quote request failed");
-
-      const data = await res.json();
-      const quotes: Record<string, { price: number; change: number; volume?: number; prevVolume?: number; prevClose?: number }> = data.quotes ?? {};
-
-      return symbols.map((symbol) => {
-        const q = quotes[symbol];
-        if (q && (q.price > 0 || Math.abs(q.change) > 0)) {
-          return { symbol, price: q.price, change: q.change, volume: q.volume ?? 0, prevVolume: q.prevVolume ?? 0 };
-        }
-        return fallbackQuotes[symbol] || { symbol, price: 0, change: 0, volume: 0, prevVolume: 0 };
-      });
-    } catch (err) {
-      console.warn("Bulk quote failed, falling back to individual fetches", err);
-      // Emergency fallback — fetch individually (slow but reliable)
-      return Promise.all(
-        symbols.map(async (symbol) => {
-          try {
-            const res = await fetch(`/api/quote?symbol=${symbol}`);
-            const data = await res.json();
-            const price = Number(data.c || 0);
-            const change = Number(data.dp || 0);
-            if (!price && !change) throw new Error("empty");
-            return { symbol, price, change };
-          } catch {
-            return { symbol, price: 0, change: 0, volume: 0, prevVolume: 0 };
-          }
-        })
-      );
+    // Step 2: Parse bulk quote (Polygon price/volume — always fast)
+    let quotes: Record<string, { price: number; change: number; volume?: number; prevVolume?: number; avgVolume?: number }> = {};
+    if (bulkRes.status === "fulfilled" && bulkRes.value.ok) {
+      try {
+        const data = await bulkRes.value.json();
+        quotes = data.quotes ?? {};
+      } catch { /* silent */ }
     }
+
+    // Step 3: Parse ht_signals if they arrived — optional enrichment
+    let signalsMap: Record<string, {
+      relativeVolume?: number;
+      catalystScore?: number;
+      htSignalScore?: number;
+      momentumScore?: number;
+      crowdScore?: number;
+      trapScore?: number;
+      signalState?: string;
+      signalPattern?: string;
+      hasFDAEvent?: boolean;
+      hasInsiderBuy?: boolean;
+    }> = {};
+    if (signalsRes.status === "fulfilled" && signalsRes.value && (signalsRes.value as Response).ok) {
+      try {
+        const data = await (signalsRes.value as Response).json();
+        for (const row of data.signals ?? []) {
+          signalsMap[row.ticker] = {
+            relativeVolume: row.relative_volume,
+            catalystScore: row.catalyst_score,
+            htSignalScore: row.ht_score,
+            momentumScore: row.momentum_score,
+            crowdScore: row.crowd_score,
+            trapScore: row.trap_score,
+            signalState: row.state,
+            signalPattern: row.pattern,
+            hasFDAEvent: row.state?.includes("FDA Event") ?? false,
+            hasInsiderBuy: row.state?.includes("Insider Buy") ?? false,
+          };
+        }
+      } catch { /* silent — signals are enrichment, not required */ }
+    }
+
+    // Step 4: Merge and normalize
+    return symbols.map((symbol) => {
+      const q = quotes[symbol];
+      const sig = signalsMap[symbol];
+
+      const base: Stock = q && (q.price > 0 || Math.abs(q.change) > 0)
+        ? { symbol, price: q.price, change: q.change, volume: q.volume ?? 0, prevVolume: q.prevVolume ?? 0 }
+        : fallbackQuotes[symbol] || { symbol, price: 0, change: 0, volume: 0, prevVolume: 0 };
+
+      if (sig) {
+        // For new discoveries, sig may have price data from the full market scan
+        // Use it when bulk-quote returned nothing — prevents new stocks from
+        // being filtered out as price=0
+        const sigPrice = base.price > 0 ? base.price : 0;
+        const sigChange = base.change !== 0 ? base.change : 0;
+        return {
+          ...base,
+          price: sigPrice || base.price,
+          change: sigChange || base.change,
+          relativeVolume: sig.relativeVolume,
+          catalystScore: sig.catalystScore,
+          htSignalScore: sig.htSignalScore,
+          momentumScore: sig.momentumScore,
+          crowdScore: sig.crowdScore,
+          trapScore: sig.trapScore,
+          signalState: sig.signalState,
+          signalPattern: sig.signalPattern,
+          hasFDAEvent: sig.hasFDAEvent,
+          hasInsiderBuy: sig.hasInsiderBuy,
+        };
+      }
+
+      return base;
+    });
   };
 
   const fetchStocks = async () => {
     try {
       setIsRefreshing(true);
 
-      const tickersToFetch = [...new Set([...marketUniverse, ...watchlist])];
+      // Fetch market-wide movers AND ht_signals tickers in parallel.
+      // ht_signals now contains top candidates from 12,913 stocks.
+      // We need their prices too — not just the enrichment data.
+      const [moversRes, signalsFeedRes] = await Promise.allSettled([
+        fetch("/api/market-movers", { cache: "no-store" })
+          .then(r => r.ok ? r.json() : { movers: [] })
+          .catch(() => ({ movers: [] })),
+        fetch("/api/ht-signals-feed", { cache: "no-store" })
+          .then(r => r.ok ? r.json() : { signals: [] })
+          .catch(() => ({ signals: [] })),
+      ]);
+
+      const moverSymbols: string[] = moversRes.status === "fulfilled"
+        ? (moversRes.value.movers ?? []).map((m: any) => m.symbol)
+        : [];
+
+      // Pull tickers from ht_signals that aren't in our universe
+      // These are the real discoveries from the full market scan
+      const signalsRaw: any[] = signalsFeedRes.status === "fulfilled"
+        ? (signalsFeedRes.value.signals ?? [])
+        : [];
+      const signalSymbols: string[] = signalsRaw.map((s: any) => s.ticker);
+
+      // Build a map of signal data so new discoveries get proper enrichment
+      // Include price and change so stocks with no bulk-quote data survive filtering
+      const signalEnrichmentMap: Record<string, any> = {};
+      for (const s of signalsRaw) {
+        signalEnrichmentMap[s.ticker] = s;
+      }
+
+      // Merge all sources — universe + movers + signal discoveries
+      const tickersToFetch = [...new Set([
+        ...marketUniverse,
+        ...moverSymbols,
+        ...signalSymbols,
+        ...watchlist,
+      ])];
 
       const stockData = await fetchStockUniverse(tickersToFetch);
+
+      // Apply ht_signals enrichment to any stock that doesn't have it yet.
+      // CRITICAL: For new discoveries, also use signal price when bulk-quote
+      // returned 0 — prevents new stocks from being filtered out.
+      const enrichedStockData = stockData.map(stock => {
+        const sig = signalEnrichmentMap[stock.symbol];
+        if (!sig) return stock;
+        return {
+          ...stock,
+          // Use signal price if bulk-quote returned nothing
+          price: stock.price > 0 ? stock.price : (sig.price ?? 0),
+          change: stock.change !== 0 ? stock.change : (sig.change_percent ?? 0),
+          relativeVolume: stock.relativeVolume || sig.relative_volume,
+          catalystScore: stock.catalystScore || sig.catalyst_score,
+          crowdScore: stock.crowdScore || sig.crowd_score,
+          momentumScore: stock.momentumScore || sig.momentum_score,
+          trapScore: stock.trapScore || sig.trap_score,
+          signalState: stock.signalState || sig.state,
+          signalPattern: stock.signalPattern || sig.pattern,
+        };
+      });
 
       // Exclude leveraged/inverse ETFs — they distort momentum signals
       const EXCLUDED_TICKERS = new Set([
@@ -6811,7 +8401,7 @@ export default function Home() {
         "LABD","LABU","TZA","TNA","FAZ","FAS","YANG","YINN",
         "SDOW","UDOW","ERY","ERX","HIBL","HIBS","DRIP","GUSH",
       ]);
-      const tradableData = stockData.filter((stock) =>
+      const tradableData = enrichedStockData.filter((stock) =>
         (stock.price > 0 || Math.abs(stock.change) > 0) &&
         !EXCLUDED_TICKERS.has(stock.symbol)
       );
@@ -6819,7 +8409,7 @@ export default function Home() {
         (a, b) => getScannerSelectionScore(b) - getScannerSelectionScore(a),
       );
 
-      const visibleBoard = sortedStocks.slice(0, 36);
+      const visibleBoard = sortedStocks.slice(0, 100);
 
       setStocks(visibleBoard);
       const newGainers = tradableData.filter((stock) => stock.change > 0).length;
@@ -6855,6 +8445,12 @@ export default function Home() {
           trap_score: getTrapRiskScore(stock),
           decision: getHTStance(stock).label,
           source: "auto_scan",
+          ht_score: getHTScore(stock),
+          change_percent: stock.change,
+          relative_volume: getRelativeVolume(stock),
+          catalyst_score: stock.catalystScore ?? 0,
+          pattern: detectPatternSignal(stock).name,
+          signal_state: stock.signalState ?? null,
         }));
         supabase.from("ht_scan_log").insert(scanPayload).then(({ error }) => {
           if (error) console.warn("Scan log error:", error.message);
@@ -6938,6 +8534,19 @@ export default function Home() {
     }
   }, []);
 
+  // Market context — fetched on mount, refreshed every 5 minutes
+  useEffect(() => {
+    const fetchCtx = () => {
+      fetch("/api/market-context")
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data && !data.error) setMarketCtx(data); })
+        .catch(() => {});
+    };
+    fetchCtx();
+    const interval = setInterval(fetchCtx, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
 
   useEffect(() => {
     const pulse = setInterval(() => {
@@ -6978,15 +8587,15 @@ export default function Home() {
 
 
   useEffect(() => {
-    // Fetch news + social for top 12 so BTC target always has data regardless of rank
+    // Fetch news for top stocks so hero card always has context
     const topStocksForFetch = stocks.slice(0, 12);
     if (liveHeroTarget && !topStocksForFetch.find(s => s.symbol === liveHeroTarget.symbol)) {
       topStocksForFetch.push(liveHeroTarget);
     }
     topStocksForFetch.forEach((stock) => {
       fetchNews(stock.symbol);
-      fetchSocialIntel(stock.symbol);
     });
+
     // Fetch API opportunities on every scan
     fetchAPIOpportunities();
 
@@ -7011,8 +8620,7 @@ export default function Home() {
     // Log top conviction signal to market behavior
     if (stocks.length > 0 && mounted) {
       const top = stocks[0];
-      const social = socialIntel[top.symbol];
-      logMarketBehaviorSignal(top, social?.socialScore ?? 0, social?.crowdStage ?? 1);
+      logMarketBehaviorSignal(top, 0, 1);
     }
   }, [stocks]);
 
@@ -7024,15 +8632,144 @@ export default function Home() {
     }
   }, [mounted]);
 
+  // Fetch ATR for a ticker only when needed — not on every 30s refresh.
+  // Returns the ATR data directly so callers don't read stale state.
+  // Also updates the cache for future use.
+  const fetchATRIfNeeded = async (ticker: string): Promise<{
+    atr14: number; support: number; resistance: number; volatility20d: number; fetchedAt: number;
+  } | null> => {
+    if (!ticker) return null;
+    const cached = atrCache[ticker];
+    const ONE_HOUR = 60 * 60 * 1000;
+    if (cached && Date.now() - cached.fetchedAt < ONE_HOUR) return cached;
+
+    try {
+      const res = await fetch(`/api/trade-framework?ticker=${ticker}`);
+      if (!res.ok) return cached ?? null;
+      const data = await res.json();
+      if (data.error || !data.atr14) return cached ?? null;
+
+      const entry = {
+        atr14: data.atr14,
+        support: data.support,
+        resistance: data.resistance,
+        volatility20d: data.volatility20d,
+        fetchedAt: Date.now(),
+      };
+
+      setAtrCache(prev => ({ ...prev, [ticker]: entry }));
+      return entry;
+    } catch (e) {
+      console.warn(`[ATR] fetch failed for ${ticker}:`, e);
+      return cached ?? null;
+    }
+  };
+
+
+  // so watchlist changes are always seen without the dep causing a double-fetch.
+  const fetchStocksRef = useRef(fetchStocks);
+  useEffect(() => { fetchStocksRef.current = fetchStocks; });
+
   useEffect(() => {
-    fetchStocks();
+    fetchStocksRef.current();
 
     const interval = setInterval(() => {
-      fetchStocks();
+      fetchStocksRef.current();
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [watchlist]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+
+
+  // ATR is cached per ticker (1hr TTL) — not refetched every 30s.
+  const smSymbol = resolvedBeforeCrowdTarget?.symbol ?? "";
+  const btcSymbol = resolvedBeforeTheCrowdTarget?.symbol ?? "";
+
+  // Log top picks to ht_scan_log with full engine data whenever active picks change.
+  useEffect(() => {
+    if (!mounted || !lastUpdated) return;
+
+    const logPick = (stock: Stock, engine: "spot_momentum" | "before_the_crowd", fw: typeof smFramework) => {
+      try {
+        const score = getHTScore(stock);
+        const stack = buildPressureStack(stock);
+        const isDual = isDualEngineConfirmation;
+        const isBTC = engine === "before_the_crowd";
+        const conv = isBTC ? beforeTheCrowdConviction : 0;
+        const saturation = getBackgroundOpportunityEngine(stock).crowdSaturationScore;
+        const hce = isHighConvictionEvent(stock);
+        const hceCat = getHCECategory(stock);
+        const reasonSentence = isBTC
+          ? (getThesisEnduranceReason(stock)[0] ?? "")
+          : (hce && hceCat
+              ? `${hceCat} identified — positioned before the event resolves.`
+              : saturation < 45
+              ? "Momentum is building before widespread participation arrives."
+              : "Momentum is expanding as more traders take notice.");
+
+        supabase.from("ht_scan_log").insert({
+          ticker: stock.symbol,
+          price: stock.price,
+          rank: 1,
+          ht_confidence: score,
+          ht_score: score,
+          state: isBTC ? getThesisEnduranceLabel(conv) : getMomentumEnduranceLabel(evaluateMomentumEndurance(stock), score),
+          engine,
+          dual_engine: isDual,
+          source: "top_pick",
+          change_percent: stock.change,
+          relative_volume: getRelativeVolume(stock),
+          catalyst_score: stock.catalystScore ?? 0,
+          pattern: detectPatternSignal(stock).name,
+          signal_state: stock.signalState ?? null,
+          crowd_score: saturation,
+          trap_score: stack.trapRiskScore,
+          decision: getHTStance(stock).label,
+          reasoning: reasonSentence,
+          upside_min: fw?.uptideMin ?? null,
+          upside_max: fw?.uptideMax ?? null,
+          risk_zone: fw?.riskZone ?? null,
+          rr_ratio: fw?.rr ?? null,
+        }).then(({ error }) => {
+          if (error) console.warn(`[${engine} log]:`, error.message);
+        });
+      } catch (e) {
+        console.warn(`[${engine} log] error:`, e);
+      }
+    };
+
+    if (resolvedBeforeCrowdTarget) logPick(resolvedBeforeCrowdTarget, "spot_momentum", smFramework);
+    if (resolvedBeforeTheCrowdTarget) logPick(resolvedBeforeTheCrowdTarget, "before_the_crowd", btcFramework);
+  }, [smSymbol, btcSymbol, lastUpdated, mounted]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
+
+  useEffect(() => {
+    if (!mounted) return;
+    const isLive = marketSession === "live";
+
+    const recompute = async () => {
+      if (resolvedBeforeCrowdTarget) {
+        const atr = await fetchATRIfNeeded(smSymbol);
+        setSMFramework(buildTradeFramework(resolvedBeforeCrowdTarget, atr, isLive));
+        setSMTrace(buildDecisionTrace(resolvedBeforeCrowdTarget, stocks, "spot_momentum"));
+      } else {
+        setSMFramework(null);
+        setSMTrace(null);
+      }
+      if (resolvedBeforeTheCrowdTarget) {
+        const atr = await fetchATRIfNeeded(btcSymbol);
+        setBTCFramework(buildTradeFramework(resolvedBeforeTheCrowdTarget, atr, isLive));
+        setBTCTrace(buildDecisionTrace(resolvedBeforeTheCrowdTarget, stocks, "before_the_crowd"));
+      } else {
+        setBTCFramework(null);
+        setBTCTrace(null);
+      }
+    };
+
+    recompute();
+  }, [smSymbol, btcSymbol, stocks, marketSession, mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // HT Change Log — detect what changed between scans
   useEffect(() => {
@@ -7246,7 +8983,10 @@ export default function Home() {
       setSearchStatus(`${cleanTicker} loaded into HT. Add it to watchlist if it deserves tracking.`);
       setTicker("");
 
-      if (typeof window !== "undefined") {
+      // On mobile the stock detail sheet is inside the mobile overlay —
+      // scrolling to #premium-terminal does nothing. Only scroll on desktop.
+      const isMobileView = window.innerWidth < 768;
+      if (!isMobileView) {
         window.setTimeout(() => {
           document
             .getElementById("premium-terminal")
@@ -7846,6 +9586,9 @@ export default function Home() {
               <a className="transition hover:text-orange-300" href="/scanner">
                 Scanner
               </a>
+              <a className="transition hover:text-orange-300" href="/signals">
+                Signals
+              </a>
               <a className="transition hover:text-orange-300" href="/news">
                 News
               </a>
@@ -8227,20 +9970,79 @@ export default function Home() {
 
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
-                onClick={() => document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth" })}
+                onClick={() => setMobileTab("watchlist")}
                 className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs font-black text-zinc-200"
               >
-                Watchlist
+                Watchlist ⭐
               </button>
               <button
-                onClick={() => document.getElementById("scanner")?.scrollIntoView({ behavior: "smooth" })}
+                onClick={() => setMobileTab("scanner")}
                 className="rounded-2xl bg-orange-500 px-4 py-3 text-xs font-black text-white"
               >
-                Expand Feed
+                Scanner ⚡
               </button>
             </div>
           </div>
         </section>
+
+        {/* ── MORNING MARKET CONTEXT ── */}
+        <div className="mx-auto max-w-[1488px] px-3 md:px-6 pb-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {marketCtx ? (
+              <>
+                <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 ${
+                  marketCtx.moodColor === "green"
+                    ? "border-green-400/20 bg-green-500/[0.05] text-green-400"
+                    : marketCtx.moodColor === "red"
+                    ? "border-red-400/20 bg-red-500/[0.05] text-red-400"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-500"
+                }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${
+                    marketCtx.moodColor === "green" ? "bg-green-400" :
+                    marketCtx.moodColor === "red" ? "bg-red-400" : "bg-zinc-600"
+                  }`} />
+                  <span className="text-[9px] font-black uppercase tracking-[0.18em]">{marketCtx.mood}</span>
+                </div>
+                {[
+                  { label: "SPY", val: marketCtx.spy },
+                  { label: "QQQ", val: marketCtx.qqq },
+                  { label: "IWM", val: marketCtx.iwm },
+                ].map(({ label, val }) => (
+                  <div key={label} className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-black/40 px-3 py-1">
+                    <span className="text-[9px] font-black text-zinc-600">{label}</span>
+                    <span className={`text-[9px] font-black ${val.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {val.change >= 0 ? "+" : ""}{val.change.toFixed(2)}%
+                    </span>
+                  </div>
+                ))}
+                {marketCtx.vix && (
+                  <div className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-black/40 px-3 py-1">
+                    <span className="text-[9px] font-black text-zinc-600">VIX</span>
+                    <span className={`text-[9px] font-black ${
+                      marketCtx.vix.price > 20 ? "text-red-400" :
+                      marketCtx.vix.price > 15 ? "text-orange-400" : "text-green-400"
+                    }`}>{marketCtx.vix.price.toFixed(1)}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-black/40 px-3 py-1">
+                  <span className="text-[9px] font-black text-zinc-600">VOL</span>
+                  <span className={`text-[9px] font-black ${
+                    marketCtx.volumeEnv === "Heavy" ? "text-orange-400" :
+                    marketCtx.volumeEnv === "Normal" ? "text-zinc-400" : "text-zinc-600"
+                  }`}>{marketCtx.volumeEnv}</span>
+                </div>
+                <span className="text-[8px] font-semibold text-zinc-800 ml-1">Market context · updates every 5 min</span>
+              </>
+            ) : (
+              // Loading state — visible while API fetches
+              <div className="flex items-center gap-1.5 animate-pulse">
+                {["","","","",""].map((_, i) => (
+                  <div key={i} className="h-5 w-16 rounded-full bg-white/[0.03] border border-white/[0.04]" />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
         <section id="conviction-engine" className="mx-auto max-w-[1488px] px-3 pt-3 pb-3 md:px-6 md:pt-4 md:pb-4">
           <motion.div
@@ -8362,31 +10164,173 @@ export default function Home() {
               </div>
 
               {/* ═══════════════════════════════════════════════════
-                  BEFORE THE CROWD — Primary Hero Experience
+                  INITIAL LOAD SKELETON
+                  Shows only on first load before real Polygon data
+                  arrives. lastUpdated is null until fetchStocks
+                  completes. After that, skeletons never show again.
+                  ═══════════════════════════════════════════════════ */}
+              {!lastUpdated && (
+                <div className="space-y-4">
+                  {/* Spot Momentum skeleton */}
+                  <div className="rounded-[1.65rem] border border-white/8 bg-black/40 overflow-hidden animate-pulse">
+                    <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.65fr]">
+                      <div className="p-5 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-1.5 rounded-full bg-violet-400/40" />
+                          <div className="h-2.5 w-28 rounded-full bg-white/8" />
+                        </div>
+                        <div className="h-14 w-48 rounded-xl bg-white/6" />
+                        <div className="flex gap-2">
+                          <div className="h-6 w-24 rounded-full bg-white/6" />
+                          <div className="h-6 w-32 rounded-full bg-white/6" />
+                        </div>
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
+                          <div className="h-2 w-36 rounded-full bg-white/8" />
+                          <div className="h-3 w-full rounded-full bg-white/6" />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="h-2.5 w-3/4 rounded-full bg-white/6" />
+                          <div className="h-2.5 w-2/3 rounded-full bg-white/6" />
+                          <div className="h-2.5 w-4/5 rounded-full bg-white/6" />
+                        </div>
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-3 space-y-2">
+                          <div className="h-2 w-32 rounded-full bg-white/8" />
+                          <div className="flex gap-6">
+                            <div className="h-6 w-16 rounded-full bg-white/6" />
+                            <div className="h-6 w-16 rounded-full bg-white/6" />
+                            <div className="h-6 w-16 rounded-full bg-white/6" />
+                          </div>
+                        </div>
+                        <div className="flex gap-3">
+                          <div className="h-8 w-40 rounded-xl bg-white/6" />
+                          <div className="h-8 w-20 rounded-xl bg-white/6" />
+                        </div>
+                      </div>
+                      <div className="p-5 bg-white/[0.01] border-l border-white/6 space-y-3">
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
+                          <div className="h-2 w-28 rounded-full bg-white/8" />
+                          <div className="h-8 w-20 rounded-full bg-white/6" />
+                          <div className="h-2 w-full rounded-full bg-white/6" />
+                        </div>
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-3 space-y-2">
+                          <div className="h-2 w-16 rounded-full bg-white/8" />
+                          <div className="h-8 w-14 rounded-full bg-white/6" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="h-12 rounded-xl bg-white/6" />
+                          <div className="h-12 rounded-xl bg-white/6" />
+                        </div>
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
+                          <div className="h-2 w-24 rounded-full bg-white/8" />
+                          <div className="h-3 w-full rounded-full bg-white/6" />
+                          <div className="h-3 w-5/6 rounded-full bg-white/6" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Before The Crowd skeleton */}
+                  <div className="rounded-[1.65rem] border border-white/8 bg-black/40 overflow-hidden animate-pulse">
+                    <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.65fr]">
+                      <div className="p-5 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-1.5 rounded-full bg-orange-400/40" />
+                          <div className="h-2.5 w-32 rounded-full bg-white/8" />
+                        </div>
+                        <div className="h-14 w-36 rounded-xl bg-white/6" />
+                        <div className="flex gap-2">
+                          <div className="h-6 w-28 rounded-full bg-white/6" />
+                          <div className="h-6 w-20 rounded-full bg-white/6" />
+                        </div>
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
+                          <div className="h-2 w-40 rounded-full bg-white/8" />
+                          <div className="space-y-1.5">
+                            <div className="h-2.5 w-full rounded-full bg-white/6" />
+                            <div className="h-2.5 w-4/5 rounded-full bg-white/6" />
+                            <div className="h-2.5 w-3/4 rounded-full bg-white/6" />
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-3 space-y-2">
+                          <div className="h-2 w-32 rounded-full bg-white/8" />
+                          <div className="flex gap-6">
+                            <div className="h-6 w-16 rounded-full bg-white/6" />
+                            <div className="h-6 w-16 rounded-full bg-white/6" />
+                            <div className="h-6 w-16 rounded-full bg-white/6" />
+                          </div>
+                        </div>
+                        <div className="flex gap-3">
+                          <div className="h-8 w-44 rounded-xl bg-white/6" />
+                          <div className="h-8 w-20 rounded-xl bg-white/6" />
+                        </div>
+                      </div>
+                      <div className="p-5 bg-white/[0.01] border-l border-white/6 space-y-3">
+                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-3">
+                          <div className="h-2 w-24 rounded-full bg-white/8" />
+                          <div className="h-8 w-16 rounded-full bg-white/6" />
+                          <div className="h-2 w-full rounded-full bg-white/6" />
+                          <div className="h-[3px] w-full rounded-full bg-white/6" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="h-10 rounded-xl bg-white/6" />
+                          <div className="h-10 rounded-xl bg-white/6" />
+                          <div className="h-10 rounded-xl bg-white/6" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ═══════════════════════════════════════════════════
+                  SPOT MOMENTUM — Primary Hero Experience
                   Powered by: opportunities API, social intel, news intel,
                   conviction engine, pressure stack
                   ═══════════════════════════════════════════════════ */}
-              {(() => {
+              {lastUpdated && (() => {
+                // ── Candidate resolution now happens once at component level
+                // (resolvedBeforeCrowdTarget) so the bull/bear fetch and the
+                // displayed ticker can never drift apart. Don't recompute here. ──
+                const resolvedTarget = resolvedBeforeCrowdTarget;
+
+                // Near-miss candidates for the empty state — highest score regardless
+                // of stage, shown only when nothing qualifies, clearly unconfirmed.
+                const nearMissCandidates = !resolvedTarget
+                  ? [...stocks].sort((a, b) => getHTScore(b) - getHTScore(a)).slice(0, 3)
+                  : [];
+
                 // Safely resolve BTC target — always a full Stock object
-                const btcTargetRaw = apiMomentum
-                  ? (stocks.find(s => s.symbol === apiMomentum.ticker) || { symbol: apiMomentum.ticker, price: apiMomentum.price || 0, change: apiMomentum.change || 0, volume: 0, prevVolume: 0 })
-                  : (topMomentumOpportunity || liveHeroTarget);
-                const btcTarget: Stock | null = btcTargetRaw && typeof btcTargetRaw.symbol === 'string' ? btcTargetRaw as Stock : liveHeroTarget;
+                const btcTargetRaw = resolvedTarget;
+                const btcTarget: Stock | null = btcTargetRaw && typeof btcTargetRaw.symbol === 'string' ? btcTargetRaw as Stock : null;
                 const btcEngine = btcTarget ? getBackgroundOpportunityEngine(btcTarget as Stock) : null;
-                const btcRead = btcTarget ? getSimpleConvictionRead(btcTarget as Stock) : null;
-                const btcSocial = btcTarget ? socialIntel[btcTarget.symbol] : null;
                 const btcNews = btcTarget ? newsIntel[btcTarget.symbol] : null;
                 const btcRvol = btcTarget ? getRelativeVolume(btcTarget as Stock) : 0;
                 const btcAttention = btcTarget ? getAttentionScore(btcTarget as Stock) : 0;
                 const btcScore = btcTarget ? getHTScore(btcTarget as Stock) : 0;
-                const btcDiscovery = btcEngine?.discoveryScore || 0;
-                const btcSaturation = btcEngine?.crowdSaturationScore || 0;
-                const isBeforeCrowd = btcSaturation < 45 && btcDiscovery >= 60;
+                const btcTier = btcScore >= 80 ? "Strong Before The Crowd" : btcScore >= 65 ? "Developing Opportunity" : "Early Setup";
+                const btcStageScore = btcTarget ? getBackgroundOpportunityEngine(btcTarget as Stock).crowdSaturationScore : 0;
+                const btcStage = btcStageScore <= 35 ? "Early" : btcStageScore <= 60 ? "Developing" : btcStageScore <= 80 ? "Crowded" : "Exhausted";
+                // For API catalyst tickers, use API data directly for signal breakdown
+                const isApiCatalyst = btcTarget?.symbol === apiMomentum?.ticker && (apiMomentum?.catalystScore ?? 0) >= 20;
+                const btcDiscovery = isApiCatalyst
+                  ? Math.min(99, (apiMomentum?.momentumScore ?? 0) + 30)
+                  : btcEngine?.discoveryScore || 0;
+                const btcSaturation = isApiCatalyst
+                  ? (apiMomentum?.attentionScore ?? 50)
+                  : btcEngine?.crowdSaturationScore || 0;
+                const isBeforeCrowd = isApiCatalyst
+                  ? (apiMomentum?.isBeforeCrowd ?? false)
+                  : btcSaturation < 45 && btcDiscovery >= 60;
 
                 // Build signal evidence bullets
-                const signalEvidence = [
+                const signalEvidence = isApiCatalyst ? [
+                  { icon: "⚡", label: "FDA Catalyst Detected", detail: `${apiMomentum?.stage ?? "Catalyst active"} — binary outcome could drive significant move`, strength: "high" },
+                  (apiMomentum?.relativeVolume ?? 0) >= 2 ? { icon: "📊", label: "Volume Surge Detected", detail: `${(apiMomentum?.relativeVolume ?? 0).toFixed(1)}x above normal — unusual buying activity`, strength: "high" } : null,
+                  { icon: "📰", label: "News Velocity Increasing", detail: `${apiMomentum?.signals?.length ?? 0} signals — Fresh catalyst activity`, strength: "medium" } ,
+                  apiMomentum?.isBeforeCrowd ? { icon: "🌱", label: "Crowd Has Not Reacted Yet", detail: `Early window still open — before crowd saturation`, strength: "high" } : null,
+                  { icon: "👁", label: "Attention Shift Detected", detail: `${apiMomentum?.attentionScore ?? 0}/99 attention score — traders are noticing`, strength: "medium" },
+                ].filter(Boolean).slice(0, 5) as { icon: string; label: string; detail: string; strength: string }[]
+                : [
                   btcRvol >= 2 ? { icon: "📊", label: "Volume Surge Detected", detail: `${btcRvol.toFixed(1)}x above normal — unusual buying activity`, strength: "high" } : null,
-                  btcSocial && btcSocial.socialScore >= 35 ? { icon: "🧲", label: "Social Acceleration Detected", detail: `${btcSocial.crowdStageLabel} — ${btcSocial.signals?.[0] || "Attention building across platforms"}`, strength: "high" } : null,
                   btcNews && btcNews.newsVelocity >= 55 ? { icon: "📰", label: "News Velocity Increasing", detail: `${btcNews.articles?.length || 0} articles — ${btcNews.catalystStrength || "Fresh catalyst activity"}`, strength: "medium" } : null,
                   btcSaturation < 45 ? { icon: "⚡", label: "Crowd Has Not Reacted Yet", detail: `Saturation at ${btcSaturation}% — early window still open`, strength: "high" } : null,
                   btcAttention >= 65 ? { icon: "👁", label: "Attention Shift Detected", detail: `${btcAttention}/99 attention score — traders are noticing`, strength: "medium" } : null,
@@ -8417,148 +10361,637 @@ export default function Home() {
                 return (
                   <div className="space-y-4">
 
-                    {/* ── BEFORE THE CROWD — Main Signal ── */}
-                    <div className="relative overflow-hidden rounded-[1.65rem] border border-orange-500/30 bg-[radial-gradient(circle_at_10%_0%,rgba(255,106,0,0.22),transparent_35%),linear-gradient(135deg,rgba(255,255,255,0.04),rgba(0,0,0,0.85))] p-6">
-                      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_90%_100%,rgba(255,140,26,0.08),transparent_40%)]" />
-
-                      {/* Header */}
-                      <div className="relative flex items-start justify-between gap-4 mb-5">
-                        <div>
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className="flex h-2.5 w-2.5 rounded-full bg-orange-400 shadow-[0_0_12px_rgba(255,106,0,0.9)] animate-pulse" />
-                            <p className="text-[11px] font-black uppercase tracking-[0.3em] text-orange-400">Before The Crowd</p>
-                          </div>
-                          <p className="text-sm font-semibold text-zinc-500 max-w-lg">
-                            {isBeforeCrowd
-                              ? "HT detected this before the crowd reacted. The early window is still open."
-                              : "HT is tracking the strongest current opportunity. Crowd saturation is being monitored."}
-                          </p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600">Detected</p>
-                          <p className="text-xs font-black text-zinc-400">{mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}</p>
-                        </div>
-                      </div>
-
-                      {/* Main signal */}
-                      <div className="relative grid gap-4 lg:grid-cols-[1fr_360px]">
-                        <div>
-                          {/* Ticker + score */}
-                          <div className="flex items-start gap-5 mb-4">
-                            <div>
-                              <p className="font-mono text-[5rem] font-black uppercase leading-[0.85] tracking-[-0.12em] text-white">
-                                {btcTarget?.symbol || "—"}
-                              </p>
-                              <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                <span className={`font-mono text-lg font-black ${(btcTarget?.change || 0) >= 0 ? "text-green-300" : "text-red-300"}`}>
-                                  {(btcTarget?.change || 0) >= 0 ? "+" : ""}{(btcTarget?.change || 0).toFixed(2)}%
-                                </span>
-                                <span className="text-zinc-600">·</span>
-                                <span className="font-mono text-sm font-semibold text-zinc-400">${(btcTarget?.price || 0).toFixed(2)}</span>
-                              </div>
+                    {/* ── BEFORE THE CROWD — 3 Column Intelligence Layout ── */}
+                    {(() => {
+                      // ── No qualifying setup — stay minimal, do not force a hero ──
+                      if (!btcTarget) {
+                        return (
+                          <div className="rounded-[1.65rem] border border-white/10 bg-black/40 p-8 text-center">
+                            <div className="flex items-center justify-center gap-2 mb-4">
+                              <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
+                              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-zinc-500">Spot Momentum</p>
                             </div>
-                            <div className="flex flex-col gap-2">
-                              <div className="rounded-2xl border border-orange-400/30 bg-orange-500/10 px-4 py-3 text-center">
-                                <p className="font-mono text-3xl font-black text-orange-300">{btcScore}</p>
-                                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600 mt-0.5">
-                                  {btcScore >= 95 ? "Elite" : btcScore >= 85 ? "Strong" : btcScore >= 70 ? "Developing" : "Watchlist"}
-                                </p>
+                            <p className="text-2xl font-black text-white mb-1.5">No Signal Confirmed</p>
+                            <p className="text-sm font-semibold text-zinc-500 max-w-md mx-auto">No stock currently clears the HT Labs momentum threshold. Monitoring continues.</p>
+
+                            {nearMissCandidates.length > 0 && (
+                              <div className="max-w-sm mx-auto mt-6 space-y-2">
+                                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600 mb-2">Watching, Not Confirmed</p>
+                                {nearMissCandidates.map((s) => {
+                                  const sc = getHTScore(s);
+                                  const stageScore = getBackgroundOpportunityEngine(s).crowdSaturationScore;
+                                  const stage = stageScore <= 35 ? "Early" : stageScore <= 60 ? "Developing" : stageScore <= 80 ? "Crowded" : "Exhausted";
+                                  return (
+                                    <button
+                                      key={s.symbol}
+                                      onClick={() => setSelectedStock(s)}
+                                      className="w-full flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.02] px-4 py-2.5 hover:border-white/15 transition"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className="font-mono text-sm font-black text-zinc-300">{s.symbol}</span>
+                                        <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-zinc-600">Stage {stageScore} · {stage}</span>
+                                      </div>
+                                      <span className="font-mono text-xs font-black text-zinc-500">HT {sc}</span>
+                                    </button>
+                                  );
+                                })}
                               </div>
-                              <div className={`rounded-xl border px-3 py-1.5 text-center text-[10px] font-black ${isBeforeCrowd ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-300" : "border-white/10 bg-white/[0.04] text-zinc-400"}`}>
-                                {isBeforeCrowd ? "⚡ Early Window" : "👁 Monitoring"}
-                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      const convTier = apiMomentum?._convictionTier ?? (isBeforeCrowd ? "Early Watch" : "Watchlist");
+                      const heroTicker = btcTarget?.symbol || "—";
+                      const heroChange = btcTarget?.change || 0;
+                      const heroPrice = btcTarget?.price || 0;
+
+                      // Use single source of truth for HCE detection
+                      const hceCategory = btcTarget ? getHCECategory(btcTarget as Stock) : null;
+                      const isCatalystPlay = Boolean(hceCategory);
+                      const isMomentumPlay = !isCatalystPlay && heroChange >= 3;
+                      const isRecoveryPlay = !isCatalystPlay && heroChange < -2;
+
+                      // Selection type label — tells user why HT Labs picked this
+                      const selectionLabel = hceCategory ?? (isMomentumPlay ? "Momentum Leader" : "Early Setup");
+
+                      const retailBullish = Math.min(90, Math.max(10, 100 - btcSaturation));
+                      const retailBearish = 100 - retailBullish;
+                      const riskLabel = isCatalystPlay ? "MEDIUM" : btcRvol >= 3 ? "HIGH" : "LOW";
+                      const confidenceLabel = btcScore >= 80 ? "HIGH" : btcScore >= 65 ? "MEDIUM" : "LOW";
+                      const positionLabel = btcSaturation < 40 ? "EARLY" : btcSaturation < 65 ? "BUILDING" : "LATE";
+
+                      // Momentum evidence bullets — specific to Spot Momentum, not BTC
+                      const whyBullets = (() => {
+                        if (!btcTarget) return [];
+                        const s = btcTarget as Stock;
+                        const rvol = getRelativeVolume(s);
+                        const engine2 = getBackgroundOpportunityEngine(s);
+                        const sat = engine2.crowdSaturationScore;
+                        const bullets: string[] = [];
+                        if (rvol >= 2) bullets.push(`Volume running ${rvol.toFixed(1)}× above normal.`);
+                        else if (rvol >= 1.3) bullets.push("Volume expanding above baseline.");
+                        if (sat < 40) bullets.push("Crowd participation still early.");
+                        else if (sat < 65) bullets.push("Crowd building — not yet crowded.");
+                        if (s.change > 0) bullets.push("Bullish pressure outweighing selling.");
+                        else if (s.change < 0) bullets.push("Selling pressure may be exhausting.");
+                        if (engine2.accelerationLabel === "Accelerating Fast") bullets.push("Momentum accelerating above baseline.");
+                        else if (engine2.accelerationLabel === "Acceleration Building") bullets.push("Acceleration building in the right direction.");
+                        if (btcScore >= 80) bullets.push("Setup above HT Labs high-conviction threshold.");
+                        else if (btcScore >= 65) bullets.push("Setup clears HT Labs minimum threshold.");
+                        return bullets.slice(0, 4);
+                      })();
+
+                      return (
+                        <div className="relative overflow-hidden rounded-[1.65rem] border border-violet-400/15 bg-gradient-to-br from-black via-black to-violet-500/[0.03]">
+
+                          {/* Header strip */}
+                          <div className="flex items-center justify-between px-5 pt-4 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="flex h-2 w-2 rounded-full bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.9)] animate-pulse" />
+                              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
                             </div>
+                            <span className="text-[10px] font-black text-zinc-600">{mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}</span>
                           </div>
 
-                          {/* Signal evidence — why HT flagged it */}
-                          <div className="space-y-2">
-                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-3">Why HT Flagged This</p>
-                            {signalEvidence.length > 0 ? signalEvidence.map((ev, i) => (
-                              <div key={i} className="flex items-start gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3">
-                                <span className="text-base shrink-0 mt-0.5">{ev.icon}</span>
-                                <div>
-                                  <p className={`text-sm font-black ${ev.strength === "high" ? "text-white" : "text-zinc-300"}`}>{ev.label}</p>
-                                  <p className="text-xs font-semibold text-zinc-500 mt-0.5">{ev.detail}</p>
+                          <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] divide-y lg:divide-y-0 lg:divide-x divide-white/[0.06]">
+
+                            {/* ══ LEFT — The Story ══ */}
+                            <div className="p-5 flex flex-col gap-4">
+
+                              {/* 1. IDENTITY */}
+                              <div>
+                                <div className="flex items-baseline gap-3 flex-wrap mb-2">
+                                  <p className="font-mono text-[3.6rem] font-black uppercase leading-none tracking-[-0.08em] text-white">
+                                    {heroTicker}
+                                  </p>
+                                  <div className="flex items-center gap-2 pb-1">
+                                    <span className="font-mono text-xl font-black text-white">${heroPrice.toFixed(2)}</span>
+                                    <span className={`font-mono text-sm font-black ${heroChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                      {heroChange >= 0 ? "+" : ""}{heroChange.toFixed(2)}%
+                                    </span>
+                                  </div>
                                 </div>
-                                {ev.strength === "high" && (
-                                  <span className="ml-auto shrink-0 rounded-full bg-orange-500/10 px-2.5 py-1 text-[9px] font-black text-orange-300">Strong</span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[10px] font-black text-zinc-500">
+                                    {selectionLabel}
+                                  </span>
+                                  <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-black ${
+                                    btcStage === "Early" ? "border-green-400/20 text-green-500" : "border-zinc-800 text-zinc-600"
+                                  }`}>
+                                    {btcStage === "Early" ? "Pre-Crowd" : btcStage === "Developing" ? "Crowd Building" : btcStage === "Crowded" ? "Crowd Arrived" : "Late Stage"}
+                                  </span>
+                                  {isCatalystPlay && (
+                                    <span className="rounded-full border border-orange-400/30 bg-orange-500/[0.07] px-2.5 py-0.5 text-[10px] font-black text-orange-300">
+                                      ⚡ {hceCategory}
+                                    </span>
+                                  )}
+                                  {isDualEngineConfirmation && (
+                                    <span className="rounded-full border border-amber-400/20 bg-amber-500/[0.05] px-2.5 py-0.5 text-[10px] font-black text-amber-400">
+                                      ⚡ Dual Engine Confirmation
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 2. EMOTIONAL HOOK — one line, bare, confident */}
+                              <p className="text-sm font-semibold text-zinc-400 leading-5">
+                                {isCatalystPlay
+                                  ? `${hceCategory} identified — positioned before the event resolves.`
+                                  : btcSaturation < 45
+                                  ? "Momentum is building before widespread participation arrives."
+                                  : "Momentum is expanding as more traders take notice."}
+                              </p>
+
+                              {/* 3. OPPORTUNITY WINDOW — the hero, big numbers, in your face */}
+                              {smFramework && (
+                                <div className="rounded-xl border border-white/8 bg-black/60 overflow-hidden">
+                                  {/* Header strip */}
+                                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/6">
+                                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-violet-400">Opportunity Window</p>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                                        smFramework.confidence === "High" ? "border-green-400/25 text-green-400" :
+                                        smFramework.confidence === "Moderate" ? "border-violet-400/20 text-violet-400" :
+                                        "border-zinc-800 text-zinc-600"
+                                      }`}>{smFramework.confidence}</span>
+                                      <span className="text-[8px] font-semibold text-zinc-700">{smFramework.horizon}</span>
+                                      {!smFramework.isLive && <span className="text-[8px] text-zinc-800">· Last session</span>}
+                                    </div>
+                                  </div>
+
+                                  {/* Big numbers — the centrepiece */}
+                                  <div className="grid grid-cols-3 divide-x divide-white/6">
+                                    <div className="px-4 py-4">
+                                      <p className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-600 mb-2">Upside</p>
+                                      <p className="font-mono text-[2.4rem] font-black text-green-400 leading-none">+{smFramework.uptideMin}%</p>
+                                      <p className="font-mono text-xs font-black text-green-400/40 mt-1.5">to +{smFramework.uptideMax}%</p>
+                                    </div>
+                                    <div className="px-4 py-4">
+                                      <p className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-600 mb-2">Risk</p>
+                                      <p className="font-mono text-[2.4rem] font-black text-red-400 leading-none">-{smFramework.riskZone}%</p>
+                                    </div>
+                                    <div className="px-4 py-4">
+                                      <p className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-600 mb-2">R/R Ratio</p>
+                                      <p className="font-mono text-[2.4rem] font-black text-violet-400 leading-none">{smFramework.rr}:1</p>
+                                    </div>
+                                  </div>
+
+                                  {/* Sentence — anchored below numbers */}
+                                  <div className="px-4 py-2.5 border-t border-white/6 bg-white/[0.01]">
+                                    <p className="text-[10px] font-semibold text-zinc-600 italic">{smFramework.sentence}</p>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 4. EVIDENCE — supporting, not leading */}
+                              {whyBullets.length > 0 && (
+                                <div className="flex flex-col gap-1.5">
+                                  {whyBullets.map((b, i) => (
+                                    <div key={i} className="flex gap-2">
+                                      <span className="text-violet-400/40 text-xs shrink-0 mt-0.5">▸</span>
+                                      <p className="text-[11px] font-semibold text-zinc-600 leading-4">{b}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* 5. CTAs */}
+                              <div className="flex items-center gap-2.5 mt-auto pt-1">
+                                <button
+                                  onClick={() => btcTarget && setSelectedStock(btcTarget as Stock)}
+                                  className="rounded-xl border border-violet-400/30 bg-violet-500/[0.07] px-4 py-2.5 text-xs font-black text-violet-300 hover:bg-violet-500/12 transition"
+                                >
+                                  Full Signal Breakdown →
+                                </button>
+                                <button
+                                  onClick={() => btcTarget && toggleWatchlist(heroTicker)}
+                                  className={`rounded-xl border px-4 py-2.5 text-xs font-black transition ${watchlist.includes(heroTicker) ? "border-violet-400/25 bg-violet-500/[0.07] text-violet-300" : "border-white/8 text-zinc-600 hover:text-zinc-400"}`}
+                                >
+                                  {watchlist.includes(heroTicker) ? "★ Watching" : "☆ Watch"}
+                                </button>
+                              </div>
+                              <p className="text-[9px] text-zinc-800 font-semibold -mt-2">Signals are for research only, not financial advice.</p>
+                            </div>
+
+                            {/* ══ RIGHT — Advanced Data ══ */}
+                            <div className="p-5 flex flex-col gap-4 bg-white/[0.01]">
+
+                              {/* HT Score */}
+                              <div>
+                                <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700 mb-2">HT Score</p>
+                                <div className="flex items-end gap-3">
+                                  <p className={`font-mono text-[3rem] font-black leading-none ${
+                                    btcScore >= 80 ? "text-green-400" : btcScore >= 65 ? "text-violet-400" : "text-orange-400"
+                                  }`}>{btcScore}</p>
+                                  <div className="pb-0.5">
+                                    <p className="text-sm font-black text-white leading-tight">
+                                      {btcTarget ? getMomentumEnduranceLabel(evaluateMomentumEndurance(btcTarget as Stock), btcScore) : "—"}
+                                    </p>
+                                    <p className="text-[10px] font-semibold text-zinc-600 mt-0.5">
+                                      {btcScore >= 80 ? "Momentum continues to strengthen." : btcScore >= 65 ? "Buying pressure remains intact." : "Momentum is holding its structure."}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Metrics */}
+                              <div className="grid grid-cols-5 gap-1">
+                                {[
+                                  { label: "Bullish", value: `${retailBullish}%`, color: "text-violet-400" },
+                                  { label: "Bearish", value: `${retailBearish}%`, color: "text-orange-400" },
+                                  { label: "Confidence", value: confidenceLabel, color: confidenceLabel === "HIGH" ? "text-violet-400" : confidenceLabel === "MEDIUM" ? "text-orange-400" : "text-zinc-500" },
+                                  { label: "Risk", value: riskLabel, color: riskLabel === "HIGH" ? "text-red-400" : riskLabel === "MEDIUM" ? "text-orange-400" : "text-green-400" },
+                                  { label: "Position", value: positionLabel, color: "text-violet-400" },
+                                ].map(({ label, value, color }) => (
+                                  <div key={label} className="rounded-lg border border-white/5 bg-black/30 px-1.5 py-2 text-center">
+                                    <p className={`font-mono text-[11px] font-black leading-none ${color}`}>{value}</p>
+                                    <p className="text-[6px] font-black uppercase tracking-[0.05em] text-zinc-700 mt-1.5">{label}</p>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* HT Read */}
+                              <div className="flex flex-col">
+                                <p className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-700 mb-2">HT Labs Read</p>
+                                {bullBearLoading ? (
+                                  <div className="space-y-1.5 animate-pulse">
+                                    <div className="h-2.5 bg-zinc-900 rounded w-full" />
+                                    <div className="h-2.5 bg-zinc-900 rounded w-3/4" />
+                                  </div>
+                                ) : bullBearData?.ticker === heroTicker && bullBearData?.htRead ? (
+                                  <p className="text-sm font-semibold text-zinc-300 leading-5">"{bullBearData.htRead}"</p>
+                                ) : (
+                                  <p className="text-sm font-semibold text-zinc-400 leading-5">
+                                    {btcSaturation < 45
+                                      ? `${heroTicker} is building before widespread participation. Volume ${btcRvol >= 1.3 ? "is above average" : "remains moderate"}.`
+                                      : `${heroTicker} is showing ${retailBullish >= 60 ? "bullish" : "mixed"} momentum with ${positionLabel.toLowerCase()} crowd positioning.`}
+                                  </p>
+                                )}
+                                <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/5 mt-3">
+                                  {[
+                                    { label: "Sentiment", value: retailBullish >= 60 ? "Bullish" : retailBullish >= 40 ? "Mixed" : "Bearish", color: retailBullish >= 60 ? "text-green-400" : retailBullish >= 40 ? "text-violet-400" : "text-orange-400" },
+                                    { label: "Momentum", value: btcScore >= 75 ? "Strengthening" : btcScore >= 60 ? "Stable" : "Fading", color: btcScore >= 75 ? "text-green-400" : btcScore >= 60 ? "text-violet-400" : "text-zinc-500" },
+                                    { label: "Crowd", value: btcSaturation < 35 ? "Early" : btcSaturation < 65 ? "Building" : "Crowded", color: btcSaturation < 35 ? "text-green-400" : btcSaturation < 65 ? "text-violet-400" : "text-red-400" },
+                                  ].map(({ label, value, color }) => (
+                                    <div key={label} className="text-center">
+                                      <p className="text-[7px] font-black uppercase tracking-[0.1em] text-zinc-700 mb-1">{label}</p>
+                                      <p className={`text-[11px] font-black ${color}`}>{value}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Decision Trace — right panel, fills dead space */}
+                              {smTrace && smTrace.primaryDrivers.length > 0 && (
+                                <div className="rounded-xl border border-white/[0.05] bg-black/40 overflow-hidden mt-auto">
+                                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.04]">
+                                    <p className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700">Decision Trace</p>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-[7px] font-black uppercase px-1.5 py-0.5 rounded-full border ${
+                                        smTrace.confidence === "High" ? "border-green-400/20 text-green-500" :
+                                        smTrace.confidence === "Moderate" ? "border-violet-400/15 text-violet-500" :
+                                        "border-zinc-800 text-zinc-700"
+                                      }`}>{smTrace.confidence}</span>
+                                      <span className="text-[7px] font-semibold text-zinc-800">
+                                        Opp {smTrace.opportunityScore} · {smTrace.candidatesEvaluated} evaluated
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="px-3 py-2.5 space-y-1.5">
+                                    <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mb-1">Why This Stock</p>
+                                    {smTrace.primaryDrivers.map((d, i) => (
+                                      <div key={i} className="flex gap-1.5 items-start">
+                                        <span className="text-violet-400/30 text-[8px] shrink-0 mt-0.5">▸</span>
+                                        <p className="text-[9px] font-semibold text-zinc-600 leading-[1.3]">{d}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  {smTrace.rejectedAlternatives.length > 0 && (
+                                    <div className="px-3 pb-2.5 border-t border-white/[0.04] pt-2">
+                                      <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mb-1.5">Why Not Others</p>
+                                      <div className="space-y-1.5">
+                                        {smTrace.rejectedAlternatives.map((r, i) => (
+                                          <div key={i} className="flex gap-1.5 items-start">
+                                            <span className="font-mono text-[9px] font-black text-zinc-500 shrink-0">{r.symbol}</span>
+                                            <p className="text-[8px] font-semibold text-zinc-700 leading-[1.3]">— {r.reason}</p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {/* ── Bottom strip — 4 quick stats ── */}
+                          <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-white/8 border-t border-white/8">
+                            <div className="flex items-center gap-2.5 p-3">
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 text-violet-400 text-sm shrink-0">🔥</span>
+                              <div>
+                                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500">Market Mood</p>
+                                <p className="text-sm font-black text-white">{heroChange >= 0 ? "Risk On" : "Risk Off"}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2.5 p-3">
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 text-violet-400 text-sm shrink-0">👥</span>
+                              <div>
+                                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500">Retail Attention</p>
+                                <p className="text-sm font-black text-white">{btcSaturation < 40 ? "Rising" : btcSaturation < 65 ? "Building" : "Peaked"}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2.5 p-3">
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 text-violet-400 text-sm shrink-0">📊</span>
+                              <div>
+                                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500">Volume</p>
+                                <p className="text-sm font-black text-white">{btcRvol.toFixed(1)}x avg</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2.5 p-3">
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 text-violet-400 text-sm shrink-0">🎯</span>
+                              <div>
+                                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500">Opportunity</p>
+                                <p className="text-sm font-black text-violet-400">{positionLabel === "EARLY" ? "Early" : positionLabel === "BUILDING" ? "Developing" : "Late"}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* ── Catalyst signal footer strip ── */}
+                          <div className="flex items-center justify-between px-5 py-2.5 border-t border-white/8 bg-violet-500/[0.03]">
+                            <div className="flex items-center gap-2">
+                              <span className="text-violet-400 text-sm">⚡</span>
+                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
+                                {isCatalystPlay ? "Catalyst Signal" : "Momentum Signal"} — Before The Move
+                              </p>
+                            </div>
+                            <p className="font-mono text-lg font-black text-violet-400">{btcScore}</p>
+                          </div>
+
+                          {/* ── Bull / Bear — full width below ── */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/8 border-t border-white/8">
+                            <div className="p-4 bg-green-500/[0.02]">
+                              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-green-400 mb-2">🐂 Bull Case</p>
+                              {bullBearLoading ? (
+                                <div className="space-y-2 animate-pulse">
+                                  <div className="h-2.5 bg-green-900/40 rounded w-full" />
+                                  <div className="h-2.5 bg-green-900/40 rounded w-4/5" />
+                                  <div className="h-2.5 bg-green-900/40 rounded w-3/5" />
+                                </div>
+                              ) : bullBearData?.ticker === heroTicker && bullBearData?.bullCase ? (
+                                <ul className="space-y-2">
+                                  {bullBearData.bullCase.slice(0, 3).map((pt: string, i: number) => (
+                                    <li key={i} className="flex gap-2 text-xs font-semibold text-zinc-300 leading-4">
+                                      <span className="text-green-500 font-black shrink-0">+</span><span>{pt}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="text-[10px] text-zinc-600">Analyzing {heroTicker}...</p>
+                              )}
+                            </div>
+                            <div className="p-4 bg-red-500/[0.02]">
+                              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-400 mb-2">🐻 Bear Case</p>
+                              {bullBearLoading ? (
+                                <div className="space-y-2 animate-pulse">
+                                  <div className="h-2.5 bg-red-900/40 rounded w-full" />
+                                  <div className="h-2.5 bg-red-900/40 rounded w-4/5" />
+                                  <div className="h-2.5 bg-red-900/40 rounded w-3/5" />
+                                </div>
+                              ) : bullBearData?.ticker === heroTicker && bullBearData?.bearCase ? (
+                                <ul className="space-y-2">
+                                  {bullBearData.bearCase.slice(0, 3).map((pt: string, i: number) => (
+                                    <li key={i} className="flex gap-2 text-xs font-semibold text-zinc-300 leading-4">
+                                      <span className="text-red-500 font-black shrink-0">−</span><span>{pt}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="text-[10px] text-zinc-600">Analyzing {heroTicker}...</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* ── Full Intelligence expandable ── */}
+                          <div className="px-5 py-2.5 border-t border-white/8">
+                            <button onClick={() => setBullBearExpanded(v => !v)} className="w-full flex items-center justify-between group">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Full Intelligence Breakdown</span>
+                                {bullBearData?.ticker === heroTicker && bullBearData && (
+                                  <span className="rounded-full border border-green-400/20 bg-green-500/10 px-2 py-0.5 text-[8px] font-black text-green-400">
+                                    {bullBearData.newsCount > 0 ? `${bullBearData.newsCount} sources` : "AI Analysis"}
+                                  </span>
                                 )}
                               </div>
-                            )) : (
-                              <div className="rounded-xl border border-white/8 bg-black/30 px-4 py-3">
-                                <p className="text-sm font-semibold text-zinc-500">HT is scanning for early signals. Check back shortly.</p>
+                              <span className="text-zinc-600 group-hover:text-zinc-300 transition text-sm">{bullBearExpanded ? "▲" : "▼"}</span>
+                            </button>
+                            {bullBearExpanded && bullBearData?.ticker === heroTicker && bullBearData && (
+                              <div className="mt-4 space-y-3 pb-2">
+                                <div className="rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500 mb-1">🚨 Why It's On Our Radar</p>
+                                  <p className="text-xs font-semibold text-zinc-200 leading-5">{bullBearData.onRadar}</p>
+                                </div>
+                                <p className="text-[9px] text-zinc-700 text-center">Not financial advice. HT Labs surfaces information — you make the call.</p>
                               </div>
                             )}
                           </div>
 
-                          {/* CTA buttons */}
-                          <div className="mt-4 flex gap-3">
-                            <button
-                              onClick={() => btcTarget && setSelectedStock(btcTarget as Stock)}
-                              className="flex-1 rounded-2xl bg-orange-500 py-3.5 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[0_0_22px_rgba(255,106,0,0.3)] hover:bg-orange-400 transition"
-                            >
-                              Full Signal Breakdown →
-                            </button>
-                            <button
-                              onClick={() => btcTarget && toggleWatchlist(btcTarget.symbol)}
-                              className={`rounded-2xl border px-5 py-3.5 text-sm font-black transition ${btcTarget && watchlist.includes(btcTarget.symbol) ? "border-green-400/30 bg-green-500/10 text-green-300" : "border-white/10 bg-white/[0.04] text-zinc-400 hover:text-white"}`}
-                            >
-                              {btcTarget && watchlist.includes(btcTarget.symbol) ? "✓ Watching" : "Watch"}
-                            </button>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ══════════════════════════════════════════════════════
+                        BEFORE THE CROWD — Thesis Endurance Engine
+                        ══════════════════════════════════════════════════════ */}
+                    {resolvedBeforeTheCrowdTarget && (() => {
+                      const btcE = resolvedBeforeTheCrowdTarget;
+                      const conv = beforeTheCrowdConviction;
+                      const convLabel = getThesisEnduranceLabel(conv);
+                      const btcScore = getHTScore(btcE);
+                      const reasons = getThesisEnduranceReason(btcE);
+                      const hceCat = getHCECategory(btcE);
+                      const btcRvol = getRelativeVolume(btcE);
+                      const btcSat = getBackgroundOpportunityEngine(btcE).crowdSaturationScore;
+                      const borderColor = conv >= 80 ? "border-green-400/20 bg-green-500/[0.03]" :
+                        conv >= 65 ? "border-violet-400/20 bg-violet-500/[0.03]" :
+                        conv >= 50 ? "border-orange-400/20 bg-orange-500/[0.03]" :
+                        "border-red-400/20 bg-red-500/[0.03]";
+                      const accentColor = conv >= 80 ? "text-green-400" : conv >= 65 ? "text-violet-400" :
+                        conv >= 50 ? "text-orange-400" : "text-red-400";
+                      const accentBorder = conv >= 80 ? "border-green-400/30 bg-green-500/10" :
+                        conv >= 65 ? "border-violet-400/30 bg-violet-500/10" :
+                        conv >= 50 ? "border-orange-400/30 bg-orange-500/10" : "border-red-400/30 bg-red-500/10";
+
+                      return (
+                        <div className={`rounded-[1.65rem] border overflow-hidden ${borderColor}`}>
+                          <div className="flex items-center justify-between px-5 pt-4 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="flex h-2 w-2 rounded-full bg-orange-400 shadow-[0_0_10px_rgba(251,146,60,0.9)] animate-pulse" />
+                              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-orange-400">Before The Crowd</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {isDualEngineConfirmation && (
+                                <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2.5 py-1 text-[9px] font-black text-amber-400">⚡ Dual Engine Confirmation</span>
+                              )}
+                              {mounted && lastUpdated && (
+                                <span className="text-[10px] font-black text-zinc-600">{lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] divide-y lg:divide-y-0 lg:divide-x divide-white/10">
+                            <div className="p-5 pt-1">
+                              <div className="flex items-baseline gap-3 flex-wrap mb-2">
+                                <p className="font-mono text-[3.4rem] font-black uppercase leading-[0.85] tracking-[-0.1em] text-white">{btcE.symbol}</p>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-xl font-black text-white">${btcE.price.toFixed(2)}</span>
+                                  <span className={`font-mono text-sm font-black ${btcE.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                    {btcE.change >= 0 ? "+" : ""}{btcE.change.toFixed(2)}%
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                                {hceCat && (
+                                  <span className="rounded-full border border-orange-400/40 bg-orange-500/10 px-3 py-1 text-[10px] font-black text-orange-300">⚡ {hceCat}</span>
+                                )}
+                                <span className={`rounded-full border px-3 py-1 text-[10px] font-black ${accentBorder} ${accentColor}`}>{convLabel}</span>
+                                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-black text-zinc-500">HT {btcScore}</span>
+                              </div>
+                              <div className="rounded-2xl border border-orange-400/10 bg-orange-500/[0.03] px-4 py-2.5 mb-3">
+                                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-orange-400 mb-1.5">Why HT Labs Selected This</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                                  {reasons.map((b, i) => (
+                                    <div key={i} className="flex gap-2">
+                                      <span className="text-orange-400 font-black text-xs shrink-0">✓</span>
+                                      <p className="text-xs font-semibold text-zinc-200 leading-4">{b}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              {/* ── Opportunity Window — Before The Crowd ── */}
+                              {btcFramework && (
+                                <div className="rounded-2xl border border-orange-400/15 bg-orange-500/[0.03] px-4 py-3 mb-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-orange-400">Opportunity Window</p>
+                                    {!btcFramework.isLive && (
+                                      <span className="text-[8px] font-semibold text-zinc-600">Last session</span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-end gap-4 mb-1.5">
+                                    <div>
+                                      <p className="text-[8px] font-black uppercase text-zinc-600 mb-0.5">Upside</p>
+                                      <p className="font-mono text-xl font-black text-green-400 leading-none">
+                                        +{btcFramework.uptideMin}% <span className="text-zinc-600 text-sm">→</span> +{btcFramework.uptideMax}%
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[8px] font-black uppercase text-zinc-600 mb-0.5">Risk</p>
+                                      <p className="font-mono text-xl font-black text-red-400 leading-none">-{btcFramework.riskZone}%</p>
+                                    </div>
+                                    <div className="ml-auto text-right">
+                                      <p className="text-[8px] font-black uppercase text-zinc-600 mb-0.5">R/R</p>
+                                      <p className="font-mono text-xl font-black text-orange-400 leading-none">{btcFramework.rr}:1</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-[10px] font-semibold text-zinc-500 italic leading-4 flex-1 mr-3">{btcFramework.sentence}</p>
+                                    <div className="flex flex-col items-end gap-0.5 shrink-0">
+                                      <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                                        btcFramework.confidence === "High" ? "border-green-400/30 bg-green-500/10 text-green-400" :
+                                        btcFramework.confidence === "Moderate" ? "border-orange-400/30 bg-orange-500/10 text-orange-400" :
+                                        "border-zinc-600/30 bg-zinc-800 text-zinc-500"
+                                      }`}>{btcFramework.confidence}</span>
+                                      <p className="text-[8px] font-semibold text-zinc-600">{btcFramework.horizon}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-3">
+                                <button onClick={() => setSelectedStock(btcE)} className="rounded-xl border border-orange-400/40 bg-transparent px-4 py-2 text-xs font-black text-orange-300 hover:bg-orange-500/10 transition">
+                                  See Why HT Labs Picked This →
+                                </button>
+                                <button onClick={() => toggleWatchlist(btcE.symbol)} className={`rounded-xl border px-4 py-2 text-xs font-black transition flex items-center gap-1.5 ${watchlist.includes(btcE.symbol) ? "border-orange-400/30 bg-orange-500/10 text-orange-300" : "border-white/15 bg-white/[0.04] text-zinc-400 hover:text-white"}`}>
+                                  ★ {watchlist.includes(btcE.symbol) ? "Watching" : "Watch"}
+                                </button>
+                              </div>
+                              <p className="mt-2.5 text-[9px] text-zinc-700 font-semibold">Signals are for research only, not financial advice.</p>
+                            </div>
+
+                            <div className="p-5 pt-4 flex flex-col bg-white/[0.01]">
+                              <div className={`rounded-2xl border px-4 py-3 mb-3 flex items-center justify-between gap-3 ${borderColor}`}>
+                                <div>
+                                  <p className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500 mb-0.5">Thesis Score</p>
+                                  <p className={`font-mono text-[3rem] font-black leading-none ${accentColor}`}>{conv}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-500 mb-1">Thesis Endurance</p>
+                                  <p className={`text-sm font-black ${accentColor} mb-1`}>{convLabel}</p>
+                                  <div className="w-24 bg-zinc-900 rounded-full h-[3px] overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-700 ease-out ${accentColor.replace("text-", "bg-")}`} style={{ width: `${conv}%` }} />
+                                  </div>
+                                  <p className="text-[9px] font-semibold text-zinc-600 mt-1">
+                                    {conv >= 80 ? "Buyers continue building positions before wider participation arrives." : conv >= 65 ? "The setup continues building before broad market participation." : conv >= 50 ? "Early positioning remains active despite limited crowd presence." : "Conviction is fading as the thesis faces structural pressure."}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2">
+                                {[
+                                  { label: "Crowd", value: btcSat <= 35 ? "Early" : btcSat <= 60 ? "Building" : "Crowded", color: btcSat <= 35 ? "text-green-400" : btcSat <= 60 ? "text-violet-400" : "text-red-400" },
+                                  { label: "Volume", value: btcRvol >= 1.5 ? `${btcRvol.toFixed(1)}×` : "Normal", color: btcRvol >= 1.5 ? "text-orange-400" : "text-zinc-400" },
+                                  { label: "HT", value: `${btcScore}`, color: btcScore >= 65 ? "text-violet-400" : "text-zinc-400" },
+                                ].map(({ label, value, color }) => (
+                                  <div key={label} className="rounded-xl border border-white/8 bg-black/20 px-2 py-2 text-center">
+                                    <p className="text-[7px] font-black uppercase text-zinc-600 mb-1">{label}</p>
+                                    <p className={`font-mono text-xs font-black ${color}`}>{value}</p>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* BTC Decision Trace — right panel */}
+                              {btcTrace && btcTrace.primaryDrivers.length > 0 && (
+                                <div className="rounded-xl border border-white/[0.05] bg-black/40 overflow-hidden mt-3">
+                                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.04]">
+                                    <p className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700">Decision Trace</p>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`text-[7px] font-black uppercase px-1.5 py-0.5 rounded-full border ${
+                                        btcTrace.confidence === "High" ? "border-green-400/20 text-green-500" :
+                                        btcTrace.confidence === "Moderate" ? "border-orange-400/15 text-orange-500" :
+                                        "border-zinc-800 text-zinc-700"
+                                      }`}>{btcTrace.confidence}</span>
+                                      <span className="text-[7px] font-semibold text-zinc-800">
+                                        Opp {btcTrace.opportunityScore} · {btcTrace.candidatesEvaluated} evaluated
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="px-3 py-2.5 space-y-1.5">
+                                    <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mb-1">Why This Stock</p>
+                                    {btcTrace.primaryDrivers.map((d, i) => (
+                                      <div key={i} className="flex gap-1.5 items-start">
+                                        <span className="text-orange-400/30 text-[8px] shrink-0 mt-0.5">▸</span>
+                                        <p className="text-[9px] font-semibold text-zinc-600 leading-[1.3]">{d}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  {btcTrace.rejectedAlternatives.length > 0 && (
+                                    <div className="px-3 pb-2.5 border-t border-white/[0.04] pt-2">
+                                      <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mb-1.5">Why Not Others</p>
+                                      <div className="space-y-1.5">
+                                        {btcTrace.rejectedAlternatives.map((r, i) => (
+                                          <div key={i} className="flex gap-1.5 items-start">
+                                            <span className="font-mono text-[9px] font-black text-zinc-500 shrink-0">{r.symbol}</span>
+                                            <p className="text-[8px] font-semibold text-zinc-700 leading-[1.3]">— {r.reason}</p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
-
-                        {/* Right panel — signal breakdown metrics */}
-                        <div className="space-y-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Signal Breakdown</p>
-
-                          {[
-                            { label: "Discovery Score", value: btcDiscovery, max: 99, desc: btcDiscovery >= 75 ? "Pre-crowd detection" : btcDiscovery >= 55 ? "Early momentum" : "Building", color: "orange" },
-                            { label: "Crowd Saturation", value: btcSaturation, max: 99, desc: btcSaturation < 35 ? "Crowd hasn't arrived" : btcSaturation < 60 ? "Crowd building" : "Crowd arriving", color: btcSaturation < 45 ? "green" : btcSaturation < 65 ? "yellow" : "red", invert: true },
-                            { label: "Social Heat", value: btcSocial?.socialScore || 0, max: 99, desc: btcSocial?.crowdStageLabel || "Monitoring", color: "purple" },
-                            { label: "News Velocity", value: btcNews?.newsVelocity || 0, max: 99, desc: btcNews?.narrativeSignal || "Quiet", color: "blue" },
-                            { label: "Volume Conviction", value: Math.min(99, Math.round(btcRvol * 14)), max: 99, desc: `${btcRvol.toFixed(1)}x relative volume`, color: "cyan" },
-                          ].map(({ label, value, max, desc, color, invert }) => (
-                            <div key={label} className="rounded-xl border border-white/8 bg-black/30 px-4 py-3">
-                              <div className="flex items-center justify-between gap-2 mb-1.5">
-                                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{label}</p>
-                                <p className={`font-mono text-sm font-black ${
-                                  color === "orange" ? "text-orange-300" :
-                                  color === "green" ? "text-green-300" :
-                                  color === "yellow" ? "text-yellow-300" :
-                                  color === "red" ? "text-red-300" :
-                                  color === "purple" ? "text-purple-300" :
-                                  color === "cyan" ? "text-cyan-300" : "text-blue-300"
-                                }`}>{value}</p>
-                              </div>
-                              <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all ${
-                                    color === "orange" ? "bg-orange-400" :
-                                    color === "green" ? "bg-green-400" :
-                                    color === "yellow" ? "bg-yellow-400" :
-                                    color === "red" ? "bg-red-400" :
-                                    color === "purple" ? "bg-purple-400" :
-                                    color === "cyan" ? "bg-cyan-400" : "bg-blue-400"
-                                  }`}
-                                  style={{ width: `${invert ? 100 - (value / max * 100) : (value / max * 100)}%` }}
-                                />
-                              </div>
-                              <p className="mt-1 text-[9px] font-semibold text-zinc-600">{desc}</p>
-                            </div>
-                          ))}
-
-                          {/* Pattern label */}
-                          {btcEngine && (
-                            <div className="rounded-xl border border-orange-400/20 bg-orange-500/[0.06] px-4 py-3">
-                              <p className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-600">Pattern Detected</p>
-                              <p className="mt-1 text-sm font-black text-orange-200">{btcEngine.pattern}</p>
-                              <p className="mt-0.5 text-[10px] font-semibold text-zinc-500">{btcEngine.opportunityWindow}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
 
                     {/* ── WHAT HT IS WATCHING — Radar ── */}
                     {radarItems.length > 0 && (
@@ -8631,6 +11064,34 @@ export default function Home() {
               })()}
 
               {/* Dual Opportunity Engine — powered by /api/opportunities */}
+              {/* Catalyst Signal Card — shows OTLK type tickers before the crowd */}
+              {apiCatalyst && (
+                <button
+                  onClick={() => { const s = stocks.find(st => st.symbol === apiCatalyst.ticker); if (s) setSelectedStock(s); }}
+                  className="mb-3 w-full rounded-2xl border border-violet-400/20 bg-violet-500/[0.05] p-4 text-left hover:border-violet-400/40 transition flex flex-col"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-300">⚡ Catalyst Signal — Before The Move</p>
+                      <p className="mt-2 font-mono text-4xl font-black tracking-[-0.08em] text-white">{apiCatalyst.ticker}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-mono text-2xl font-black text-violet-300">{apiCatalyst.confidence}</p>
+                      <p className="text-[9px] font-black uppercase text-violet-400">{apiCatalyst.stage}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    {(apiCatalyst.signals ?? []).map((sig: string) => (
+                      <span key={sig} className="rounded-full border border-violet-400/20 bg-violet-500/10 px-2.5 py-1 text-[10px] font-black text-violet-300">{sig}</span>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs font-semibold leading-5 text-zinc-200">{apiCatalyst.whyItMatters}</p>
+                  <div className="mt-3 rounded-xl border border-white/8 bg-black/30 px-3 py-2">
+                    <p className="text-[9px] font-black uppercase text-violet-400">Risk Note</p>
+                    <p className="mt-0.5 text-[10px] font-semibold text-zinc-400">{apiCatalyst.riskNote}</p>
+                  </div>
+                </button>
+              )}
               {(apiMomentum || apiRecovery || topMomentumOpportunity || topRecoveryOpportunity) && (
                 <div className="grid gap-3 sm:grid-cols-2 sm:items-stretch">
 
@@ -9094,14 +11555,12 @@ export default function Home() {
                     const rvol = getRelativeVolume(liveHeroTarget);
                     const attention = getAttentionScore(liveHeroTarget);
                     const trap = getTrapRiskScore(liveHeroTarget);
-                    const social = socialIntel[liveHeroTarget.symbol];
-                    const read = getSimpleConvictionRead(liveHeroTarget);
+                          const read = getSimpleConvictionRead(liveHeroTarget);
 
                     const whyBullets = [
                       rvol >= 2 ? `Volume is ${rvol.toFixed(1)}x normal — unusual buying activity` : rvol >= 1.2 ? `Volume is steady — consistent participation` : null,
                       attention >= 70 ? `Crowd attention is elevated — traders are noticing` : attention >= 55 ? `Trader interest is building quietly` : null,
                       trap < 40 ? `Low reversal risk — structure is clean` : trap < 60 ? `Manageable risk — structure holds` : null,
-                      social?.socialScore >= 40 ? `Social mentions accelerating` : null,
                       read.state.includes("Accumulation") ? `Early accumulation detected before crowd arrives` : null,
                       read.state.includes("Igniting") ? `Crowd is arriving but setup is not yet saturated` : null,
                       liveHeroTarget.change > 0 ? `Price up ${liveHeroTarget.change.toFixed(1)}% — buyers are in control` : null,
@@ -9111,7 +11570,6 @@ export default function Home() {
                     const whatChanged = [
                       rvol >= 3 ? `Volume surged to ${rvol.toFixed(1)}x above normal` : rvol >= 2 ? `Volume elevated at ${rvol.toFixed(1)}x normal` : null,
                       liveHeroTarget.change >= 3 ? `Price up ${liveHeroTarget.change.toFixed(1)}% with structure intact` : null,
-                      social?.acceleration >= 100 ? `Social mentions increased ${Math.round(social.acceleration)}%` : null,
                       attention >= 75 ? `Market participation expanding` : null,
                     ].filter(Boolean);
 
@@ -9158,8 +11616,8 @@ export default function Home() {
                   {liveHeroTarget && (
                     <div className="mt-3 space-y-3">
                   {/* Social Momentum Signal */}
-                  {liveHeroTarget && socialIntel[liveHeroTarget.symbol] && (() => {
-                    const s = socialIntel[liveHeroTarget.symbol];
+                  {liveHeroTarget && false && (() => {
+                    const s: any = null;
                     return (
                       <div className="mt-3 rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.04] p-4">
                         <div className="flex items-center justify-between gap-3 mb-2">
@@ -9197,7 +11655,7 @@ export default function Home() {
                           )}
                         </div>
                         <div className="space-y-1">
-                          {s.signals.slice(0, 3).map((sig) => (
+                          {s.signals.slice(0, 3).map((sig: string) => (
                             <p key={sig} className="text-[10px] font-semibold text-cyan-300">· {sig}</p>
                           ))}
                         </div>
@@ -9387,7 +11845,7 @@ export default function Home() {
                         "Early pressure forming.";
                       const isEarly = engine.opportunityWindow === "EARLY WINDOW OPEN" || engine.opportunityWindow === "EARLY WINDOW BUILDING";
                       return (
-                        <button key={`emerging-${stock.symbol}`} onClick={() => { setSelectedStock(stock); fetchSocialIntel(stock.symbol); }} className="rounded-2xl border border-white/10 bg-black/30 p-4 text-left hover:border-cyan-300/30 transition">
+                        <button key={`emerging-${stock.symbol}`} onClick={() => { setSelectedStock(stock); }} className="rounded-2xl border border-white/10 bg-black/30 p-4 text-left hover:border-cyan-300/30 transition">
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <p className="font-mono text-2xl font-black tracking-[-0.05em] text-white">{stock.symbol}</p>
@@ -9398,22 +11856,7 @@ export default function Home() {
                           <p className="mt-3 text-xs font-semibold leading-5 text-zinc-300">{humanReason}</p>
                           <div className="mt-3 flex items-center gap-2 flex-wrap">
                             <span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-[9px] font-black text-zinc-400">HT {radarScore}</span>
-                            {socialIntel[stock.symbol] && (
-                              <>
-                                <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-[9px] font-black text-cyan-300">
-                                  {socialIntel[stock.symbol].crowdStageEmoji} {socialIntel[stock.symbol].crowdStageLabel}
-                                </span>
-                                {socialIntel[stock.symbol].socialScore >= 30 && (
-                                  <span className="rounded-full bg-orange-500/10 px-2.5 py-1 text-[9px] font-black text-orange-300">
-                                    Social {socialIntel[stock.symbol].socialScore}
-                                  </span>
-                                )}
-                              </>
-                            )}
                           </div>
-                          {socialIntel[stock.symbol]?.signals?.[0] && (
-                            <p className="mt-2 text-[10px] font-semibold text-cyan-400">{socialIntel[stock.symbol].signals[0]}</p>
-                          )}
                         </button>
                       );
                     })}
@@ -12702,14 +15145,86 @@ export default function Home() {
           MOBILE EXPERIENCE — completely separate UI
           Hidden on desktop, full screen on mobile
           ============================================ */}
-      {mounted && (
-        <div className="md:hidden fixed inset-0 bg-[#050505] text-white flex flex-col z-[200]">
+      <div className="md:hidden fixed inset-0 bg-[#050505] text-white flex flex-col z-[200]">
+
+          {/* Mobile Header */}
+          <div className="flex-shrink-0 border-b border-white/10 bg-black/80 backdrop-blur-xl px-4 pt-safe">
+            <div className="flex items-center justify-between gap-3 py-3">
+              <img src="/logo.png" alt="HT Labs" className="h-8 w-auto" />
+              <div className="flex-1 mx-3">
+                <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
+                  <span className="text-zinc-600 text-sm">⌕</span>
+                  <input
+                    type="text"
+                    placeholder="Search ticker..."
+                    value={ticker}
+                    onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => { if (e.key === "Enter") { handleTickerSearch(); setMobileTab("home"); } }}
+                    className="flex-1 bg-transparent text-sm font-black uppercase text-white outline-none placeholder:normal-case placeholder:font-normal placeholder:text-zinc-600"
+                  />
+                  {ticker.length > 0 && (
+                    <button
+                      onClick={() => { handleTickerSearch(); setMobileTab("home"); }}
+                      className="shrink-0 rounded-lg bg-violet-500/20 border border-violet-400/30 px-2.5 py-1 text-[10px] font-black text-violet-300"
+                    >
+                      GO
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                <span className="text-[9px] font-black uppercase tracking-[0.14em] text-green-400">Live</span>
+              </div>
+            </div>
+          </div>
 
           {/* Mobile content area */}
           <div className="flex-1 overflow-hidden relative">
 
-            {/* HOME TAB — Swipeable conviction cards */}
+            {/* HOME TAB — Before The Crowd + Swipeable conviction cards */}
             {mobileTab === "home" && (() => {
+              // Show mobile skeleton on first load — same gate as desktop
+              if (!lastUpdated) return (
+                <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2 space-y-4 animate-pulse">
+                  <div className="rounded-2xl border border-white/8 bg-black overflow-hidden">
+                    <div className="px-5 pt-4 pb-0 flex items-center gap-2">
+                      <div className="h-1.5 w-1.5 rounded-full bg-violet-400/40" />
+                      <div className="h-2 w-28 rounded-full bg-white/8" />
+                    </div>
+                    <div className="px-5 pt-3 pb-2">
+                      <div className="h-12 w-32 rounded-xl bg-white/6" />
+                    </div>
+                    <div className="px-5 pb-4 border-b border-white/8">
+                      <div className="h-7 w-48 rounded-xl bg-white/6 mb-1.5" />
+                      <div className="h-3 w-56 rounded-full bg-white/6" />
+                    </div>
+                    <div className="px-5 py-5 border-b border-white/8 space-y-3">
+                      <div className="h-2 w-32 rounded-full bg-white/8" />
+                      <div className="h-[3px] w-full rounded-full bg-white/6" />
+                      <div className="flex justify-between">
+                        <div className="h-8 w-12 rounded-lg bg-white/6" />
+                        <div className="flex gap-4">
+                          <div className="h-8 w-12 rounded-lg bg-white/6" />
+                          <div className="h-8 w-12 rounded-lg bg-white/6" />
+                          <div className="h-8 w-12 rounded-lg bg-white/6" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="px-5 py-4 border-b border-white/8 space-y-2">
+                      <div className="h-2 w-40 rounded-full bg-white/8" />
+                      <div className="h-3 w-full rounded-full bg-white/6" />
+                      <div className="h-3 w-4/5 rounded-full bg-white/6" />
+                      <div className="h-3 w-3/4 rounded-full bg-white/6" />
+                    </div>
+                    <div className="px-5 py-4 flex gap-2">
+                      <div className="flex-1 h-10 rounded-xl bg-white/6" />
+                      <div className="h-10 w-12 rounded-xl bg-white/6" />
+                    </div>
+                  </div>
+                </div>
+              );
+
               const mobileCards = convictionLeaders.slice(0, 8).filter(Boolean);
               const current = mobileCards[mobileCardIndex];
               if (!current) return (
@@ -12717,10 +15232,39 @@ export default function Home() {
                   <p className="text-zinc-500 font-bold">Scanning market...</p>
                 </div>
               );
-              const read = getSimpleConvictionRead(current);
-              const stance = getHTStance(current);
-              const exits = getContinuationWindows(current);
-              const isGreen = current.change >= 0;
+              // Before The Crowd data
+              // stocks[] is now fully enriched with Polygon data from ht_signals
+              // ── Mobile Before The Crowd — same data source as desktop.
+              // Uses resolvedBeforeCrowdTarget (the same HT Score + Stage
+              // eligible candidate the desktop shows) so both surfaces always
+              // show the same ticker, same score, same conviction tier.
+              const mobileBtcTarget = resolvedBeforeCrowdTarget;
+              const mobileBtcEngine = mobileBtcTarget ? getBackgroundOpportunityEngine(mobileBtcTarget) : null;
+              const mobileBtcScore = mobileBtcTarget ? getHTScore(mobileBtcTarget) : 0;
+              const mobileMomentumEndurance = mobileBtcTarget ? evaluateMomentumEndurance(mobileBtcTarget) : 75;
+              const mobileBtcTier = getMomentumEnduranceLabel(mobileMomentumEndurance, mobileBtcScore);
+              const mobileBtcEngine2 = mobileBtcTarget ? getBackgroundOpportunityEngine(mobileBtcTarget) : null;
+              const mobileBtcStageScore = mobileBtcEngine2?.crowdSaturationScore ?? 0;
+              const mobileBtcStageLabel = mobileBtcStageScore <= 35 ? "Early" : mobileBtcStageScore <= 60 ? "Developing" : mobileBtcStageScore <= 80 ? "Crowded" : "Exhausted";
+              const mobileSaturation = mobileBtcEngine?.crowdSaturationScore ?? 0;
+              const mobileRvol = mobileBtcTarget ? getRelativeVolume(mobileBtcTarget) : 0;
+              const mobileHceCategory = mobileBtcTarget ? getHCECategory(mobileBtcTarget) : null;
+              const mobileIsCatalyst = Boolean(mobileHceCategory);
+              const mobileSelectionLabel = mobileHceCategory ?? (mobileBtcTarget?.change ?? 0 >= 3 ? "Momentum Leader" : "Early Setup");
+              const mobileHeroTicker = mobileBtcTarget?.symbol ?? "";
+              const mobileHeroPrice = mobileBtcTarget?.price ?? 0;
+              const mobileHeroChange = mobileBtcTarget?.change ?? 0;
+              const mobileRetailBullish = Math.min(90, Math.max(10, 100 - mobileSaturation));
+              const mobileRetailBearish = 100 - mobileRetailBullish;
+              const mobileRiskLabel = mobileIsCatalyst ? "MEDIUM" : mobileRvol >= 3 ? "HIGH" : "LOW";
+              const mobilePositionLabel = mobileSaturation < 40 ? "EARLY" : mobileSaturation < 65 ? "BUILDING" : "LATE";
+              const mobileWhyBullets = mobileBtcTarget
+                ? getBeforeCrowdReason(mobileBtcTarget)
+                : [];
+              const mobileNearMiss = !mobileBtcTarget
+                ? [...stocks].sort((a, b) => getHTScore(b) - getHTScore(a)).slice(0, 3)
+                : [];
+
 
               return (
                 <div
@@ -12737,210 +15281,407 @@ export default function Home() {
                   }}
                 >
                   {/* Hero Card */}
-                  <div className="relative px-4 pt-8 pb-3 flex-shrink-0">
+                  {/* BEFORE THE CROWD — Mobile Hero */}
+                  {/* Mirrors desktop: same resolvedBeforeCrowdTarget, same HT Score, same Stage, same eligibility gate */}
 
-                    {/* Swipe indicator + Live badge */}
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex gap-1.5">
-                          {mobileCards.slice(0, 8).map((_, i) => (
-                            <button
-                              key={i}
-                              onClick={() => setMobileCardIndex(i)}
-                              className={`h-1 rounded-full transition-all ${i === mobileCardIndex ? "w-6 bg-orange-400" : "w-2 bg-white/20"}`}
-                            />
+                  {!mobileBtcTarget ? (
+                    <div className="mx-4 mt-4 mb-3 rounded-2xl border border-white/8 bg-black/60 p-6 flex-shrink-0">
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="h-1.5 w-1.5 rounded-full bg-zinc-700" />
+                        <p className="text-[9px] font-black uppercase tracking-[0.28em] text-zinc-600">Spot Momentum</p>
+                      </div>
+                      <p className="text-2xl font-black text-white mb-1">No Signal Confirmed</p>
+                      <p className="text-xs font-semibold text-zinc-600 leading-5 mb-4">Nothing clears the HT Labs qualification threshold right now. Monitoring continues.</p>
+                      {mobileNearMiss.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700 mb-2">Watching, Not Confirmed</p>
+                          {mobileNearMiss.map(s => (
+                            <button key={s.symbol} onClick={() => setSelectedStock(s)}
+                              className="w-full flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3 hover:border-white/15 transition">
+                              <span className="font-mono text-sm font-black text-zinc-300">{s.symbol}</span>
+                              <span className="font-mono text-xs font-black text-zinc-600">HT {getHTScore(s)}</span>
+                            </button>
                           ))}
                         </div>
-                        <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600">
-                          {mobileCardIndex + 1} of {mobileCards.length} · swipe for more
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-                        <span className="text-[10px] font-black uppercase tracking-[0.14em] text-green-400">Live</span>
-                      </div>
+                      )}
                     </div>
+                  ) : (
+                    // ── SPOT MOMENTUM — Mobile Mission Briefing ──────────────
+                    // Same story as desktop: Identity → Hook → Window → Evidence → Actions
+                    <div className="mx-4 mt-4 mb-3 rounded-2xl border border-violet-400/15 bg-black flex-shrink-0 overflow-hidden">
 
-                    {/* 1. Ranking */}
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-400 mb-2">
-                      #{mobileCardIndex + 1} Active Read
-                    </p>
-
-                    {/* 2. TICKER */}
-                    <h1 className="font-mono text-[5.5rem] font-black uppercase leading-[0.82] tracking-[-0.12em] text-white">
-                      {current.symbol}
-                    </h1>
-
-                    {/* 3. Stage badge */}
-                    <div className="mt-3 inline-flex items-center rounded-2xl border border-white/15 bg-white/[0.06] px-4 py-2">
-                      <p className="text-base font-black text-white">{read.state}</p>
-                    </div>
-
-                    {/* 4. WHY NOW — one sentence */}
-                    <p className="mt-2 text-sm font-semibold text-zinc-400 leading-5">
-                      {(() => {
-                        const rvol = getRelativeVolume(current);
-                        const attention = getAttentionScore(current);
-                        const crowd = getBackgroundOpportunityEngine(current).crowdSaturationScore;
-                        if (read.state.includes("Crowd Igniting"))
-                          return `Volume is ${rvol}x normal and crowd participation is accelerating.`;
-                        if (read.state.includes("Quiet Accumulation"))
-                          return `Buying pressure is building quietly while attention remains low.`;
-                        if (read.state.includes("Pressure"))
-                          return `Momentum is building before it becomes obvious to everyone.`;
-                        if (read.state.includes("Momentum Wave"))
-                          return `The move is holding and buyers continue to show up.`;
-                        if (read.state.includes("Breakout"))
-                          return `Setup is approaching a key trigger — volume confirmation needed.`;
-                        if (read.state.includes("Avoid") || read.state.includes("Trap"))
-                          return `Risk is too elevated for a clean entry right now.`;
-                        if (read.state.includes("Buyers Needed"))
-                          return `Price is dropping. Wait for buyers to step in with volume.`;
-                        if (read.state.includes("Pullback"))
-                          return `Good setup — a cleaner entry will come after it settles.`;
-                        if (read.state.includes("Exhaustion"))
-                          return `The move is extended. Entering here means buying late.`;
-                        if (read.state.includes("Attention"))
-                          return `Interest is increasing without signs of crowd saturation.`;
-                        return `HT is watching for one more confirmation before acting.`;
-                      })()}
-                    </p>
-
-                    {/* 5. Price + Change */}
-                    <div className="mt-4 flex items-center gap-3">
-                      <span className="font-mono text-2xl font-black text-white">${current.price.toFixed(2)}</span>
-                      <span className={`font-mono text-xl font-black ${isGreen ? "text-green-400" : "text-red-400"}`}>
-                        {isGreen ? "+" : ""}{current.change.toFixed(2)}%
-                      </span>
-                    </div>
-
-                    {/* 6. Conviction score — king. Entry quality supporting. */}
-                    <div className="mt-3">
-                      <div className="inline-flex flex-col rounded-2xl border border-orange-400/25 bg-orange-500/10 px-4 py-3">
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-4xl font-black text-orange-300">{getHTScore(current)}</span>
-                          <span className="text-sm font-black uppercase text-orange-400">Conviction</span>
+                      {/* Engine label + dual signal */}
+                      <div className="flex items-center justify-between px-5 pt-4 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
+                          <p className="text-[9px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
                         </div>
-                        <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-500">
-                          {getHTScore(current) >= 90 ? "Top Active Read Right Now" :
-                           getHTScore(current) >= 80 ? "High Rated Setup" :
-                           getHTScore(current) >= 70 ? "Active Watch" :
-                           "Developing Setup"}
-                        </p>
+                        {isDualEngineConfirmation && (
+                          <span className="text-[8px] font-black text-amber-400">⚡ Dual Signal</span>
+                        )}
                       </div>
-                      <p className="mt-2 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-600">
-                        Entry Quality:{" "}
-                        <span className={getEntryQualityScore(current) >= 78 ? "text-green-400" : getEntryQualityScore(current) >= 62 ? "text-yellow-400" : "text-zinc-600"}>
-                          {getEntryQualityScore(current) >= 78 ? "Strong" : getEntryQualityScore(current) >= 62 ? "Fair" : "Weak"}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* Why HT Likes This */}
-                  <div className="px-4 pb-3 flex-shrink-0">
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300 mb-2.5">Why HT Likes This</p>
-                      <div className="space-y-1.5">
-                        {[
-                          { good: getRelativeVolume(current) >= 2, text: getRelativeVolume(current) >= 2 ? "Volume is accelerating" : "Volume is not yet elevated" },
-                          { good: getAttentionScore(current) >= 65, text: getAttentionScore(current) >= 65 ? "Crowd attention is increasing" : "Crowd has not noticed yet" },
-                          { good: getContinuationStrengthScore(current) >= 60, text: getContinuationStrengthScore(current) >= 60 ? "Price structure remains clean" : "Price structure needs to hold" },
-                          { good: getTrapRiskScore(current) < 55, text: getTrapRiskScore(current) < 55 ? "Low reversal risk" : "Watch for potential reversal" },
-                        ].map(({ good, text }) => (
-                          <div key={text} className="flex items-center gap-2.5">
-                            <span className={`text-sm font-black ${good ? "text-green-400" : "text-zinc-700"}`}>{good ? "✓" : "×"}</span>
-                            <p className={`text-sm font-semibold ${good ? "text-zinc-200" : "text-zinc-600"}`}>{text}</p>
+                      {/* 1. IDENTITY — ticker + price + status */}
+                      <div className="px-5 pb-4 border-b border-white/8">
+                        <div className="flex items-end gap-3 mb-2">
+                          <p className="font-mono text-[3.2rem] font-black text-white leading-none tracking-[-0.06em]">{mobileHeroTicker}</p>
+                          <div className="pb-1">
+                            <span className="font-mono text-base font-black text-white">${mobileHeroPrice.toFixed(2)}</span>
+                            <span className={`font-mono text-xs font-black ml-2 ${mobileHeroChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              {mobileHeroChange >= 0 ? "+" : ""}{mobileHeroChange.toFixed(2)}%
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* CTAs */}
-                  <div className="px-4 pb-3 flex-shrink-0">
-                    <button
-                      onClick={() => setSelectedStock(current)}
-                      className="w-full rounded-2xl bg-orange-500 py-4 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[0_0_20px_rgba(249,115,22,0.28)]"
-                    >
-                      View Full Analysis →
-                    </button>
-                    <button
-                      onClick={() => toggleWatchlist(current.symbol)}
-                      className="mt-2 w-full rounded-2xl border border-white/10 bg-transparent py-3 text-sm font-black uppercase tracking-[0.08em] text-zinc-500"
-                    >
-                      {watchlist.includes(current.symbol) ? "✓ In Watchlist" : "Add to Watchlist ☆"}
-                    </button>
-                  </div>
-
-                  {/* HT Decision */}
-                  <div className="px-4 pb-4 flex-shrink-0">
-                    <div className={`rounded-2xl border p-5 ${stance.bg}`}>
-                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500 mb-1">HT Decision</p>
-                      <p className={`text-3xl font-black ${stance.color}`}>{stance.label}</p>
-                      <p className="mt-2 text-sm font-semibold text-zinc-300">{stance.desc}</p>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <div className="rounded-xl bg-black/30 p-3">
-                          <p className="text-[9px] font-black uppercase text-green-400">Target</p>
-                          <p className="mt-1 font-mono text-lg font-black text-green-300">{exits.conservative}</p>
                         </div>
-                        <div className="rounded-xl bg-black/30 p-3">
-                          <p className="text-[9px] font-black uppercase text-red-400">Exit If</p>
-                          <p className="mt-1 text-xs font-black text-red-300">Volume drops below normal</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-black text-zinc-400">{mobileBtcTier}</span>
+                          <span className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black ${
+                            mobileBtcStageLabel === "Early" ? "border-green-400/20 bg-green-500/[0.06] text-green-400" : "border-zinc-700 text-zinc-600"
+                          }`}>{mobileBtcStageLabel === "Early" ? "Pre-Crowd" : mobileBtcStageLabel === "Developing" ? "Crowd Building" : mobileBtcStageLabel === "Crowded" ? "Crowd Arrived" : "Late Stage"}</span>
+                          {mobileIsCatalyst && (
+                            <span className="rounded-full border border-orange-400/25 bg-orange-500/[0.06] px-2.5 py-0.5 text-[9px] font-black text-orange-300">⚡ {mobileHceCategory}</span>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  </div>
 
-                  {/* Before The Crowd */}
-                  <div className="px-4 pb-6 flex-shrink-0">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300 mb-3">⚡ Before The Crowd</p>
-                    <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none]">
-                      {emergingRadarCandidates.slice(0, 6).map(({ stock, radarScore }) => (
-                        <button
-                          key={stock.symbol}
-                          onClick={() => setSelectedStock(stock)}
-                          className="shrink-0 rounded-2xl border border-cyan-300/20 bg-cyan-400/[0.04] p-4 w-36"
-                        >
-                          <p className="font-mono text-xl font-black text-white">{stock.symbol}</p>
-                          <p className={`mt-1 font-mono text-sm font-black ${stock.change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                            {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(1)}%
-                          </p>
-                          <p className="mt-1.5 text-[9px] font-black uppercase text-cyan-300">{radarScore}% conf</p>
-                          <p className="mt-0.5 text-[9px] font-semibold text-zinc-500">Early watch</p>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                      {/* 2. EMOTIONAL HOOK — one sentence, no box */}
+                      <div className="px-5 py-4 border-b border-white/8">
+                        <p className="text-sm font-bold text-zinc-200 leading-5">
+                          {mobileIsCatalyst
+                            ? `${mobileHceCategory} identified — positioned before the event resolves.`
+                            : mobileSaturation < 45
+                            ? "Momentum is building before widespread participation arrives."
+                            : "Momentum is expanding as more traders take notice."}
+                        </p>
+                      </div>
 
-                  {/* Today's Battlefield */}
-                  <div className="px-4 pb-24 flex-shrink-0">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-300 mb-3">Today's Battlefield</p>
-                    <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none]">
-                      {convictionLeaders.slice(0, 10).map((stock) => {
-                        const pattern = detectPatternSignal(stock).name;
-                        const emoji =
-                          stock.change < 0 ? "📉" :
-                          pattern === "Quiet Accumulation" ? "👀" :
-                          pattern === "Crowd Ignition" ? "🔥" :
-                          pattern === "Continuation Stack" ? "🌊" :
-                          getHTScore(stock) >= 85 ? "🔥" : "⚡";
-                        return (
+                      {/* 3. OPPORTUNITY WINDOW — the decision hero */}
+                      {smFramework && (
+                        <div className="px-5 py-4 border-b border-white/8">
+                          <div className="flex items-center justify-between mb-3">
+                            <p className="text-[9px] font-black uppercase tracking-[0.22em] text-violet-400">Opportunity Window</p>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                                smFramework.confidence === "High" ? "border-green-400/25 text-green-400" :
+                                smFramework.confidence === "Moderate" ? "border-violet-400/25 text-violet-400" :
+                                "border-zinc-700 text-zinc-600"
+                              }`}>{smFramework.confidence}</span>
+                              <span className="text-[8px] font-semibold text-zinc-600">{smFramework.horizon}</span>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 mb-3">
+                            <div>
+                              <p className="text-[8px] font-black uppercase text-zinc-600 mb-1">Upside</p>
+                              <p className="font-mono text-lg font-black text-green-400 leading-none">+{smFramework.uptideMin}%</p>
+                              <p className="font-mono text-xs font-black text-green-400/50 mt-0.5">→ +{smFramework.uptideMax}%</p>
+                            </div>
+                            <div>
+                              <p className="text-[8px] font-black uppercase text-zinc-600 mb-1">Risk</p>
+                              <p className="font-mono text-lg font-black text-red-400 leading-none">-{smFramework.riskZone}%</p>
+                            </div>
+                            <div>
+                              <p className="text-[8px] font-black uppercase text-zinc-600 mb-1">R/R</p>
+                              <p className="font-mono text-lg font-black text-violet-400 leading-none">{smFramework.rr}:1</p>
+                            </div>
+                          </div>
+                          <p className="text-[10px] font-semibold text-zinc-600 italic leading-4">{smFramework.sentence}</p>
+                          {!smFramework.isLive && <p className="text-[8px] text-zinc-700 mt-1">Based on last session</p>}
+                        </div>
+                      )}
+
+                      {/* 4. ENGINE EVIDENCE */}
+                      {mobileWhyBullets.length > 0 && (
+                        <div className="px-5 py-3 border-b border-white/8">
+                          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700 mb-2">Evidence</p>
+                          <div className="space-y-1.5">
+                            {mobileWhyBullets.map((b, i) => (
+                              <div key={i} className="flex gap-2">
+                                <span className="text-violet-400/60 font-black text-[10px] shrink-0 mt-0.5">▸</span>
+                                <p className="text-[11px] font-semibold text-zinc-500 leading-4">{b}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 5. ADVANCED — HT Score + metrics (power user) */}
+                      <div className="px-5 py-3 border-b border-white/8">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-[7px] font-black uppercase tracking-[0.18em] text-zinc-700 mb-0.5">HT Score</p>
+                            <p className={`font-mono text-2xl font-black leading-none ${mobileBtcScore >= 80 ? "text-green-400" : mobileBtcScore >= 65 ? "text-violet-400" : "text-orange-400"}`}>{mobileBtcScore}</p>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 text-center">
+                            {[
+                              { label: "Crowd", value: mobileSaturation <= 35 ? "Early" : mobileSaturation <= 60 ? "Building" : "Crowded", color: mobileSaturation <= 35 ? "text-green-400" : mobileSaturation <= 60 ? "text-violet-400" : "text-red-400" },
+                              { label: "Volume", value: mobileRvol >= 1.5 ? `${mobileRvol.toFixed(1)}×` : "Normal", color: mobileRvol >= 1.5 ? "text-orange-400" : "text-zinc-600" },
+                              { label: "Position", value: mobilePositionLabel, color: mobilePositionLabel === "EARLY" ? "text-green-400" : mobilePositionLabel === "BUILDING" ? "text-violet-400" : "text-zinc-500" },
+                            ].map(({ label, value, color }) => (
+                              <div key={label}>
+                                <p className="text-[7px] font-black uppercase text-zinc-700 mb-0.5">{label}</p>
+                                <p className={`text-[10px] font-black ${color}`}>{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* HT Read if available */}
+                      {bullBearData?.ticker === mobileHeroTicker && bullBearData?.htRead && (
+                        <div className="px-5 py-3 border-b border-white/8">
+                          <p className="text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700 mb-1.5">HT Read</p>
+                          <p className="text-xs font-semibold text-zinc-500 leading-5 italic">"{bullBearData.htRead}"</p>
+                        </div>
+                      )}
+
+                      {/* Decision Trace — mobile compact */}
+                      {smTrace && smTrace.primaryDrivers.length > 0 && (
+                        <div className="border-b border-white/8">
+                          <div className="flex items-center justify-between px-5 py-2.5 border-b border-white/[0.04]">
+                            <p className="text-[7px] font-black uppercase tracking-[0.2em] text-zinc-700">Decision Trace</p>
+                            <span className="text-[7px] font-semibold text-zinc-800">Opp {smTrace.opportunityScore} · {smTrace.candidatesEvaluated} evaluated</span>
+                          </div>
+                          <div className="px-5 py-3 space-y-1.5">
+                            <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mb-1">Why This Stock</p>
+                            {smTrace.primaryDrivers.slice(0, 3).map((d, i) => (
+                              <div key={i} className="flex gap-1.5">
+                                <span className="text-violet-400/30 text-[8px] shrink-0">▸</span>
+                                <p className="text-[9px] font-semibold text-zinc-600 leading-[1.3]">{d}</p>
+                              </div>
+                            ))}
+                            {smTrace.rejectedAlternatives.length > 0 && (
+                              <>
+                                <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mt-2.5 mb-1">Why Not Others</p>
+                                {smTrace.rejectedAlternatives.slice(0, 2).map((r, i) => (
+                                  <div key={i} className="flex gap-1.5">
+                                    <span className="font-mono text-[9px] font-black text-zinc-600 shrink-0">{r.symbol}</span>
+                                    <p className="text-[9px] font-semibold text-zinc-700 leading-[1.3]">— {r.reason}</p>
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 6. ACTIONS */}
+                      <div className="px-5 py-4">
+                        <div className="flex gap-2">
                           <button
-                            key={stock.symbol}
-                            onClick={() => setSelectedStock(stock)}
-                            className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 w-28"
+                            onClick={() => mobileBtcTarget && setSelectedStock(mobileBtcTarget)}
+                            className="flex-1 rounded-xl border border-violet-400/30 bg-violet-500/[0.08] py-3 text-xs font-black text-violet-300"
                           >
-                            <p className="font-mono text-base font-black text-white">{stock.symbol}</p>
-                            <p className="mt-1 text-lg">{emoji}</p>
-                            <p className={`mt-1 font-mono text-xs font-black ${stock.change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                              {stock.change >= 0 ? "+" : ""}{stock.change.toFixed(1)}%
-                            </p>
+                            Full Signal Breakdown →
                           </button>
-                        );
-                      })}
+                          <button
+                            onClick={() => mobileBtcTarget && toggleWatchlist(mobileHeroTicker)}
+                            className={`rounded-xl border px-4 py-3 text-xs font-black transition ${watchlist.includes(mobileHeroTicker) ? "border-violet-400/30 bg-violet-500/10 text-violet-300" : "border-white/8 bg-white/[0.02] text-zinc-600"}`}
+                          >
+                            {watchlist.includes(mobileHeroTicker) ? "★" : "☆"}
+                          </button>
+                        </div>
+                        <p className="mt-2.5 text-center text-[8px] text-zinc-700 font-semibold">Signals are for research only, not financial advice.</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* ── BEFORE THE CROWD — Mission Briefing (mobile) ── */}
+                  {resolvedBeforeTheCrowdTarget && (() => {
+                    const btcM = resolvedBeforeTheCrowdTarget;
+                    const btcMConv = beforeTheCrowdConviction;
+                    const btcMLabel = getThesisEnduranceLabel(btcMConv);
+                    const btcMScore = getHTScore(btcM);
+                    const btcMReasons = getThesisEnduranceReason(btcM);
+                    const btcMHce = getHCECategory(btcM);
+                    const btcMRvol = getRelativeVolume(btcM);
+                    const btcMSat = getBackgroundOpportunityEngine(btcM).crowdSaturationScore;
+                    const accentColor = btcMConv >= 80 ? "text-green-400" : btcMConv >= 65 ? "text-violet-400" : btcMConv >= 50 ? "text-orange-400" : "text-red-400";
+                    const borderAccent = btcMConv >= 80 ? "border-green-400/15" : btcMConv >= 65 ? "border-violet-400/15" : btcMConv >= 50 ? "border-orange-400/15" : "border-red-400/15";
+
+                    return (
+                      <div className={`mx-4 mb-3 rounded-2xl border ${borderAccent} bg-black flex-shrink-0 overflow-hidden`}>
+
+                        {/* 1. Engine label */}
+                        <div className="flex items-center justify-between px-5 pt-4 pb-0">
+                          <div className="flex items-center gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-orange-400 animate-pulse shadow-[0_0_8px_rgba(251,146,60,0.8)]" />
+                            <p className="text-[9px] font-black uppercase tracking-[0.28em] text-orange-400">Before The Crowd</p>
+                          </div>
+                          {isDualEngineConfirmation && (
+                            <span className="text-[8px] font-black text-amber-400">⚡ Dual Signal</span>
+                          )}
+                        </div>
+
+                        {/* 2. Ticker + Price */}
+                        <div className="px-5 pt-3 pb-2">
+                          <div className="flex items-end gap-3">
+                            <p className="font-mono text-[3.2rem] font-black text-white leading-none tracking-[-0.06em]">{btcM.symbol}</p>
+                            <div className="pb-1.5">
+                              <span className="font-mono text-base font-black text-white">${btcM.price.toFixed(2)}</span>
+                              <span className={`font-mono text-xs font-black ml-2 ${btcM.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                {btcM.change >= 0 ? "+" : ""}{btcM.change.toFixed(2)}%
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 3. Status — thesis label is the hero */}
+                        <div className="px-5 pb-4 border-b border-white/8">
+                          <p className={`text-2xl font-black leading-tight ${accentColor}`}>{btcMLabel}</p>
+                          <p className="text-xs font-semibold text-zinc-600 mt-1 mb-1.5">
+                            {btcMConv >= 80 ? "Buyers continue building positions before wider participation arrives." : btcMConv >= 65 ? "The setup continues building before broad market participation." : btcMConv >= 50 ? "Early positioning remains active despite limited crowd presence." : "Conviction is fading as the thesis faces structural pressure."}
+                          </p>
+                          {btcMHce && (
+                            <span className="inline-flex rounded-full border border-orange-400/30 bg-orange-500/10 px-2.5 py-0.5 text-[9px] font-black text-orange-300">⚡ {btcMHce}</span>
+                          )}
+                        </div>
+
+                        {/* 4. Thesis Score meter */}
+                        <div className="px-5 py-5 border-b border-white/8">
+                          <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-600 mb-3">Thesis Score</p>
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="flex-1 bg-zinc-900 rounded-full h-[3px] overflow-hidden">
+                              <div className={`h-full rounded-full transition-all duration-700 ease-out ${accentColor.replace("text-", "bg-")}`} style={{ width: `${btcMConv}%` }} />
+                            </div>
+                            <p className={`font-mono text-sm font-black shrink-0 ${accentColor}`}>{btcMConv}</p>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-[7px] font-black uppercase tracking-[0.18em] text-zinc-700 mb-0.5">Thesis Score</p>
+                              <p className={`font-mono text-[2rem] font-black leading-none ${accentColor}`}>{btcMConv}</p>
+                            </div>
+                            <div className="grid grid-cols-3 gap-3 text-center">
+                              {[
+                                { label: "Crowd", value: btcMSat <= 35 ? "Early" : btcMSat <= 60 ? "Building" : "Crowded", color: btcMSat <= 35 ? "text-green-400" : btcMSat <= 60 ? "text-violet-400" : "text-red-400" },
+                                { label: "Volume", value: btcMRvol >= 1.5 ? `${btcMRvol.toFixed(1)}×` : "Normal", color: btcMRvol >= 1.5 ? "text-orange-400" : "text-zinc-500" },
+                                { label: "HT Score", value: `${btcMScore}`, color: btcMScore >= 65 ? "text-violet-400" : "text-zinc-500" },
+                              ].map(({ label, value, color }) => (
+                                <div key={label}>
+                                  <p className="text-[7px] font-black uppercase text-zinc-700 mb-0.5">{label}</p>
+                                  <p className={`text-[9px] font-black ${color}`}>{value}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 5. Why HT Labs Selected This */}
+                        <div className="px-5 py-4 border-b border-white/8">
+                          <p className="text-[8px] font-black uppercase tracking-[0.22em] text-orange-400 mb-2.5">Why HT Labs Selected This</p>
+                          <div className="space-y-2">
+                            {btcMReasons.map((b, i) => (
+                              <div key={i} className="flex gap-2.5">
+                                <span className="text-orange-400 font-black text-[10px] shrink-0 mt-0.5">✓</span>
+                                <p className="text-xs font-semibold text-zinc-200 leading-5">{b}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 5.5 Opportunity Window */}
+                        {btcFramework && (
+                          <div className="px-5 pb-4 border-b border-white/8">
+                            <p className="text-[8px] font-black uppercase tracking-[0.22em] text-orange-400 mb-2">Opportunity Window</p>
+                            <div className="flex items-center gap-3 mb-1.5">
+                              <div className="flex-1">
+                                <p className="text-[7px] font-black uppercase text-zinc-700 mb-0.5">Upside</p>
+                                <p className="font-mono text-base font-black text-green-400">+{btcFramework.uptideMin}% → +{btcFramework.uptideMax}%</p>
+                              </div>
+                              <div>
+                                <p className="text-[7px] font-black uppercase text-zinc-700 mb-0.5">Risk</p>
+                                <p className="font-mono text-base font-black text-red-400">-{btcFramework.riskZone}%</p>
+                              </div>
+                              <div>
+                                <p className="text-[7px] font-black uppercase text-zinc-700 mb-0.5">R/R</p>
+                                <p className="font-mono text-base font-black text-orange-400">{btcFramework.rr}:1</p>
+                              </div>
+                            </div>
+                            <p className="text-[10px] font-semibold text-zinc-600 italic">{btcFramework.sentence}</p>
+                            {!btcFramework.isLive && <p className="text-[8px] text-zinc-700 mt-0.5">Based on last session</p>}
+                          </div>
+                        )}
+
+                        {/* 5.5 Decision Trace — mobile BTC */}
+                        {btcTrace && btcTrace.primaryDrivers.length > 0 && (
+                          <div className="border-b border-white/8">
+                            <div className="flex items-center justify-between px-5 py-2.5 border-b border-white/[0.04]">
+                              <p className="text-[7px] font-black uppercase tracking-[0.2em] text-zinc-700">Decision Trace</p>
+                              <span className="text-[7px] font-semibold text-zinc-800">Opp {btcTrace.opportunityScore} · {btcTrace.candidatesEvaluated} evaluated</span>
+                            </div>
+                            <div className="px-5 py-3 space-y-1.5">
+                              <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mb-1">Why This Stock</p>
+                              {btcTrace.primaryDrivers.slice(0, 3).map((d, i) => (
+                                <div key={i} className="flex gap-1.5">
+                                  <span className="text-orange-400/30 text-[8px] shrink-0">▸</span>
+                                  <p className="text-[9px] font-semibold text-zinc-600 leading-[1.3]">{d}</p>
+                                </div>
+                              ))}
+                              {btcTrace.rejectedAlternatives.length > 0 && (
+                                <>
+                                  <p className="text-[7px] font-black uppercase tracking-[0.16em] text-zinc-800 mt-2.5 mb-1">Why Not Others</p>
+                                  {btcTrace.rejectedAlternatives.slice(0, 2).map((r, i) => (
+                                    <div key={i} className="flex gap-1.5">
+                                      <span className="font-mono text-[9px] font-black text-zinc-600 shrink-0">{r.symbol}</span>
+                                      <p className="text-[9px] font-semibold text-zinc-700 leading-[1.3]">— {r.reason}</p>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 6. Actions */}
+                        <div className="px-5 py-4">
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setSelectedStock(btcM)}
+                              className="flex-1 rounded-xl border border-orange-400/30 bg-orange-500/10 py-2.5 text-xs font-black text-orange-300"
+                            >
+                              See Why HT Labs Picked This →
+                            </button>
+                            <button
+                              onClick={() => toggleWatchlist(btcM.symbol)}
+                              className={`rounded-xl border px-4 py-2.5 text-xs font-black transition ${watchlist.includes(btcM.symbol) ? "border-orange-400/30 bg-orange-500/10 text-orange-300" : "border-white/10 bg-white/[0.03] text-zinc-500"}`}
+                            >
+                              {watchlist.includes(btcM.symbol) ? "★" : "☆"}
+                            </button>
+                          </div>
+                          <p className="mt-2.5 text-center text-[8px] text-zinc-700 font-semibold">Signals are for research only, not financial advice.</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── swipeable conviction leaders (unchanged) ── */}
+                  {false && (
+                    <div className="hidden">
+                      {/* placeholder to close old card block */}
+                    </div>
+                  )}
+
+                  <MobileCardDetail
+                    current={current}
+                    mobileCards={mobileCards}
+                    mobileCardIndex={mobileCardIndex}
+                    isHeroCard={mobileBtcTarget?.symbol === current.symbol}
+                    convictionLeaders={convictionLeaders}
+                    emergingRadarCandidates={emergingRadarCandidates}
+                    watchlist={watchlist}
+                    setMobileCardIndex={setMobileCardIndex}
+                    setSelectedStock={setSelectedStock}
+                    toggleWatchlist={toggleWatchlist}
+                    getHTScore={getHTScore}
+                    getRelativeVolume={getRelativeVolume}
+                    getAttentionScore={getAttentionScore}
+                    getContinuationStrengthScore={getContinuationStrengthScore}
+                    getTrapRiskScore={getTrapRiskScore}
+                    getEntryQualityScore={getEntryQualityScore}
+                    detectPatternSignal={detectPatternSignal}
+                    getSimpleConvictionRead={getSimpleConvictionRead}
+                    getHTStance={getHTStance}
+                    getContinuationWindows={getContinuationWindows}
+                    getBackgroundOpportunityEngine={getBackgroundOpportunityEngine}
+                  />
                 </div>
               );
             })()}
@@ -13153,12 +15894,118 @@ export default function Home() {
             )}
           </div>
 
+          {/* Mobile Stock Detail Sheet — z-[300] sits above mobile overlay (z-200) */}
+          {selectedStock && (
+            <div
+              className="fixed inset-0 z-[300] flex items-end justify-center bg-black/85 backdrop-blur-md"
+              onClick={() => setSelectedStock(null)}
+            >
+              <div
+                className="w-full max-h-[90vh] overflow-y-auto rounded-t-[1.5rem] border-t border-x border-violet-400/20 bg-zinc-950 pb-8"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-center pt-3 pb-2">
+                  <div className="h-1 w-10 rounded-full bg-white/20" />
+                </div>
+                <div className="flex items-center justify-between px-5 pb-3 border-b border-white/10">
+                  <div>
+                    <p className="font-mono text-3xl font-black text-white">{selectedStock.symbol}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="font-mono text-base font-black text-white">${selectedStock.price.toFixed(2)}</span>
+                      <span className={`font-mono text-sm font-black ${selectedStock.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {selectedStock.change >= 0 ? "+" : ""}{selectedStock.change.toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                  <button onClick={() => setSelectedStock(null)} className="text-zinc-500 text-2xl leading-none px-2">×</button>
+                </div>
+
+                {/* HT Score */}
+                {(() => {
+                  const sc = getHTScore(selectedStock);
+                  const eng = getBackgroundOpportunityEngine(selectedStock);
+                  const sat = eng.crowdSaturationScore;
+                  const stageLabel = sat <= 35 ? "Early" : sat <= 60 ? "Developing" : sat <= 80 ? "Crowded" : "Exhausted";
+                  const tier = sc >= 80 ? "Strong Before The Crowd" : sc >= 65 ? "Developing Opportunity" : "Early Setup";
+                  return (
+                    <div className="px-5 py-4 border-b border-white/10">
+                      <div className={`rounded-2xl border px-4 py-3 flex items-center justify-between ${
+                        sc >= 80 ? "border-green-400/25 bg-green-500/[0.06]" :
+                        sc >= 65 ? "border-violet-400/25 bg-violet-500/[0.06]" :
+                        "border-orange-400/20 bg-orange-500/[0.05]"
+                      }`}>
+                        <p className={`font-mono text-[2.8rem] font-black leading-none ${
+                          sc >= 80 ? "text-green-400" : sc >= 65 ? "text-violet-400" : "text-orange-400"
+                        }`}>{sc}</p>
+                        <div className="text-right">
+                          <p className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500 mb-0.5">HT Score</p>
+                          <p className="text-sm font-black text-white">{tier}</p>
+                          <p className={`text-[9px] font-black mt-0.5 ${stageLabel === "Early" ? "text-green-400" : "text-violet-400"}`}>
+                            Stage {sat} · {stageLabel}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Bull/Bear AI Read */}
+                {bullBearLoading && bullBearTicker !== selectedStock.symbol ? (
+                  <div className="px-5 py-4 border-b border-white/10">
+                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-violet-400 mb-2">HT Labs Read</p>
+                    <div className="space-y-2 animate-pulse">
+                      <div className="h-3 bg-zinc-800 rounded w-full" />
+                      <div className="h-3 bg-zinc-800 rounded w-4/5" />
+                      <div className="h-3 bg-zinc-800 rounded w-3/5" />
+                    </div>
+                  </div>
+                ) : bullBearData?.ticker === selectedStock.symbol && (
+                  <div className="px-5 py-4 border-b border-white/10">
+                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-violet-400 mb-2">HT Labs Read</p>
+                    <p className="text-sm font-bold text-white leading-5 mb-4">"{bullBearData.htRead}"</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-[8px] font-black uppercase text-green-400 mb-2">🐂 Bull Case</p>
+                        <ul className="space-y-1.5">
+                          {bullBearData.bullCase.slice(0, 3).map((pt: string, i: number) => (
+                            <li key={i} className="flex gap-1.5 text-[11px] font-semibold text-zinc-300 leading-4">
+                              <span className="text-green-500 shrink-0">+</span><span>{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="text-[8px] font-black uppercase text-red-400 mb-2">🐻 Bear Case</p>
+                        <ul className="space-y-1.5">
+                          {bullBearData.bearCase.slice(0, 3).map((pt: string, i: number) => (
+                            <li key={i} className="flex gap-1.5 text-[11px] font-semibold text-zinc-300 leading-4">
+                              <span className="text-red-500 shrink-0">−</span><span>{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="px-5 py-4">
+                  <button
+                    onClick={() => setSelectedStock(null)}
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.04] py-3.5 text-sm font-black text-zinc-400"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Bottom Navigation */}
           <div className="flex-shrink-0 border-t border-white/10 bg-black/90 backdrop-blur-2xl pb-safe">
             <div className="grid grid-cols-5">
               {[
                 { tab: "home", icon: "🏠", label: "Home" },
-                { tab: "convictions", icon: "🔥", label: "Convictions" },
+                { tab: "convictions", icon: "🔥", label: "Top" },
                 { tab: "scanner", icon: "⚡", label: "Scanner" },
                 { tab: "watchlist", icon: "⭐", label: "Watchlist" },
                 { tab: "profile", icon: "👤", label: "Profile" },
@@ -13175,7 +16022,6 @@ export default function Home() {
             </div>
           </div>
         </div>
-      )}
     </main>
   );
 }

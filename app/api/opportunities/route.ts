@@ -1,7 +1,13 @@
+// ─────────────────────────────────────────────────────────────
+//  app/api/opportunities/route.ts
+//  FINAL VERSION — reads directly from ht_signals
+//  No re-scoring. No external calls. Pure Polygon data.
+// ─────────────────────────────────────────────────────────────
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
+const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
@@ -10,13 +16,15 @@ export type HTOpportunity = {
   ticker: string;
   price: number;
   change: number;
-  opportunityType: "momentum" | "recovery" | "breakout" | "social_surge" | "watch";
+  opportunityType: "momentum" | "recovery" | "breakout" | "social_surge" | "catalyst" | "watch";
   opportunityScore: number;
   momentumScore: number;
   recoveryScore: number;
   attentionScore: number;
   riskScore: number;
   patternScore: number;
+  catalystScore: number;
+  catalystTags: string[];
   stage: string;
   stageEmoji: string;
   confidence: number;
@@ -29,206 +37,135 @@ export type HTOpportunity = {
   isBeforeCrowd: boolean;
 };
 
-type RawTickerData = {
-  ticker: string;
-  price: number;
-  change: number;
-  relativeVolume: number;
-  attentionScore: number;
-  trapRisk: number;
-  htScore: number;
-  pattern: string;
-  crowdSaturation: number;
-  socialScore?: number;
-  newsArticles?: number;
-  newsVelocity?: number;
-};
+function buildOpportunityFromRow(row: any): HTOpportunity | null {
+  const ticker = row.ticker;
+  const price = row.price ?? 0;
+  const change = row.change_percent ?? 0;
+  const relativeVolume = row.relative_volume ?? 1;
+  const catalystScore = row.catalyst_score ?? 0;
+  const htScore = row.ht_score ?? 50;
+  const crowdScore = row.crowd_score ?? 50;
+  const trapScore = row.trap_score ?? 50;
+  const momentumScore = row.momentum_score ?? 0;
+  const state = row.state ?? "";
+  const pattern = row.pattern ?? "Standard";
 
-function calcMomentumScore(d: RawTickerData): number {
-  if (d.change <= 0) return 0;
-  // Heavily penalize exhaustion/extended moves
-  if (d.pattern.includes("Exhaustion") || d.change >= 20 || d.crowdSaturation >= 80) return 0;
-  let score = 0;
-  score += Math.min(35, d.change * 3.5);
-  score += Math.min(25, d.relativeVolume * 6);
-  score += Math.min(20, d.attentionScore * 0.22);
-  score += d.htScore >= 80 ? 15 : d.htScore >= 65 ? 8 : 0;
-  score += d.crowdSaturation < 45 ? 10 : d.crowdSaturation < 60 ? 3 : -10;
-  // Penalize high trap risk
-  if (d.trapRisk >= 65) score -= 20;
-  if (d.trapRisk >= 80) score -= 30;
-  return Math.min(99, Math.max(0, Math.round(score)));
-}
+  if (pattern.includes("Exhaustion") && catalystScore < 20) return null;
 
-function calcRecoveryScore(d: RawTickerData): number {
-  if (d.change >= 0) return 0;
-  const drop = Math.abs(d.change);
-  if (drop < 2 || drop > 35) return 0;
-  let score = 0;
-  score += Math.min(35, drop * 2.2);
-  score += d.relativeVolume >= 1.5 && d.relativeVolume < 5 ? 20 : 0;
-  score += d.attentionScore >= 55 ? 15 : 0;
-  score += d.trapRisk < 50 ? 15 : d.trapRisk < 65 ? 5 : 0;
-  score += d.htScore >= 55 ? 10 : 0;
-  score += (d.socialScore ?? 0) >= 30 ? 5 : 0;
-  return Math.min(99, Math.max(0, Math.round(score)));
-}
+  let opportunityType: HTOpportunity["opportunityType"] = "watch";
+  if (catalystScore >= 20) {
+    opportunityType = "catalyst";
+  } else if (change >= 2 && relativeVolume >= 1.5 && crowdScore < 75) {
+    opportunityType = momentumScore >= 60 ? "breakout" : "momentum";
+  } else if (change < 0 && relativeVolume >= 1.5) {
+    opportunityType = "recovery";
+  }
 
-function calcAttentionScore(d: RawTickerData): number {
-  let score = d.attentionScore * 0.5;
-  score += Math.min(25, (d.socialScore ?? 0) * 0.35);
-  score += Math.min(15, (d.newsVelocity ?? 0) * 5);
-  score += d.relativeVolume >= 2 ? 10 : 0;
-  return Math.min(99, Math.max(0, Math.round(score)));
-}
+  if (opportunityType === "watch" && catalystScore < 20) return null;
 
-function calcRiskScore(d: RawTickerData): number {
-  let risk = d.trapRisk * 0.5;
-  risk += d.change >= 15 ? 35 : d.change >= 10 ? 22 : d.change >= 7 ? 12 : 0;
-  risk += d.crowdSaturation >= 75 ? 28 : d.crowdSaturation >= 60 ? 15 : 0;
-  risk += d.pattern.includes("Exhaustion") ? 30 : 0;
-  risk += d.relativeVolume >= 8 ? 10 : 0;
-  return Math.min(99, Math.max(0, Math.round(risk)));
-}
-
-function calcPatternScore(d: RawTickerData): number {
-  if (d.pattern.includes("Exhaustion")) return 10; // Heavily penalize
-  const weights: Record<string, number> = {
-    "Quiet Accumulation": 88,
-    "Pressure Coil": 85,
-    "Continuation Stack": 78,
-    "Crowd Ignition": 72,
-    "Reclaim Setup": 68,
-    "Standard": 50,
-  };
-  return weights[d.pattern] ?? 50;
-}
-
-function calcOpportunityScore(d: RawTickerData, scores: {
-  momentum: number; recovery: number; attention: number; risk: number; pattern: number;
-}): number {
-  // Hard filter — exhaustion or extreme risk never qualifies as top opportunity
-  if (d.pattern.includes("Exhaustion") || d.trapRisk >= 80 || d.crowdSaturation >= 85) return 0;
-
-  const isRecovery = d.change < 0;
-  if (isRecovery) {
-    return Math.round(
-      scores.recovery * 0.45 +
-      scores.attention * 0.25 +
-      scores.pattern * 0.20 +
-      (99 - scores.risk) * 0.10
+  let opportunityScore = 0;
+  if (catalystScore >= 20) {
+    opportunityScore = catalystScore + Math.min(40, momentumScore);
+  } else if (change >= 0) {
+    opportunityScore = Math.round(
+      momentumScore * 0.45 +
+      Math.min(30, relativeVolume * 8) * 0.3 +
+      (100 - crowdScore) * 0.25
     );
-  }
-  return Math.round(
-    scores.momentum * 0.40 +
-    scores.attention * 0.25 +
-    scores.pattern * 0.20 +
-    (99 - scores.risk) * 0.15
-  );
-}
-
-function getOpportunityType(d: RawTickerData, scores: ReturnType<typeof buildScores>): HTOpportunity["opportunityType"] {
-  if (d.pattern.includes("Exhaustion") || d.crowdSaturation >= 80) return "watch";
-  if (d.change < 0 && scores.recovery >= 40) return "recovery";
-  if ((d.socialScore ?? 0) >= 60 && scores.attention >= 65) return "social_surge";
-  if (d.pattern === "Pressure Coil" && scores.momentum >= 70) return "breakout";
-  if (scores.momentum >= 55) return "momentum";
-  return "watch";
-}
-
-function getStage(d: RawTickerData, type: HTOpportunity["opportunityType"]): { stage: string; emoji: string } {
-  if (type === "recovery") {
-    const s = calcRecoveryScore(d);
-    if (s >= 80) return { stage: "Recovery Confirmed", emoji: "✅" };
-    if (s >= 65) return { stage: "Recovery Beginning", emoji: "🌱" };
-    if (s >= 45) return { stage: "Stabilizing", emoji: "⚖️" };
-    return { stage: "Capitulation", emoji: "📉" };
-  }
-  if (d.pattern.includes("Exhaustion")) return { stage: "Exhaustion Risk", emoji: "⚠️" };
-  if (d.crowdSaturation >= 75) return { stage: "Crowd Arrived", emoji: "🔥" };
-  if (d.crowdSaturation >= 60) return { stage: "Crowd Arriving", emoji: "🔥" };
-  if (d.relativeVolume >= 3 && d.htScore >= 80) return { stage: "Acceleration", emoji: "⚡" };
-  if (d.relativeVolume >= 2) return { stage: "Discovery", emoji: "👀" };
-  return { stage: "Early Watch", emoji: "🌱" };
-}
-
-function buildWhyItMatters(d: RawTickerData, type: HTOpportunity["opportunityType"]): string {
-  const parts: string[] = [];
-  if (type === "recovery") {
-    parts.push(`Stock is down ${Math.abs(d.change).toFixed(1)}% today.`);
-    if (d.relativeVolume >= 1.5 && d.relativeVolume < 5) parts.push(`Volume is ${d.relativeVolume.toFixed(1)}x normal — selling may be exhausting.`);
-    if (d.attentionScore >= 65) parts.push(`Attention is increasing as traders watch the level.`);
-    if (d.trapRisk < 45) parts.push(`Recovery signals are strengthening.`);
   } else {
-    if (d.relativeVolume >= 2) parts.push(`Volume is ${d.relativeVolume.toFixed(1)}x above average.`);
-    if (d.change >= 3) parts.push(`Up ${d.change.toFixed(1)}% with price structure intact.`);
-    if (d.crowdSaturation < 45) parts.push(`Crowd has not fully arrived yet — still early.`);
-    if ((d.socialScore ?? 0) >= 40) parts.push(`Social attention is accelerating.`);
-    if (d.htScore >= 80) parts.push(`HT confidence is strong at ${d.htScore}%.`);
+    const dropScore = Math.min(35, Math.abs(change) * 2.2);
+    opportunityScore = Math.round(dropScore * 0.5 + (100 - trapScore) * 0.3 + Math.min(25, relativeVolume * 8) * 0.2);
   }
-  return parts.join(" ") || "HT detected early signals worth monitoring.";
-}
 
-function buildWhatChanged(d: RawTickerData): string {
-  if (d.relativeVolume >= 3) return `Volume surged to ${d.relativeVolume.toFixed(1)}x normal — unusual activity detected.`;
-  if (Math.abs(d.change) >= 5) return `Price moved ${d.change > 0 ? "+" : ""}${d.change.toFixed(1)}% with elevated participation.`;
-  if ((d.socialScore ?? 0) >= 50) return "Social mention velocity increased significantly.";
-  if (d.change < 0) return `Dropped ${Math.abs(d.change).toFixed(1)}% — watching for stabilization signals.`;
-  return "Multiple signals aligned within the last scan cycle.";
-}
+  if (opportunityScore < 15 && catalystScore < 20) return null;
 
-function buildRiskNote(d: RawTickerData, riskScore: number): string {
-  if (d.pattern.includes("Exhaustion")) return "Move is extended and crowd has arrived. High risk of reversal — avoid chasing.";
-  if (riskScore >= 70) return "High risk — extended move with crowd saturation. Entry timing is critical.";
-  if (riskScore >= 50) return "Moderate risk — monitor volume closely. Set a clear invalidation level.";
-  if (d.change < 0) return "Recovery setup — wait for volume confirmation before acting.";
-  return "Risk appears controlled. Volume must hold for the thesis to stay valid.";
-}
+  let stage = "Developing";
+  let stageEmoji = "👀";
+  if (state.includes("Catalyst")) {
+    stage = state.includes("FDA") ? "FDA Catalyst Active" : "Catalyst Building";
+    stageEmoji = "⚡";
+  } else if (state.includes("Insider")) {
+    stage = "Insider Conviction";
+    stageEmoji = "🎯";
+  } else if (relativeVolume >= 3) {
+    stage = "Acceleration";
+    stageEmoji = "⚡";
+  } else if (relativeVolume >= 2) {
+    stage = "Discovery";
+    stageEmoji = "👀";
+  } else if (change < 0 && relativeVolume >= 1.5) {
+    stage = "Recovery Beginning";
+    stageEmoji = "🌱";
+  }
 
-function buildScores(d: RawTickerData) {
-  const momentum = calcMomentumScore(d);
-  const recovery = calcRecoveryScore(d);
-  const attention = calcAttentionScore(d);
-  const risk = calcRiskScore(d);
-  const pattern = calcPatternScore(d);
-  const opportunity = calcOpportunityScore(d, { momentum, recovery, attention, risk, pattern });
-  return { momentum, recovery, attention, risk, pattern, opportunity };
-}
-
-export function scoreOpportunity(raw: RawTickerData): HTOpportunity {
-  const scores = buildScores(raw);
-  const type = getOpportunityType(raw, scores);
-  const { stage, emoji } = getStage(raw, type);
-  const confidence = Math.min(99, Math.round((scores.opportunity * 0.6 + raw.htScore * 0.4)));
+  const catalystTags: string[] = [];
+  if (state.includes("FDA Event")) catalystTags.push("FDA Event");
+  if (state.includes("Insider Buy")) catalystTags.push("Insider Buying");
+  if (catalystScore >= 20 && catalystTags.length === 0) catalystTags.push("Catalyst Watch");
 
   const signals: string[] = [];
-  if (raw.relativeVolume >= 3) signals.push(`${raw.relativeVolume.toFixed(1)}x relative volume`);
-  if (raw.crowdSaturation < 40) signals.push("Before crowd saturation");
-  if ((raw.socialScore ?? 0) >= 40) signals.push("Social momentum building");
-  if (scores.pattern >= 80) signals.push(`Strong ${raw.pattern} pattern`);
-  if (scores.recovery >= 60) signals.push("Recovery signals forming");
+  if (relativeVolume >= 3) signals.push(`${relativeVolume.toFixed(1)}x relative volume`);
+  if (crowdScore < 40) signals.push("Before crowd saturation");
+  if (state.includes("FDA Event")) signals.push("FDA catalyst event");
+  if (state.includes("Insider Buy")) signals.push("Insider Form 4 buy detected");
+  if (catalystScore >= 20) signals.push(`Catalyst score: ${catalystScore}`);
+
+  let whyItMatters = "";
+  if (state.includes("FDA Event")) {
+    whyItMatters = `FDA catalyst event detected for ${ticker} — binary outcome could drive a significant price move. `;
+  }
+  if (state.includes("Insider Buy")) {
+    whyItMatters += `Insider bought shares recently via Form 4 — insiders rarely buy without conviction. `;
+  }
+  if (change >= 2) {
+    whyItMatters += `Up ${change.toFixed(1)}% with ${relativeVolume.toFixed(1)}x normal volume`;
+    if (crowdScore < 45) whyItMatters += " — crowd has not fully arrived yet.";
+    else whyItMatters += ".";
+  } else if (change < 0) {
+    whyItMatters += `Down ${Math.abs(change).toFixed(1)}% — volume is ${relativeVolume.toFixed(1)}x normal, selling may be exhausting.`;
+  }
+  if (!whyItMatters) whyItMatters = "HT detected early signals worth monitoring.";
+
+  let whatChanged = "";
+  if (state.includes("FDA Event")) whatChanged = "FDA catalyst event identified — binary outcome approaching.";
+  else if (state.includes("Insider Buy")) whatChanged = "Form 4 insider buy detected recently.";
+  else if (relativeVolume >= 3) whatChanged = `Volume surged to ${relativeVolume.toFixed(1)}x normal.`;
+  else if (Math.abs(change) >= 5) whatChanged = `Price moved ${change > 0 ? "+" : ""}${change.toFixed(1)}% with elevated participation.`;
+  else whatChanged = "Multiple signals aligned within the last scan cycle.";
+
+  let riskNote = "";
+  if (state.includes("FDA Event")) riskNote = "Binary FDA event — position sizing is critical. A negative outcome could cause significant decline.";
+  else if (trapScore >= 70) riskNote = "High risk — extended move. Entry timing is critical.";
+  else if (change < 0) riskNote = "Recovery setup — wait for volume confirmation before acting.";
+  else riskNote = "Risk appears controlled. Volume must hold for the thesis to stay valid.";
+
+  const confidence = Math.min(99, Math.round(opportunityScore * 0.6 + htScore * 0.4));
+  const crowdStage = crowdScore < 30 ? 1 : crowdScore < 50 ? 2 : crowdScore < 65 ? 3 : crowdScore < 80 ? 4 : 5;
+  const isBeforeCrowd = crowdScore < 45 && (relativeVolume >= 1.5 || catalystScore >= 20);
 
   return {
-    ticker: raw.ticker,
-    price: raw.price,
-    change: raw.change,
-    opportunityType: type,
-    opportunityScore: scores.opportunity,
-    momentumScore: scores.momentum,
-    recoveryScore: scores.recovery,
-    attentionScore: scores.attention,
-    riskScore: scores.risk,
-    patternScore: scores.pattern,
+    ticker,
+    price,
+    change,
+    opportunityType,
+    opportunityScore,
+    momentumScore,
+    recoveryScore: change < 0 ? Math.min(99, Math.round(Math.abs(change) * 2.2 + relativeVolume * 10)) : 0,
+    attentionScore: crowdScore,
+    riskScore: trapScore,
+    patternScore: 50,
+    catalystScore,
+    catalystTags,
     stage,
-    stageEmoji: emoji,
+    stageEmoji,
     confidence,
-    whyItMatters: buildWhyItMatters(raw, type),
-    whatChanged: buildWhatChanged(raw),
-    riskNote: buildRiskNote(raw, scores.risk),
+    whyItMatters,
+    whatChanged,
+    riskNote,
     signals,
-    crowdStage: raw.crowdSaturation < 30 ? 1 : raw.crowdSaturation < 50 ? 2 : raw.crowdSaturation < 65 ? 3 : raw.crowdSaturation < 80 ? 4 : 5,
-    relativeVolume: raw.relativeVolume,
-    isBeforeCrowd: raw.crowdSaturation < 45 && raw.relativeVolume >= 1.5,
+    crowdStage,
+    relativeVolume,
+    isBeforeCrowd,
   };
 }
 
@@ -238,11 +175,11 @@ export async function GET(req: Request) {
   const limit = Math.min(20, parseInt(searchParams.get("limit") ?? "10"));
 
   try {
-    const { data: scanData, error } = await supabase
-      .from("ht_scan_log")
+    const { data: scanData, error } = await getSupabase()
+      .from("ht_signals")
       .select("*")
       .order("scanned_at", { ascending: false })
-      .limit(200);
+      .limit(300);
 
     if (error || !scanData?.length) {
       return NextResponse.json({
@@ -252,51 +189,38 @@ export async function GET(req: Request) {
       });
     }
 
-    // Dedupe to latest per ticker
-    const latestByTicker = new Map<string, typeof scanData[0]>();
+    const latestByTicker = new Map<string, any>();
     for (const row of scanData) {
-      if (!latestByTicker.has(row.ticker)) {
-        latestByTicker.set(row.ticker, row);
-      }
+      if (!latestByTicker.has(row.ticker)) latestByTicker.set(row.ticker, row);
     }
 
     const opportunities: HTOpportunity[] = [];
     for (const [, row] of latestByTicker) {
-      // Parse change from state/decision context
-      const isDown = row.state?.includes("Buyers Needed") || row.state?.includes("Pullback") || row.state?.includes("Recovery");
-      const estimatedChange = isDown ? -Math.abs((row.volume_score ?? 10) * 0.3) : Math.abs((row.volume_score ?? 10) * 0.3);
-
-      const raw: RawTickerData = {
-        ticker: row.ticker,
-        price: row.price ?? 0,
-        change: estimatedChange,
-        relativeVolume: Math.max(0.5, (row.volume_score ?? 10) / 10),
-        attentionScore: row.crowd_score ?? 50,
-        trapRisk: row.trap_score ?? 50,
-        htScore: row.ht_confidence ?? 50,
-        pattern: row.state?.includes("Accumulation") ? "Quiet Accumulation" :
-                 row.state?.includes("Coil") || row.state?.includes("Pressure") ? "Pressure Coil" :
-                 row.state?.includes("Wave") || row.state?.includes("Momentum") ? "Continuation Stack" :
-                 row.state?.includes("Igniting") || row.state?.includes("Crowd") ? "Crowd Ignition" :
-                 row.state?.includes("Exhaustion") || row.state?.includes("Avoid") ? "Exhaustion Risk" :
-                 row.state?.includes("Reclaim") || row.state?.includes("Buyers") ? "Reclaim Setup" : "Standard",
-        crowdSaturation: row.crowd_score ?? 50,
-        socialScore: 0,
-        newsArticles: 0,
-        newsVelocity: 0,
-      };
-
-      const scored = scoreOpportunity(raw);
-      // Only include real opportunities — skip exhaustion and watch
-      if (scored.opportunityScore >= 25 && scored.opportunityType !== "watch") {
-        opportunities.push(scored);
-      }
+      const opp = buildOpportunityFromRow(row);
+      if (opp) opportunities.push(opp);
     }
 
     let filtered = [...opportunities].sort((a, b) => b.opportunityScore - a.opportunityScore);
-    if (type === "momentum") filtered = filtered.filter(o => o.opportunityType === "momentum" || o.opportunityType === "breakout" || o.opportunityType === "social_surge");
-    if (type === "recovery") filtered = filtered.filter(o => o.opportunityType === "recovery");
-    if (type === "before_crowd") filtered = filtered.filter(o => o.isBeforeCrowd);
+
+    if (type === "momentum") {
+      filtered = filtered.filter(o => o.opportunityType === "momentum" || o.opportunityType === "breakout");
+    }
+    if (type === "recovery") {
+      filtered = filtered.filter(o => o.opportunityType === "recovery");
+    }
+    if (type === "catalyst") {
+      filtered = filtered
+        .filter(o => o.catalystScore >= 20)
+        .sort((a, b) => {
+          if (b.catalystScore !== a.catalystScore) return b.catalystScore - a.catalystScore;
+          if (Math.abs(b.change) !== Math.abs(a.change)) return Math.abs(b.change) - Math.abs(a.change);
+          if ((b.relativeVolume ?? 1) !== (a.relativeVolume ?? 1)) return (b.relativeVolume ?? 1) - (a.relativeVolume ?? 1);
+          return a.price - b.price;
+        });
+    }
+    if (type === "before_crowd") {
+      filtered = filtered.filter(o => o.isBeforeCrowd);
+    }
 
     return NextResponse.json({
       opportunities: filtered.slice(0, limit),
@@ -309,4 +233,44 @@ export async function GET(req: Request) {
     console.error("Opportunities API error:", error);
     return NextResponse.json({ error: "Failed to fetch opportunities" }, { status: 500 });
   }
+}
+
+export function scoreOpportunity(raw: any): any {
+  return buildOpportunityFromRow({
+    ticker: raw.ticker,
+    price: raw.price,
+    change_percent: raw.change,
+    relative_volume: raw.relativeVolume,
+    crowd_score: raw.crowdSaturation,
+    trap_score: raw.trapRisk,
+    ht_score: raw.htScore,
+    momentum_score: raw.momentumScore ?? 0,
+    catalyst_score: raw.catalystScore ?? 0,
+    pattern: raw.pattern,
+    state: raw.signal_state ?? raw.state ?? "",
+    volume_score: raw.relativeVolume ? raw.relativeVolume * 10 : 10,
+  }) ?? {
+    ticker: raw.ticker,
+    price: raw.price,
+    change: raw.change,
+    opportunityType: "watch",
+    opportunityScore: 0,
+    momentumScore: 0,
+    recoveryScore: 0,
+    attentionScore: raw.attentionScore ?? 50,
+    riskScore: raw.trapRisk ?? 50,
+    patternScore: 50,
+    catalystScore: raw.catalystScore ?? 0,
+    catalystTags: [],
+    stage: "Watch",
+    stageEmoji: "👀",
+    confidence: 0,
+    whyItMatters: "Monitoring.",
+    whatChanged: "No significant change.",
+    riskNote: "No clear signal yet.",
+    signals: [],
+    crowdStage: 3,
+    relativeVolume: raw.relativeVolume ?? 1,
+    isBeforeCrowd: false,
+  };
 }

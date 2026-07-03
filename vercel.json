@@ -7,6 +7,10 @@
     {
       "path": "/api/outcome-tracker?secret=htlabs-internal",
       "schedule": "0 20 * * 1-5"
+    },
+    {
+      "path": "/api/polygon-scanner?secret=htlabs-internal",
+      "schedule": "*/5 9-16 * * 1-5"
     }
   ]
 }
