@@ -500,9 +500,9 @@ export default function Home() {
   // build: v149-auth-stability-v120-behavior
   // V70 command center cleanup: live tape/search/auth first, top conviction as hero, capital and portfolio below, old marketing hero hidden.
   // v106 pre-market stabilization pass: preserve identity, polish nav/search spacing, compress support metrics, and keep market-open usability stable.
-  const initialStocks = Object.values(fallbackQuotes).filter((stock) =>
-    defaultStarterTickers.includes(stock.symbol),
-  );
+  // Frontend starts empty.
+  // No fake/local starter board. Real display data must come from the live pipeline.
+  const initialStocks: Stock[] = [];
 
   const [stocks, setStocks] = useState<Stock[]>(initialStocks);
   const [ticker, setTicker] = useState("");
@@ -775,6 +775,8 @@ export default function Home() {
     catalystTags?: string[];
     relativeVolume?: number;
     crowdStage?: number;
+    scannedAt?: string | null;
+    freshnessLabel?: string;
     _convictionTier?: string;
     _isCatalyst?: boolean;
   };
@@ -800,82 +802,44 @@ export default function Home() {
 
   const fetchAPIOpportunities = async () => {
     try {
-      const [momRes, recRes, catRes] = await Promise.all([
-        fetch("/api/opportunities?type=momentum&limit=5"),
-        fetch("/api/opportunities?type=recovery&limit=5"),
+      const [topRes, catalystRes] = await Promise.all([
+        fetch("/api/opportunities?limit=1"),
         fetch("/api/opportunities?type=catalyst&limit=3"),
       ]);
-      // Collect all candidates from all three endpoints
-      const allCandidates: any[] = [];
 
-      if (momRes.ok) {
-        const data = await momRes.json();
-        const valid = (data.opportunities ?? []).filter(
-          (o: any) => !o.stage.includes("Exhaustion") && o.opportunityType !== "watch" && o.opportunityScore >= 30
-        );
-        allCandidates.push(...valid);
-      }
-      if (recRes.ok) {
-        const data = await recRes.json();
-        if (data.opportunities?.[0]) setApiRecovery(data.opportunities[0]);
-      }
-      if (catRes.ok) {
-        const data = await catRes.json();
-        // Catalyst signals always included — sorted by catalystScore desc
-        const catSignals = (data.opportunities ?? []).filter((o: any) => o.catalystScore >= 20);
-        catSignals.forEach((o: any) => { o._isCatalyst = true; });
-        if (catSignals[0]) setApiCatalyst(catSignals[0]);
-        allCandidates.push(...catSignals);
-      }
+      // The backend/API owns signal eligibility, ranking, and top selection.
+      // The frontend only displays the first verified opportunity returned.
+      if (topRes.ok) {
+        const data = await topRes.json();
+        const topOpportunity = data.opportunities?.[0] ?? null;
 
-      // ── Rank all candidates — catalyst signals get strong boost ──
-      const rankSignal = (o: any): number => {
-        let score = 0;
-        score += (o.opportunityScore ?? 0) * 0.30;
-        score += (o.confidence ?? 0) * 0.20;
-        // Catalyst signals get a hard 40pt boost — they are always high priority
-        score += o._isCatalyst ? 40 : 0;
-        score += Math.min(25, (o.catalystScore ?? 0));
-        score += (o.momentumScore ?? 0) * 0.10;
-        score -= (o.attentionScore ?? 50) * 0.05;
-        score -= (o.riskScore ?? 50) * 0.03;
-        return Math.round(score);
-      };
+        if (topOpportunity) {
+          topOpportunity._convictionTier =
+            topOpportunity.freshnessLabel === "Last Verified Signal"
+              ? "Last Trading Session"
+              : "Top Opportunity";
+        }
 
-      if (allCandidates.length > 0) {
-        const ranked = [...allCandidates].sort((a, b) => rankSignal(b) - rankSignal(a));
-        // Only set apiMomentum if the top candidate actually exists in stocks
-        // and passes the SM gate — prevents HOOD and other crowded stocks
-        // from getting in through the back door
-        const topConviction = ranked.find(c => {
-          const stock = stocks.find(s => s.symbol === c.ticker);
-          if (!stock) return false;
-          const saturation = (stock as any).crowdScore ?? 50;
-          const isCrowded = saturation > 65;
-          const isPermanentlySaturated = [
-            "META","AAPL","MSFT","GOOGL","GOOG","AMZN","NVDA","TSLA",
-            "SPY","QQQ","IWM","DIA","VTI","XLK","XLF","XLE","SMH","ARKK",
-            "JPM","BAC","GS","MS","WFC","V","MA","WMT","COST","JNJ","UNH","LLY","NVO",
-          ].includes(stock.symbol);
-          return !isCrowded && !isPermanentlySaturated;
-        }) ?? ranked[0];
-
-        const convScore = rankSignal(topConviction);
-        topConviction._convictionTier = convScore >= 80
-          ? "Top Conviction"
-          : convScore >= 60
-          ? "High Opportunity"
-          : convScore >= 40
-          ? "Early Watch"
-          : "Watchlist";
-        setApiMomentum(topConviction);
-      } else if (allCandidates.length === 0) {
-        // Nothing qualified — clear hero
+        setApiMomentum(topOpportunity);
+      } else {
         setApiMomentum(null);
       }
 
+      // Recovery is no longer a homepage pillar.
+      // Keep the state cleared so old local/recovery logic cannot hijack the UI.
+      setApiRecovery(null);
+
+      if (catalystRes.ok) {
+        const data = await catalystRes.json();
+        setApiCatalyst(data.opportunities?.[0] ?? null);
+      } else {
+        setApiCatalyst(null);
+      }
     } catch (e) {
       console.warn("API opportunities fetch failed:", e);
+      setApiMomentum(null);
+      setApiRecovery(null);
+      setApiCatalyst(null);
     }
   };
 
@@ -6510,8 +6474,31 @@ export default function Home() {
     return { requiredLead: 15, requiredStreak: 4 };
   };
 
+  const apiMomentumAsStock = useMemo<Stock | null>(() => {
+    if (!apiMomentum) return null;
+
+    return {
+      symbol: apiMomentum.ticker,
+      price: Number(apiMomentum.price || 0),
+      change: Number(apiMomentum.change || 0),
+      relativeVolume: Number(apiMomentum.relativeVolume || 0),
+      catalystScore: Number(apiMomentum.catalystScore || 0),
+      htSignalScore: Number(apiMomentum.confidence || apiMomentum.opportunityScore || 0),
+      momentumScore: Number(apiMomentum.momentumScore || 0),
+      crowdScore: Number(apiMomentum.attentionScore || 0),
+      trapScore: Number(apiMomentum.riskScore || 0),
+      signalState: apiMomentum.stage,
+      signalPattern: apiMomentum.signals?.[2] ?? apiMomentum.stage,
+      changePercent: Number(apiMomentum.change || 0),
+    };
+  }, [apiMomentum]);
+
   // Memo: reads refs, never writes them. Returns which stock to display.
   const resolvedBeforeCrowdTarget: Stock | null = useMemo(() => {
+    // The API opportunity is the homepage truth source.
+    // If it exists, desktop and mobile hero both render this exact same object.
+    if (apiMomentumAsStock) return apiMomentumAsStock;
+
     const { pool, effectivePool } = getSMCandidatePool(stocks);
     const candidate = selectTopContender(effectivePool);
     const current = topContenderRef.current;
@@ -6538,7 +6525,7 @@ export default function Home() {
       if (prevStreak + 1 >= requiredStreak) return candidate;
     }
     return current;
-  }, [stocks]);
+  }, [stocks, apiMomentumAsStock]);
 
   // Effect: writes refs after render. Same pool, same thresholds as memo above.
   useEffect(() => {
@@ -8461,19 +8448,13 @@ export default function Home() {
     } catch (err) {
       console.error("Stock fetch error:", err);
 
-      const fallbackData = defaultTickers
-        .map((symbol) => fallbackQuotes[symbol])
-        .filter(Boolean)
-        .sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-
-      setStocks(fallbackData);
-      setMarketScanStats({
-        scanned: fallbackData.length,
-        gainers: fallbackData.filter((stock) => stock.change > 0).length,
-        losers: fallbackData.filter((stock) => stock.change < 0).length,
-        highVolume: fallbackData.filter((stock) => getRelativeVolume(stock) >= 3).length,
-        lastFullScan: new Date(),
-      });
+      // No fake/local fallback board.
+      // If the live quote pipeline fails, keep the current verified state instead of
+      // replacing it with local/demo stocks that can hide real problems.
+      setMarketScanStats((prev) => ({
+        ...prev,
+        lastFullScan: prev.lastFullScan,
+      }));
       setLastUpdated(new Date());
     } finally {
       setIsRefreshing(false);
@@ -9136,38 +9117,12 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  // Opportunity engine memos — placed AFTER all function definitions to avoid circular refs
-  const topMomentumOpportunity = useMemo(() => {
-    if (!mounted || stocks.length === 0) return null;
-    const EXCLUDED_MOMENTUM = new Set([
-      "SQQQ","TQQQ","SOXS","SOXL","UVXY","SVXY","SPXS","SPXL",
-      "LABD","LABU","TZA","TNA","FAZ","FAS","YANG","YINN",
-      "SDOW","UDOW","ERY","ERX","HIBL","HIBS","DRIP","GUSH","SNAL",
-    ]);
-    return [...stocks]
-      .filter(s => {
-        if (s.change <= 0) return false;
-        if (EXCLUDED_MOMENTUM.has(s.symbol)) return false;
-        if (s.change >= 20) return false; // too extended
-        const pattern = detectPatternSignal(s).name;
-        if (pattern === "Exhaustion Risk") return false;
-        const crowd = getBackgroundOpportunityEngine(s).crowdSaturationScore;
-        if (crowd >= 80) return false;
-        return true;
-      })
-      .sort((a, b) => {
-        const aScore = getHTScore(a) * 0.4 + getRelativeVolume(a) * 10 * 0.3 + getAttentionScore(a) * 0.3;
-        const bScore = getHTScore(b) * 0.4 + getRelativeVolume(b) * 10 * 0.3 + getAttentionScore(b) * 0.3;
-        return bScore - aScore;
-      })[0] ?? null;
-  }, [stocks, mounted]);
-
-  const topRecoveryOpportunity = useMemo(() => {
-    if (!mounted || stocks.length === 0) return null;
-    return [...stocks]
-      .filter(s => s.change < 0 && getRecoveryScore(s) >= 25)
-      .sort((a, b) => getRecoveryScore(b) - getRecoveryScore(a))[0] ?? null;
-  }, [stocks, mounted]);
+  // Frontend does not pick homepage winners anymore.
+  // The backend/API owns Top Opportunity, Spot Momentum, and Before The Crowd decisions.
+  // Keep these names temporarily because existing UI still references them;
+  // they intentionally return null so local fallback logic cannot override the pipeline.
+  const topMomentumOpportunity = useMemo(() => null as Stock | null, []);
+  const topRecoveryOpportunity = useMemo(() => null as Stock | null, []);
 
   return (
     <main suppressHydrationWarning className="ht-simplified-ui min-h-screen overflow-hidden bg-[#050505] text-white">
@@ -10301,25 +10256,27 @@ export default function Home() {
                 // Safely resolve BTC target — always a full Stock object
                 const btcTargetRaw = resolvedTarget;
                 const btcTarget: Stock | null = btcTargetRaw && typeof btcTargetRaw.symbol === 'string' ? btcTargetRaw as Stock : null;
-                const btcEngine = btcTarget ? getBackgroundOpportunityEngine(btcTarget as Stock) : null;
+
+                // Hero truth source:
+                // If the verified opportunities API returned a pick, the hero story uses that API object.
+                // Local Stock helpers are fallback-only for visual compatibility and must not override the backend score/story.
+                const apiHero = apiMomentum && btcTarget?.symbol === apiMomentum.ticker ? apiMomentum : null;
+                const btcEngine = btcTarget && !apiHero ? getBackgroundOpportunityEngine(btcTarget as Stock) : null;
                 const btcNews = btcTarget ? newsIntel[btcTarget.symbol] : null;
-                const btcRvol = btcTarget ? getRelativeVolume(btcTarget as Stock) : 0;
-                const btcAttention = btcTarget ? getAttentionScore(btcTarget as Stock) : 0;
-                const btcScore = btcTarget ? getHTScore(btcTarget as Stock) : 0;
-                const btcTier = btcScore >= 80 ? "Strong Before The Crowd" : btcScore >= 65 ? "Developing Opportunity" : "Early Setup";
-                const btcStageScore = btcTarget ? getBackgroundOpportunityEngine(btcTarget as Stock).crowdSaturationScore : 0;
-                const btcStage = btcStageScore <= 35 ? "Early" : btcStageScore <= 60 ? "Developing" : btcStageScore <= 80 ? "Crowded" : "Exhausted";
-                // For API catalyst tickers, use API data directly for signal breakdown
-                const isApiCatalyst = btcTarget?.symbol === apiMomentum?.ticker && (apiMomentum?.catalystScore ?? 0) >= 20;
-                const btcDiscovery = isApiCatalyst
-                  ? Math.min(99, (apiMomentum?.momentumScore ?? 0) + 30)
-                  : btcEngine?.discoveryScore || 0;
-                const btcSaturation = isApiCatalyst
-                  ? (apiMomentum?.attentionScore ?? 50)
-                  : btcEngine?.crowdSaturationScore || 0;
-                const isBeforeCrowd = isApiCatalyst
-                  ? (apiMomentum?.isBeforeCrowd ?? false)
-                  : btcSaturation < 45 && btcDiscovery >= 60;
+                const btcRvol = Number(apiHero?.relativeVolume ?? (btcTarget ? getRelativeVolume(btcTarget as Stock) : 0));
+                const btcAttention = Number(apiHero?.attentionScore ?? (btcTarget ? getAttentionScore(btcTarget as Stock) : 0));
+                const btcScore = Number(apiHero?.opportunityScore ?? apiHero?.confidence ?? (btcTarget ? getHTScore(btcTarget as Stock) : 0));
+                const backendConfidence = Number(apiHero?.confidence ?? btcScore);
+                const backendRiskScore = Number(apiHero?.riskScore ?? 0);
+                const btcTier = apiHero?._convictionTier ?? apiHero?.stage ?? (btcScore >= 80 ? "Top Opportunity" : btcScore >= 65 ? "Developing Opportunity" : "Early Setup");
+                const btcStageScore = Number(apiHero?.attentionScore ?? (btcTarget ? getBackgroundOpportunityEngine(btcTarget as Stock).crowdSaturationScore : 0));
+                const btcStage = apiHero?.freshnessLabel === "Last Verified Signal"
+                  ? "Last Verified Signal"
+                  : btcStageScore <= 35 ? "Early" : btcStageScore <= 60 ? "Developing" : btcStageScore <= 80 ? "Crowded" : "Exhausted";
+                const isApiCatalyst = Boolean(apiHero && (apiHero.catalystScore ?? 0) >= 20);
+                const btcDiscovery = apiHero ? Math.min(99, (apiHero.momentumScore ?? 0) + 20) : btcEngine?.discoveryScore || 0;
+                const btcSaturation = Number(apiHero?.attentionScore ?? btcEngine?.crowdSaturationScore ?? 0);
+                const isBeforeCrowd = Boolean(apiHero?.isBeforeCrowd ?? (btcSaturation < 45 && btcDiscovery >= 60));
 
                 // Build signal evidence bullets
                 const signalEvidence = isApiCatalyst ? [
@@ -10369,7 +10326,7 @@ export default function Home() {
                           <div className="rounded-[1.65rem] border border-white/10 bg-black/40 p-8 text-center">
                             <div className="flex items-center justify-center gap-2 mb-4">
                               <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
-                              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-zinc-500">Spot Momentum</p>
+                              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-zinc-500">Top Opportunity</p>
                             </div>
                             <p className="text-2xl font-black text-white mb-1.5">No Signal Confirmed</p>
                             <p className="text-sm font-semibold text-zinc-500 max-w-md mx-auto">No stock currently clears the HT Labs momentum threshold. Monitoring continues.</p>
@@ -10401,42 +10358,40 @@ export default function Home() {
                         );
                       }
 
-                      const convTier = apiMomentum?._convictionTier ?? (isBeforeCrowd ? "Early Watch" : "Watchlist");
-                      const heroTicker = btcTarget?.symbol || "—";
-                      const heroChange = btcTarget?.change || 0;
-                      const heroPrice = btcTarget?.price || 0;
+                      const convTier = apiHero?._convictionTier ?? apiHero?.stage ?? (isBeforeCrowd ? "Early Watch" : "Watchlist");
+                      const heroTicker = btcTarget?.symbol || apiHero?.ticker || "—";
+                      const heroChange = Number(apiHero?.change ?? btcTarget?.change ?? 0);
+                      const heroPrice = Number(apiHero?.price ?? btcTarget?.price ?? 0);
 
-                      // Use single source of truth for HCE detection
-                      const hceCategory = btcTarget ? getHCECategory(btcTarget as Stock) : null;
-                      const isCatalystPlay = Boolean(hceCategory);
+                      const hceCategory = apiHero?.catalystTags?.[0] ?? (btcTarget ? getHCECategory(btcTarget as Stock) : null);
+                      const isCatalystPlay = Boolean((apiHero?.catalystScore ?? 0) >= 20 || hceCategory);
                       const isMomentumPlay = !isCatalystPlay && heroChange >= 3;
-                      const isRecoveryPlay = !isCatalystPlay && heroChange < -2;
 
-                      // Selection type label — tells user why HT Labs picked this
-                      const selectionLabel = hceCategory ?? (isMomentumPlay ? "Momentum Leader" : "Early Setup");
+                      const selectionLabel = apiHero?.freshnessLabel === "Last Verified Signal"
+                        ? "Last Trading Session"
+                        : isCatalystPlay
+                        ? (hceCategory ?? "Catalyst Watch")
+                        : isMomentumPlay
+                        ? "Momentum Leader"
+                        : (apiHero?.stage ?? "Verified Setup");
 
                       const retailBullish = Math.min(90, Math.max(10, 100 - btcSaturation));
                       const retailBearish = 100 - retailBullish;
-                      const riskLabel = isCatalystPlay ? "MEDIUM" : btcRvol >= 3 ? "HIGH" : "LOW";
-                      const confidenceLabel = btcScore >= 80 ? "HIGH" : btcScore >= 65 ? "MEDIUM" : "LOW";
-                      const positionLabel = btcSaturation < 40 ? "EARLY" : btcSaturation < 65 ? "BUILDING" : "LATE";
+                      const riskLabel = backendRiskScore >= 70 ? "HIGH" : backendRiskScore >= 45 ? "MEDIUM" : "LOW";
+                      const confidenceLabel = backendConfidence >= 80 ? "HIGH" : backendConfidence >= 65 ? "MEDIUM" : "LOW";
+                      const positionLabel = apiHero?.freshnessLabel === "Last Verified Signal"
+                        ? "VERIFIED"
+                        : btcSaturation < 40 ? "EARLY" : btcSaturation < 65 ? "BUILDING" : "LATE";
 
-                      // Momentum evidence bullets — specific to Spot Momentum, not BTC
                       const whyBullets = (() => {
+                        if (apiHero?.signals?.length) return apiHero.signals.slice(0, 4);
                         if (!btcTarget) return [];
                         const s = btcTarget as Stock;
                         const rvol = getRelativeVolume(s);
-                        const engine2 = getBackgroundOpportunityEngine(s);
-                        const sat = engine2.crowdSaturationScore;
                         const bullets: string[] = [];
                         if (rvol >= 2) bullets.push(`Volume running ${rvol.toFixed(1)}× above normal.`);
                         else if (rvol >= 1.3) bullets.push("Volume expanding above baseline.");
-                        if (sat < 40) bullets.push("Crowd participation still early.");
-                        else if (sat < 65) bullets.push("Crowd building — not yet crowded.");
                         if (s.change > 0) bullets.push("Bullish pressure outweighing selling.");
-                        else if (s.change < 0) bullets.push("Selling pressure may be exhausting.");
-                        if (engine2.accelerationLabel === "Accelerating Fast") bullets.push("Momentum accelerating above baseline.");
-                        else if (engine2.accelerationLabel === "Acceleration Building") bullets.push("Acceleration building in the right direction.");
                         if (btcScore >= 80) bullets.push("Setup above HT Labs high-conviction threshold.");
                         else if (btcScore >= 65) bullets.push("Setup clears HT Labs minimum threshold.");
                         return bullets.slice(0, 4);
@@ -10479,7 +10434,7 @@ export default function Home() {
                                   <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-black ${
                                     btcStage === "Early" ? "border-green-400/20 text-green-500" : "border-zinc-800 text-zinc-600"
                                   }`}>
-                                    {btcStage === "Early" ? "Pre-Crowd" : btcStage === "Developing" ? "Crowd Building" : btcStage === "Crowded" ? "Crowd Arrived" : "Late Stage"}
+                                    {btcStage === "Last Verified Signal" ? "Last Verified" : btcStage === "Early" ? "Pre-Crowd" : btcStage === "Developing" ? "Crowd Building" : btcStage === "Crowded" ? "Crowd Arrived" : "Late Stage"}
                                   </span>
                                   {isCatalystPlay && (
                                     <span className="rounded-full border border-orange-400/30 bg-orange-500/[0.07] px-2.5 py-0.5 text-[10px] font-black text-orange-300">
@@ -10496,11 +10451,12 @@ export default function Home() {
 
                               {/* 2. EMOTIONAL HOOK — one line, bare, confident */}
                               <p className="text-sm font-semibold text-zinc-400 leading-5">
-                                {isCatalystPlay
+                                {apiHero?.whyItMatters
+                                  ?? (isCatalystPlay
                                   ? `${hceCategory} identified — positioned before the event resolves.`
                                   : btcSaturation < 45
                                   ? "Momentum is building before widespread participation arrives."
-                                  : "Momentum is expanding as more traders take notice."}
+                                  : "Momentum is expanding as more traders take notice.")}
                               </p>
 
                               {/* 3. OPPORTUNITY WINDOW — the hero, big numbers, in your face */}
@@ -10579,17 +10535,17 @@ export default function Home() {
 
                               {/* HT Score */}
                               <div>
-                                <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700 mb-2">HT Score</p>
+                                <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700 mb-2">Opportunity Score</p>
                                 <div className="flex items-end gap-3">
                                   <p className={`font-mono text-[3rem] font-black leading-none ${
                                     btcScore >= 80 ? "text-green-400" : btcScore >= 65 ? "text-violet-400" : "text-orange-400"
                                   }`}>{btcScore}</p>
                                   <div className="pb-0.5">
                                     <p className="text-sm font-black text-white leading-tight">
-                                      {btcTarget ? getMomentumEnduranceLabel(evaluateMomentumEndurance(btcTarget as Stock), btcScore) : "—"}
+                                      {apiHero?.stage ?? (btcTarget ? getMomentumEnduranceLabel(evaluateMomentumEndurance(btcTarget as Stock), btcScore) : "—")}
                                     </p>
                                     <p className="text-[10px] font-semibold text-zinc-600 mt-0.5">
-                                      {btcScore >= 80 ? "Momentum continues to strengthen." : btcScore >= 65 ? "Buying pressure remains intact." : "Momentum is holding its structure."}
+                                      {apiHero?.whatChanged ?? (btcScore >= 80 ? "Momentum continues to strengthen." : btcScore >= 65 ? "Buying pressure remains intact." : "Momentum is holding its structure.")}
                                     </p>
                                   </div>
                                 </div>
@@ -10623,9 +10579,10 @@ export default function Home() {
                                   <p className="text-sm font-semibold text-zinc-300 leading-5">"{bullBearData.htRead}"</p>
                                 ) : (
                                   <p className="text-sm font-semibold text-zinc-400 leading-5">
-                                    {btcSaturation < 45
+                                    {apiHero?.whyItMatters
+                                      ?? (btcSaturation < 45
                                       ? `${heroTicker} is building before widespread participation. Volume ${btcRvol >= 1.3 ? "is above average" : "remains moderate"}.`
-                                      : `${heroTicker} is showing ${retailBullish >= 60 ? "bullish" : "mixed"} momentum with ${positionLabel.toLowerCase()} crowd positioning.`}
+                                      : `${heroTicker} is showing ${retailBullish >= 60 ? "bullish" : "mixed"} momentum with ${positionLabel.toLowerCase()} crowd positioning.`)}
                                   </p>
                                 )}
                                 <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/5 mt-3">
@@ -10711,7 +10668,7 @@ export default function Home() {
                               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 text-violet-400 text-sm shrink-0">🎯</span>
                               <div>
                                 <p className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500">Opportunity</p>
-                                <p className="text-sm font-black text-violet-400">{positionLabel === "EARLY" ? "Early" : positionLabel === "BUILDING" ? "Developing" : "Late"}</p>
+                                <p className="text-sm font-black text-violet-400">{positionLabel === "VERIFIED" ? "Verified" : positionLabel === "EARLY" ? "Early" : positionLabel === "BUILDING" ? "Developing" : "Late"}</p>
                               </div>
                             </div>
                           </div>
@@ -15239,31 +15196,39 @@ export default function Home() {
               // eligible candidate the desktop shows) so both surfaces always
               // show the same ticker, same score, same conviction tier.
               const mobileBtcTarget = resolvedBeforeCrowdTarget;
-              const mobileBtcEngine = mobileBtcTarget ? getBackgroundOpportunityEngine(mobileBtcTarget) : null;
-              const mobileBtcScore = mobileBtcTarget ? getHTScore(mobileBtcTarget) : 0;
+              const mobileApiHero = apiMomentum && mobileBtcTarget?.symbol === apiMomentum.ticker ? apiMomentum : null;
+              const mobileBtcEngine = mobileBtcTarget && !mobileApiHero ? getBackgroundOpportunityEngine(mobileBtcTarget) : null;
+              const mobileBtcScore = Number(mobileApiHero?.opportunityScore ?? mobileApiHero?.confidence ?? (mobileBtcTarget ? getHTScore(mobileBtcTarget) : 0));
               const mobileMomentumEndurance = mobileBtcTarget ? evaluateMomentumEndurance(mobileBtcTarget) : 75;
-              const mobileBtcTier = getMomentumEnduranceLabel(mobileMomentumEndurance, mobileBtcScore);
-              const mobileBtcEngine2 = mobileBtcTarget ? getBackgroundOpportunityEngine(mobileBtcTarget) : null;
-              const mobileBtcStageScore = mobileBtcEngine2?.crowdSaturationScore ?? 0;
-              const mobileBtcStageLabel = mobileBtcStageScore <= 35 ? "Early" : mobileBtcStageScore <= 60 ? "Developing" : mobileBtcStageScore <= 80 ? "Crowded" : "Exhausted";
-              const mobileSaturation = mobileBtcEngine?.crowdSaturationScore ?? 0;
-              const mobileRvol = mobileBtcTarget ? getRelativeVolume(mobileBtcTarget) : 0;
-              const mobileHceCategory = mobileBtcTarget ? getHCECategory(mobileBtcTarget) : null;
-              const mobileIsCatalyst = Boolean(mobileHceCategory);
-              const mobileSelectionLabel = mobileHceCategory ?? (mobileBtcTarget?.change ?? 0 >= 3 ? "Momentum Leader" : "Early Setup");
-              const mobileHeroTicker = mobileBtcTarget?.symbol ?? "";
-              const mobileHeroPrice = mobileBtcTarget?.price ?? 0;
-              const mobileHeroChange = mobileBtcTarget?.change ?? 0;
+              const mobileBtcTier = mobileApiHero?._convictionTier ?? mobileApiHero?.stage ?? getMomentumEnduranceLabel(mobileMomentumEndurance, mobileBtcScore);
+              const mobileBtcStageScore = Number(mobileApiHero?.attentionScore ?? mobileBtcEngine?.crowdSaturationScore ?? 0);
+              const mobileBtcStageLabel = mobileApiHero?.freshnessLabel === "Last Verified Signal"
+                ? "Last Verified Signal"
+                : mobileBtcStageScore <= 35 ? "Early" : mobileBtcStageScore <= 60 ? "Developing" : mobileBtcStageScore <= 80 ? "Crowded" : "Exhausted";
+              const mobileSaturation = mobileBtcStageScore;
+              const mobileRvol = Number(mobileApiHero?.relativeVolume ?? (mobileBtcTarget ? getRelativeVolume(mobileBtcTarget) : 0));
+              const mobileHceCategory = mobileApiHero?.catalystTags?.[0] ?? (mobileBtcTarget ? getHCECategory(mobileBtcTarget) : null);
+              const mobileIsCatalyst = Boolean((mobileApiHero?.catalystScore ?? 0) >= 20 || mobileHceCategory);
+              const mobileSelectionLabel = mobileApiHero?.freshnessLabel === "Last Verified Signal"
+                ? "Last Trading Session"
+                : mobileHceCategory ?? ((mobileBtcTarget?.change ?? 0) >= 3 ? "Momentum Leader" : mobileApiHero?.stage ?? "Verified Setup");
+              const mobileHeroTicker = mobileApiHero?.ticker ?? mobileBtcTarget?.symbol ?? "";
+              const mobileHeroPrice = Number(mobileApiHero?.price ?? mobileBtcTarget?.price ?? 0);
+              const mobileHeroChange = Number(mobileApiHero?.change ?? mobileBtcTarget?.change ?? 0);
               const mobileRetailBullish = Math.min(90, Math.max(10, 100 - mobileSaturation));
               const mobileRetailBearish = 100 - mobileRetailBullish;
-              const mobileRiskLabel = mobileIsCatalyst ? "MEDIUM" : mobileRvol >= 3 ? "HIGH" : "LOW";
-              const mobilePositionLabel = mobileSaturation < 40 ? "EARLY" : mobileSaturation < 65 ? "BUILDING" : "LATE";
-              const mobileWhyBullets = mobileBtcTarget
+              const mobileRiskScore = Number(mobileApiHero?.riskScore ?? 0);
+              const mobileRiskLabel = mobileRiskScore >= 70 ? "HIGH" : mobileRiskScore >= 45 ? "MEDIUM" : "LOW";
+              const mobilePositionLabel = mobileApiHero?.freshnessLabel === "Last Verified Signal"
+                ? "VERIFIED"
+                : mobileSaturation < 40 ? "EARLY" : mobileSaturation < 65 ? "BUILDING" : "LATE";
+              const mobileWhyBullets = mobileApiHero?.signals?.length
+                ? mobileApiHero.signals.slice(0, 4)
+                : mobileBtcTarget
                 ? getBeforeCrowdReason(mobileBtcTarget)
                 : [];
-              const mobileNearMiss = !mobileBtcTarget
-                ? [...stocks].sort((a, b) => getHTScore(b) - getHTScore(a)).slice(0, 3)
-                : [];
+              const mobileNearMiss: Stock[] = [];
+
 
 
               return (
@@ -15288,7 +15253,7 @@ export default function Home() {
                     <div className="mx-4 mt-4 mb-3 rounded-2xl border border-white/8 bg-black/60 p-6 flex-shrink-0">
                       <div className="flex items-center gap-2 mb-4">
                         <span className="h-1.5 w-1.5 rounded-full bg-zinc-700" />
-                        <p className="text-[9px] font-black uppercase tracking-[0.28em] text-zinc-600">Spot Momentum</p>
+                        <p className="text-[9px] font-black uppercase tracking-[0.28em] text-zinc-600">Top Opportunity</p>
                       </div>
                       <p className="text-2xl font-black text-white mb-1">No Signal Confirmed</p>
                       <p className="text-xs font-semibold text-zinc-600 leading-5 mb-4">Nothing clears the HT Labs qualification threshold right now. Monitoring continues.</p>
@@ -15314,7 +15279,7 @@ export default function Home() {
                       <div className="flex items-center justify-between px-5 pt-4 pb-3">
                         <div className="flex items-center gap-2">
                           <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
-                          <p className="text-[9px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
+                          <p className="text-[9px] font-black uppercase tracking-[0.28em] text-violet-400">Top Opportunity</p>
                         </div>
                         {isDualEngineConfirmation && (
                           <span className="text-[8px] font-black text-amber-400">⚡ Dual Signal</span>
@@ -15336,7 +15301,7 @@ export default function Home() {
                           <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-black text-zinc-400">{mobileBtcTier}</span>
                           <span className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black ${
                             mobileBtcStageLabel === "Early" ? "border-green-400/20 bg-green-500/[0.06] text-green-400" : "border-zinc-700 text-zinc-600"
-                          }`}>{mobileBtcStageLabel === "Early" ? "Pre-Crowd" : mobileBtcStageLabel === "Developing" ? "Crowd Building" : mobileBtcStageLabel === "Crowded" ? "Crowd Arrived" : "Late Stage"}</span>
+                          }`}>{mobileBtcStageLabel === "Last Verified Signal" ? "Last Verified" : mobileBtcStageLabel === "Early" ? "Pre-Crowd" : mobileBtcStageLabel === "Developing" ? "Crowd Building" : mobileBtcStageLabel === "Crowded" ? "Crowd Arrived" : "Late Stage"}</span>
                           {mobileIsCatalyst && (
                             <span className="rounded-full border border-orange-400/25 bg-orange-500/[0.06] px-2.5 py-0.5 text-[9px] font-black text-orange-300">⚡ {mobileHceCategory}</span>
                           )}
@@ -15346,11 +15311,12 @@ export default function Home() {
                       {/* 2. EMOTIONAL HOOK — one sentence, no box */}
                       <div className="px-5 py-4 border-b border-white/8">
                         <p className="text-sm font-bold text-zinc-200 leading-5">
-                          {mobileIsCatalyst
+                          {mobileApiHero?.whyItMatters
+                            ?? (mobileIsCatalyst
                             ? `${mobileHceCategory} identified — positioned before the event resolves.`
                             : mobileSaturation < 45
                             ? "Momentum is building before widespread participation arrives."
-                            : "Momentum is expanding as more traders take notice."}
+                            : "Momentum is expanding as more traders take notice.")}
                         </p>
                       </div>
 
