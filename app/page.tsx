@@ -783,6 +783,10 @@ export default function Home() {
   const [apiMomentum, setApiMomentum] = useState<APIOpportunity | null>(null);
   const [apiRecovery, setApiRecovery] = useState<APIOpportunity | null>(null);
   const [apiCatalyst, setApiCatalyst] = useState<APIOpportunity | null>(null);
+  // Before The Crowd — backend-ranked list (top 5), same architecture as SM.
+  // A list, not a single value, so we can pick the best BTC candidate that
+  // ISN'T the same ticker SM already claimed (Dual Engine Confirmation logic).
+  const [apiBeforeCrowdList, setApiBeforeCrowdList] = useState<APIOpportunity[]>([]);
 
   // Bull/Bear case state — generated when top conviction ticker changes
   type BullBearData = {
@@ -802,9 +806,10 @@ export default function Home() {
 
   const fetchAPIOpportunities = async () => {
     try {
-      const [topRes, catalystRes] = await Promise.all([
+      const [topRes, catalystRes, btcRes] = await Promise.all([
         fetch("/api/opportunities?limit=1"),
         fetch("/api/opportunities?type=catalyst&limit=3"),
+        fetch("/api/opportunities?type=before_crowd&limit=5"),
       ]);
 
       // The backend/API owns signal eligibility, ranking, and top selection.
@@ -835,11 +840,22 @@ export default function Home() {
       } else {
         setApiCatalyst(null);
       }
+
+      // Backend already ranks these by the before-the-crowd flavored score.
+      // We keep the top 5 so the frontend can pick the best one that isn't
+      // the same ticker SM claimed, without a second network round-trip.
+      if (btcRes.ok) {
+        const data = await btcRes.json();
+        setApiBeforeCrowdList(data.opportunities ?? []);
+      } else {
+        setApiBeforeCrowdList([]);
+      }
     } catch (e) {
       console.warn("API opportunities fetch failed:", e);
       setApiMomentum(null);
       setApiRecovery(null);
       setApiCatalyst(null);
+      setApiBeforeCrowdList([]);
     }
   };
 
@@ -6493,6 +6509,38 @@ export default function Home() {
     };
   }, [apiMomentum]);
 
+  // Same conversion for Before The Crowd — the backend has already ranked
+  // these by the before-the-crowd flavored opportunity score (earliness
+  // weighted heavier). We pick the best one that ISN'T the same ticker SM
+  // already claimed, so the two cards answer different questions whenever
+  // the market offers more than one real candidate. If the market only
+  // offers one genuine opportunity today, both cards showing it together
+  // IS the Dual Engine Confirmation — that's the honest signal, not a bug.
+  const apiBeforeCrowdPick = useMemo<APIOpportunity | null>(() => {
+    if (!apiBeforeCrowdList.length) return null;
+    const smTicker = apiMomentum?.ticker;
+    const distinct = apiBeforeCrowdList.find(o => o.ticker !== smTicker);
+    return distinct ?? apiBeforeCrowdList[0] ?? null;
+  }, [apiBeforeCrowdList, apiMomentum]);
+
+  const apiBeforeCrowdAsStock = useMemo<Stock | null>(() => {
+    if (!apiBeforeCrowdPick) return null;
+    return {
+      symbol: apiBeforeCrowdPick.ticker,
+      price: Number(apiBeforeCrowdPick.price || 0),
+      change: Number(apiBeforeCrowdPick.change || 0),
+      relativeVolume: Number(apiBeforeCrowdPick.relativeVolume || 0),
+      catalystScore: Number(apiBeforeCrowdPick.catalystScore || 0),
+      htSignalScore: Number(apiBeforeCrowdPick.confidence || apiBeforeCrowdPick.opportunityScore || 0),
+      momentumScore: Number(apiBeforeCrowdPick.momentumScore || 0),
+      crowdScore: Number(apiBeforeCrowdPick.attentionScore || 0),
+      trapScore: Number(apiBeforeCrowdPick.riskScore || 0),
+      signalState: apiBeforeCrowdPick.stage,
+      signalPattern: apiBeforeCrowdPick.signals?.[2] ?? apiBeforeCrowdPick.stage,
+      changePercent: Number(apiBeforeCrowdPick.change || 0),
+    };
+  }, [apiBeforeCrowdPick]);
+
   // Memo: reads refs, never writes them. Returns which stock to display.
   const resolvedBeforeCrowdTarget: Stock | null = useMemo(() => {
     // The API opportunity is the homepage truth source.
@@ -6565,8 +6613,11 @@ export default function Home() {
     }
   }, [stocks]);
 
-  // Before The Crowd — thesis endurance selection result
+  // Before The Crowd — backend-ranked first (same architecture as SM now),
+  // client-side selectBeforeTheCrowd as fallback when the API has nothing.
   const resolvedBeforeTheCrowdTarget: Stock | null = useMemo(() => {
+    if (apiBeforeCrowdAsStock) return apiBeforeCrowdAsStock;
+
     const btcWinner = selectBeforeTheCrowd(stocks);
 
     // If BTC picks the same stock as SM, that IS the Dual Engine Confirmation.
@@ -6584,7 +6635,7 @@ export default function Home() {
     }
 
     return btcWinner;
-  }, [stocks, resolvedBeforeCrowdTarget]);
+  }, [stocks, resolvedBeforeCrowdTarget, apiBeforeCrowdAsStock]);
 
   const beforeTheCrowdConviction: number = useMemo(() => {
     return resolvedBeforeTheCrowdTarget

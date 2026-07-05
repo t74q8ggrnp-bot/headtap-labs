@@ -137,7 +137,8 @@ function computeSignal(
   relativeVolume: number,
   catalystScore: number,
   catalystState: string,
-  pool: "spot_momentum" | "before_the_crowd"
+  pool: "spot_momentum" | "before_the_crowd",
+  avgVolume: number = 0
 ): any {
   // Production scanner receives positive movers only.
   // Still protect this function so direct future calls cannot reward downside as momentum.
@@ -224,6 +225,7 @@ function computeSignal(
     price,
     change_percent: Number(changePercent.toFixed(4)),
     relative_volume: Number(relativeVolume.toFixed(4)),
+    avg_volume: Math.round(avgVolume),
     ht_score: htScore,
     momentum_score: momentumScore,
     crowd_score: crowdScore,
@@ -331,9 +333,9 @@ export async function GET(req: Request) {
       if (changePercent <= 0) continue;
 
       if (rvol >= 2 && changePercent >= 1) {
-        smPool.push({ ticker, price, changePercent, rvol });
+        smPool.push({ ticker, price, changePercent, rvol, prevVol });
       } else if (rvol >= 1.3 && changePercent >= 0.5) {
-        btcPool.push({ ticker, price, changePercent, rvol });
+        btcPool.push({ ticker, price, changePercent, rvol, prevVol });
       }
     }
 
@@ -361,7 +363,8 @@ export async function GET(req: Request) {
         t.rvol,
         cat?.score ?? 0,
         cat?.state ?? "",
-        "spot_momentum"
+        "spot_momentum",
+        t.prevVol
       ));
     }
 
@@ -374,7 +377,8 @@ export async function GET(req: Request) {
         t.rvol,
         cat?.score ?? 0,
         cat?.state ?? "",
-        "before_the_crowd"
+        "before_the_crowd",
+        t.prevVol
       ));
     }
 
