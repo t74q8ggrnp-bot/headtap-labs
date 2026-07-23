@@ -81,10 +81,15 @@ function Value({
   large?: boolean;
 }) {
   return (
-    <div className={large ? "px-4 py-4" : ""}>
-      <p className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-600 mb-2">{label}</p>
-      <p className={`font-mono font-black leading-none ${tone} ${large ? "text-[2.4rem]" : "text-lg"}`}>{value}</p>
-      {detail && <p className={`font-mono text-xs font-black mt-1.5 ${tone} opacity-40`}>{detail}</p>}
+    <div className={`min-w-0 ${large ? "px-3 py-4" : ""}`}>
+      <p className="text-[8px] font-black uppercase tracking-[0.14em] text-zinc-600 mb-2 truncate">{label}</p>
+      <p
+        className={`font-mono font-black leading-none truncate ${tone} ${large ? "text-2xl sm:text-[2rem]" : "text-lg"}`}
+        title={value}
+      >
+        {value}
+      </p>
+      {detail && <p className={`font-mono text-xs font-black mt-1.5 truncate ${tone} opacity-40`} title={detail}>{detail}</p>}
     </div>
   );
 }
