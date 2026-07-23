@@ -6,7 +6,7 @@ export default function OpportunityBottomStats({ opportunity }: { opportunity: O
     { icon: "🔥", label: "Market Mood", value: opportunity.change >= 0 ? "Risk On" : "Risk Off", tone: "text-white" },
     { icon: "👥", label: "Retail Attention", value: view.saturation < 40 ? "Rising" : view.saturation < 65 ? "Building" : "Peaked", tone: "text-white" },
     { icon: "📊", label: "Volume", value: `${opportunity.relativeVolume.toFixed(1)}x avg`, tone: "text-white" },
-    { icon: "🎯", label: "Opportunity", value: view.positionLabel === "VERIFIED" ? "Verified" : view.positionLabel === "EARLY" ? "Early" : view.positionLabel === "BUILDING" ? "Developing" : "Late", tone: "text-violet-400" },
+    { icon: opportunity.riskTags[0] ? "⚠" : "🎯", label: "Risk Profile", value: opportunity.riskTags[0] ?? "Standard", tone: opportunity.riskTags[0] ? "text-red-300" : "text-white" },
   ];
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-white/8 border-t border-white/8">
