@@ -27,8 +27,7 @@ export default function OpportunityScorePanel({
             {score}
           </p>
           <div className="pb-0.5">
-            <p className="text-sm font-black text-white leading-tight">{opportunity.stage}</p>
-            <p className="text-[10px] font-semibold text-zinc-600 mt-0.5">{opportunity.whatChanged}</p>
+            <p className="text-sm font-black text-white leading-tight">{opportunity.whatChanged}</p>
           </div>
         </div>
       </div>

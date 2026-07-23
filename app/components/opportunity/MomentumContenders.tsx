@@ -28,7 +28,7 @@ export default function MomentumContenders({ candidates, onSelect }: MomentumCon
                 <div className="flex flex-col gap-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm font-black text-white truncate">{opportunity.ticker}</span>
-                    <span className={`font-mono text-[10px] font-black shrink-0 ${opportunity.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    <span className={`font-mono text-[10px] font-black shrink-0 ${opportunity.change >= 0 ? "text-orange-400" : "text-red-400"}`}>
                       {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(1)}%
                     </span>
                   </div>
@@ -40,8 +40,8 @@ export default function MomentumContenders({ candidates, onSelect }: MomentumCon
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-mono text-lg font-black text-violet-400">{Math.round(opportunity.opportunityScore)}</p>
-                <p className="text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">{opportunity.tier}</p>
+                <p className="font-mono text-lg font-black text-white">{Math.round(opportunity.opportunityScore)}</p>
+                <p className="text-[7px] font-black uppercase tracking-[0.14em] text-orange-400">HT Score</p>
               </div>
             </button>
           ))}

@@ -37,14 +37,14 @@ export default function OpportunityRead({
             : "text-zinc-500",
     },
     {
-      label: "Crowd",
-      value: view.crowdLabel,
+      label: "Confidence",
+      value: view.confidenceLabel,
       color:
-        view.crowdLabel === "Early"
-          ? "text-green-400"
-          : view.crowdLabel === "Building"
-            ? "text-violet-400"
-            : "text-red-400",
+        view.confidenceLabel === "HIGH"
+          ? "text-violet-400"
+          : view.confidenceLabel === "MEDIUM"
+            ? "text-orange-400"
+            : "text-zinc-500",
     },
   ];
 
