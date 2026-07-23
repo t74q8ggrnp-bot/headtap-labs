@@ -4049,30 +4049,11 @@ function HomeInner() {
     lastSignalMemoryKey.current = memoryKey;
 
     try {
-      const since = new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString();
-      const { data: recentExisting, error: lookupError } = await supabase
-        .from("ht_signal_memory")
-        .select("id")
-        .eq("user_id", payload.user_id)
-        .eq("symbol", payload.symbol)
-        .gte("picked_at", since)
-        .limit(1);
-
-      if (lookupError) {
-        console.error("SIGNAL MEMORY LOOKUP ERROR:", lookupError);
-        return;
-      }
-
-      if (recentExisting && recentExisting.length > 0) {
-        return;
-      }
-
-      const { error } = await supabase.from("ht_signal_memory").insert(payload);
-
-      if (error) {
-        console.error("SIGNAL MEMORY INSERT ERROR:", error);
-        return;
-      }
+      await fetch("/api/signal-memory-writer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
     } catch (error) {
       console.error("SIGNAL MEMORY SAVE ERROR:", error);
     }

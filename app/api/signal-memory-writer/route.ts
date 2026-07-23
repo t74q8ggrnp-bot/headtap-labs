@@ -1,132 +1,86 @@
 // app/api/signal-memory-writer/route.ts
+//
+// Per-user "save this conviction to memory" writer. Previously this route
+// wrote a different, never-called shape (system-level catalyst batches) while
+// app/page.tsx wrote directly to ht_signal_memory via the Supabase client —
+// two implementations of the same table, only one of them actually live.
+// This route now owns the real, live shape; page.tsx only builds the payload
+// (still using its local scoring engine) and posts it here instead of
+// touching the database directly.
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-interface CatalystSignalInput {
-  ticker: string;
-  price: number;
-  changePercent: number;
-  relativeVolume: number;
-  htScore: number;
-  catalystScore: number;
-  momentumScore: number;
-  crowdScore: number;
-  trapScore: number;
+type SignalMemoryPayload = {
+  user_id: string;
+  symbol: string;
+  picked_at: string;
+  entry_price: number;
+  change_percent: number;
+  ht_score: number;
+  final_score: number;
+  discovery_score: number;
+  acceleration_score: number;
+  fingerprint_score: number;
+  crowd_saturation_score: number;
+  opportunity_window: string;
+  opportunity_window_open: boolean;
   pattern: string;
-  state: string;
-  hasFDAEvent: boolean;
-  hasInsiderBuy: boolean;
-  catalystKeywords: string[];
-}
+  contender_status: string;
+  quality_gate: string;
+  trap_risk: number;
+  entry_quality: number;
+  participation: number;
+  continuation: number;
+  consumer_label: string;
+  discovery_read: string;
+  internal_reason: string;
+  status: string;
+};
 
-function buildMemoryPayload(signal: CatalystSignalInput) {
-  const now = new Date().toISOString();
-  const opportunityWindow = signal.hasFDAEvent || signal.hasInsiderBuy || signal.catalystScore >= 30 ? "Early Window" : "Developing";
-  const patternName = signal.pattern.includes("Catalyst") ? "Quiet Accumulation" : signal.pattern.includes("Momentum") ? "Continuation Stack" : "Quiet Accumulation";
-  const discoveryScore = Math.min(99, Math.round(signal.catalystScore * 1.5 + (100 - signal.crowdScore) * 0.3 + Math.min(20, signal.relativeVolume * 4)));
-  const accelerationScore = Math.min(99, Math.round(signal.momentumScore * 0.8 + signal.catalystScore * 0.4));
-
-  return {
-    user_id: "ht_system",
-    symbol: signal.ticker,
-    picked_at: now,
-    entry_price: signal.price,
-    change_percent: signal.changePercent,
-    ht_score: signal.htScore,
-    final_score: signal.htScore + signal.catalystScore,
-    discovery_score: discoveryScore,
-    acceleration_score: accelerationScore,
-    fingerprint_score: signal.catalystScore,
-    crowd_saturation_score: signal.crowdScore,
-    opportunity_window: opportunityWindow,
-    opportunity_window_open: true,
-    pattern: patternName,
-    contender_status: signal.catalystScore >= 24 ? "Top Contender" : "Contender",
-    quality_gate: signal.hasFDAEvent || signal.hasInsiderBuy ? "Pass" : "Watch",
-    trap_risk: signal.trapScore,
-    entry_quality: Math.min(99, Math.round((100 - signal.trapScore) * 0.7 + signal.catalystScore * 0.5)),
-    participation: Math.min(99, Math.round(signal.relativeVolume * 15)),
-    continuation: Math.min(99, Math.round(signal.catalystScore * 1.2)),
-    consumer_label: "Top Conviction",
-    discovery_read: signal.hasFDAEvent
-      ? `FDA catalyst event detected for ${signal.ticker} — binary outcome could drive significant move. Catalyst score: ${signal.catalystScore}.`
-      : signal.hasInsiderBuy
-      ? `Insider buy detected for ${signal.ticker} via Form 4 filing. Catalyst score: ${signal.catalystScore}.`
-      : `Catalyst signal detected for ${signal.ticker}: ${signal.catalystKeywords.join(", ")}. Score: ${signal.catalystScore}.`,
-    internal_reason: [
-      signal.hasFDAEvent ? "FDA_EVENT" : null,
-      signal.hasInsiderBuy ? "INSIDER_BUY" : null,
-      signal.catalystKeywords.length > 0 ? `KEYWORDS:${signal.catalystKeywords.slice(0, 3).join(",")}` : null,
-      `CATALYST_SCORE:${signal.catalystScore}`,
-      `STATE:${signal.state}`,
-    ].filter(Boolean).join("|"),
-    status: "tracking",
-    outcome_status: null,
-    max_gain: null,
-    max_drawdown: null,
-    price_1d: null,
-    price_3d: null,
-    price_5d: null,
-  };
-}
+const DEDUP_WINDOW_MS = 1000 * 60 * 60 * 4;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const signals: CatalystSignalInput[] = body.signals ?? [];
-    if (!signals.length) return NextResponse.json({ written: 0, message: "No signals provided" });
-
-    const catalystSignals = signals.filter(s => s.catalystScore >= 20);
-    if (!catalystSignals.length) return NextResponse.json({ written: 0, message: "No catalyst signals to write" });
-
-    const results = { written: 0, skipped: 0, errors: 0, tickers: [] as string[] };
-
-    for (const signal of catalystSignals) {
-      try {
-        const since = new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString();
-        const { data: existing } = await getSupabase()
-          .from("ht_signal_memory")
-          .select("id")
-          .eq("symbol", signal.ticker)
-          .eq("user_id", "ht_system")
-          .gte("picked_at", since)
-          .limit(1);
-
-        if (existing && existing.length > 0) {
-          results.skipped++;
-          continue;
-        }
-
-        const { error } = await getSupabase()
-          .from("ht_signal_memory")
-          .insert(buildMemoryPayload(signal));
-
-        if (error) {
-          console.error(`[Signal Memory] INSERT ERROR for ${signal.ticker}:`, error.message);
-          results.errors++;
-        } else {
-          results.written++;
-          results.tickers.push(signal.ticker);
-        }
-      } catch (err) {
-        console.error(`[Signal Memory] ERROR for ${signal.ticker}:`, err);
-        results.errors++;
-      }
+    const payload = (await req.json()) as Partial<SignalMemoryPayload>;
+    if (!payload.user_id || !payload.symbol) {
+      return NextResponse.json({ error: "Missing user_id or symbol" }, { status: 400 });
     }
 
-    return NextResponse.json({
-      ...results,
-      message: `Signal memory: ${results.written} written, ${results.skipped} skipped, ${results.errors} errors`,
-      timestamp: new Date().toISOString(),
-    });
+    const supabase = getSupabase();
+    const since = new Date(Date.now() - DEDUP_WINDOW_MS).toISOString();
+
+    const { data: recentExisting, error: lookupError } = await supabase
+      .from("ht_signal_memory")
+      .select("id")
+      .eq("user_id", payload.user_id)
+      .eq("symbol", payload.symbol)
+      .gte("picked_at", since)
+      .limit(1);
+
+    if (lookupError) {
+      console.error("[signal-memory-writer] lookup error:", lookupError.message);
+      return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
+    }
+
+    if (recentExisting && recentExisting.length > 0) {
+      return NextResponse.json({ written: false, skipped: true, reason: "Recent entry already exists" });
+    }
+
+    const { error: insertError } = await supabase.from("ht_signal_memory").insert(payload);
+    if (insertError) {
+      console.error("[signal-memory-writer] insert error:", insertError.message);
+      return NextResponse.json({ error: "Insert failed" }, { status: 500 });
+    }
+
+    return NextResponse.json({ written: true, skipped: false });
   } catch (err) {
-    console.error("[Signal Memory Writer] Route error:", err);
+    console.error("[signal-memory-writer] route error:", err);
     return NextResponse.json({ error: "Signal memory writer failed" }, { status: 500 });
   }
 }
