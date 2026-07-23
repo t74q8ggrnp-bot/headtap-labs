@@ -486,6 +486,7 @@ function HomeInner() {
     spotMomentumRunnersUp: apiMomentumRunnersUp,
     catalyst: apiCatalyst,
     beforeCrowd: apiBeforeCrowdList,
+    fullRankedList: apiFullRankedList,
     loading: apiOpportunitiesLoading,
     refresh: fetchAPIOpportunities,
   } = useOpportunityFeed();
@@ -776,21 +777,24 @@ function HomeInner() {
     return "Mixed";
   }, [bearishCount, bullishCount, stocks.length]);
 
-  const filteredStocks = useMemo(() => {
+  // Scanner feed — reads the same canonical ranked list as everything else
+  // (apiFullRankedList, merged momentum + before-crowd from /api/opportunities).
+  // No local re-scoring, no separate raw-board universe.
+  const filteredOpportunities = useMemo(() => {
     if (scannerFilter === "hot") {
-      return stocks.filter((stock) => Math.abs(stock.change) > 4);
+      return apiFullRankedList.filter((opportunity) => Math.abs(opportunity.change) > 4);
     }
 
     if (scannerFilter === "bullish") {
-      return stocks.filter((stock) => stock.change >= 0);
+      return apiFullRankedList.filter((opportunity) => opportunity.change >= 0);
     }
 
     if (scannerFilter === "watchlist") {
-      return stocks.filter((stock) => watchlist.includes(stock.symbol));
+      return apiFullRankedList.filter((opportunity) => watchlist.includes(opportunity.ticker));
     }
 
-    return stocks;
-  }, [scannerFilter, stocks, watchlist]);
+    return apiFullRankedList;
+  }, [scannerFilter, apiFullRankedList, watchlist]);
 
   const topGainers = useMemo(
     () =>
@@ -854,17 +858,6 @@ function HomeInner() {
     // Priority 3: Estimate from price change (last resort — no Polygon data available)
     const move = Math.abs(stock.change);
     return Number(Math.max(0.8, 1 + move / 3).toFixed(1));
-  };
-
-  const getGapSignal = (stock: Stock) => {
-    const change = stock.change;
-
-    if (change >= 10) return "Major Gap Up";
-    if (change >= 4) return "Gap Up";
-    if (change <= -6) return "Gap Down";
-    if (change < 0) return "Soft Open";
-
-    return "Flat / Building";
   };
 
   const getVolumeAcceleration = (stock: Stock) => {
@@ -941,18 +934,6 @@ function HomeInner() {
     return Math.min(99, Math.max(40, quality));
   };
 
-  const getSignalGrade = (stock: Stock) => {
-    const quality = getSignalQuality(stock);
-
-    if (quality >= 90) return "Elite";
-    if (quality >= 82) return "Strong";
-    if (quality >= 72) return "Tradable";
-    if (quality >= 62) return "Developing";
-
-    return "Weak";
-  };
-
-
   const getConfidence = (stock: Stock) => {
     const base = getMomentumScore(stock);
     const momentumBonus = stock.change >= 0 ? 3 : -4;
@@ -979,15 +960,6 @@ function HomeInner() {
     return Math.min(99, Math.max(35, score));
   };
 
-  const getMomentumConfidence = (score: number) => {
-    if (score >= 90) return "EXTREME";
-    if (score >= 82) return "HIGH";
-    if (score >= 72) return "ELEVATED";
-    if (score >= 60) return "MODERATE";
-
-    return "LOW";
-  };
-
   const getRiskProfile = (stock: Stock) => {
     const move = Math.abs(stock.change);
 
@@ -997,16 +969,6 @@ function HomeInner() {
     if (stock.change < 0) return "DEFENSIVE";
 
     return "CONTROLLED";
-  };
-
-  const getCrowdStrength = (stock: Stock) => {
-    const move = Math.abs(stock.change);
-
-    if (stock.symbol === "SNAL" || move >= 15) return "PARABOLIC";
-    if (stock.symbol === "QUBT" || move >= 8) return "ACCELERATING";
-    if (move >= 4) return "ACTIVE";
-
-    return "EARLY";
   };
 
   const getSetupGrade = (score: number) => {
@@ -6034,21 +5996,6 @@ function HomeInner() {
     return "Add 3-5 tickers to start building a personalized HT Labs workflow.";
   }, [watchlistPriority, recentlyViewedStocks, priorityTarget, news, savedSetups, traderMode]);
 
-  const getTradePlan = (stock: Stock) => {
-    if (stock.change >= 8) {
-      return "Attention Spike is hot. Wait for pullback/reclaim instead of chasing the biggest candle.";
-    }
-
-    if (stock.change >= 2) {
-      return "Attention pressure is forming. Participation quality must expand before the move earns conviction.";
-    }
-
-    if (stock.change < 0) {
-      return "Defensive tape. Needs reclaim confirmation before treating it as a long setup.";
-    }
-
-    return "Pre-signal watch. HT needs attention, participation, or catalyst pressure before calling it early.";
-  };
 
   const fetchNews = async (symbol: string) => {
     if (news[symbol] || newsIntel[symbol]) return;
@@ -6134,45 +6081,6 @@ function HomeInner() {
 
   const getTopNews = (symbol: string) => {
     return getNewsArticles(symbol)?.[0];
-  };
-
-  const getWhyMoving = (stock: Stock) => {
-    const move = Math.abs(stock.change);
-    const topNews = getNewsArticles(stock.symbol)[0];
-
-    if (topNews?.headline) {
-      return `Recent catalyst detected: ${topNews.headline}`;
-    }
-
-    if (stock.symbol === "SNAL") {
-      return "Retail attention and extreme volatility are driving the tape. Watch for volume fade risk after parabolic moves.";
-    }
-
-    if (stock.symbol === "QUBT") {
-      return "Speculative quantum/AI narrative is attracting momentum traders. Best setups usually come after reclaim or higher-low confirmation.";
-    }
-
-    if (stock.symbol === "NVDA") {
-      return "Large-cap AI leadership is supporting broader tech strength and institutional attention.";
-    }
-
-    if (stock.symbol === "MSTR") {
-      return "Crypto-beta momentum is feeding into trader attention. Moves can expand quickly when risk appetite is strong.";
-    }
-
-    if (move >= 8) {
-      return "Unusual percentage move detected. Trader attention is elevated, but chase risk is high.";
-    }
-
-    if (move >= 4) {
-      return "Attention pressure is above scanner threshold. Watch whether participation quality keeps expanding.";
-    }
-
-    if (stock.change < 0) {
-      return "Weak tape today. Needs reclaim confirmation before treating it as a long setup.";
-    }
-
-    return "No true pressure shift yet. Keep it on watch until crowd behavior starts changing.";
   };
 
   const liveHeroTarget = convictionEngineTarget || priorityTarget || topStock;
@@ -11969,16 +11877,16 @@ function HomeInner() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredStocks.map((stock, index) => {
-              const isBullish = stock.change >= 0;
-              const isHot = Math.abs(stock.change) > 4;
-              const score = getHTScore(stock);
-              const confidence = getConfidence(stock);
-              const riskLabel = getRiskLabel(stock);
+            {filteredOpportunities.map((opportunity, index) => {
+              const isBullish = opportunity.change >= 0;
+              const isHot = Math.abs(opportunity.change) > 4;
+              const score = Math.round(opportunity.opportunityScore);
+              const view = getOpportunityPresentation(opportunity);
+              const attention = Math.round(opportunity.attentionScore);
 
               return (
                 <motion.div
-                  key={stock.symbol}
+                  key={opportunity.ticker}
                   initial={{ opacity: 0, y: 25 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.45, delay: index * 0.05 }}
@@ -11999,15 +11907,15 @@ function HomeInner() {
                           Attention Spike
                         </p>
 
-                        <h2 className="text-3xl font-black">{stock.symbol}</h2>
+                        <h2 className="text-3xl font-black">{opportunity.ticker}</h2>
                       </div>
                     </div>
 
                     <button
-                      onClick={() => toggleWatchlist(stock.symbol)}
+                      onClick={() => toggleWatchlist(opportunity.ticker)}
                       className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm transition hover:bg-orange-500/10"
                     >
-                      {watchlist.includes(stock.symbol) ? "⭐" : "☆"}
+                      {watchlist.includes(opportunity.ticker) ? "⭐" : "☆"}
                     </button>
                   </div>
 
@@ -12029,7 +11937,7 @@ function HomeInner() {
                     )}
 
                     <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-zinc-400">
-                      {riskLabel}
+                      {view.riskLabel} RISK
                     </div>
 
                     <div className="rounded-full border border-orange-500/20 bg-orange-500/10 px-3 py-1 text-xs font-black text-orange-300">
@@ -12041,7 +11949,7 @@ function HomeInner() {
                     <p className="text-sm text-zinc-500">Current Price</p>
 
                     <h3 className="mt-1 text-4xl font-black">
-                      ${Number(stock.price || 0).toFixed(2)}
+                      ${Number(opportunity.price || 0).toFixed(2)}
                     </h3>
 
                     <p
@@ -12050,32 +11958,32 @@ function HomeInner() {
                       }`}
                     >
                       {isBullish ? "+" : ""}
-                      {Number(stock.change || 0).toFixed(2)}%
+                      {Number(opportunity.change || 0).toFixed(2)}%
                     </p>
                   </div>
 
                   <div className="mt-5 rounded-2xl border border-white/10 bg-black/35 p-4">
                     <div className="flex items-center justify-start">
                       <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-500">
-                        Crowd Pressure
+                        Attention Score
                       </p>
                       <p className="text-sm font-black text-orange-300">
-                        {confidence}%
+                        {attention}%
                       </p>
                     </div>
                     <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-orange-700 to-orange-400"
-                        style={{ width: `${confidence}%` }}
+                        style={{ width: `${attention}%` }}
                       />
                     </div>
                   </div>
 
                   <div className="mt-5 rounded-2xl border border-white/10 bg-gradient-to-r from-orange-500/5 to-orange-900/5 p-3">
                     <MiniStockChart
-                      symbol={stock.symbol}
-                      price={stock.price}
-                      change={stock.change}
+                      symbol={opportunity.ticker}
+                      price={opportunity.price}
+                      change={opportunity.change}
                     />
                   </div>
 
@@ -12085,35 +11993,26 @@ function HomeInner() {
                         Signal Strength
                       </p>
                       <p className="text-xs font-black text-green-300">
-                        {getSignalGrade(stock)}
+                        {(opportunity.tier ?? "scanner").toUpperCase()}
                       </p>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="mt-4 grid grid-cols-2 gap-2">
                       <div className="rounded-xl border border-white/10 bg-black/30 p-3">
                         <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
                           RVOL
                         </p>
-                        <p className="mt-1 text-sm font-black text-white">
-                          {getRelativeVolume(stock)}x
+                        <p className="mt-1 text-lg font-black text-white">
+                          {opportunity.relativeVolume.toFixed(1)}x
                         </p>
                       </div>
 
                       <div className="rounded-xl border border-white/10 bg-black/30 p-3">
                         <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                          Gap
+                          Breakout
                         </p>
-                        <p className="mt-1 text-sm font-black text-white">
-                          {getGapSignal(stock)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-white/10 bg-black/30 p-3">
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                          Flow
-                        </p>
-                        <p className="mt-1 text-sm font-black text-white">
-                          {getVolumeAcceleration(stock)}
+                        <p className="mt-1 text-lg font-black text-white">
+                          {opportunity.breakoutPotentialLabel}
                         </p>
                       </div>
                     </div>
@@ -12124,11 +12023,11 @@ function HomeInner() {
                       Why It&apos;s Moving
                     </p>
                     <p className="mt-2 text-sm leading-6 text-zinc-300">
-                      {getWhyMoving(stock)}
+                      {opportunity.whyItMatters}
                     </p>
                   </div>
 
-                  {getTopNews(stock.symbol) && (
+                  {getTopNews(opportunity.ticker) && (
                     <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
                       <div className="mb-2 flex items-center justify-start gap-3">
                         <p className="text-xs uppercase tracking-[0.2em] text-orange-400">
@@ -12140,17 +12039,17 @@ function HomeInner() {
                       </div>
 
                       <h4 className="text-sm font-black leading-5 text-white">
-                        {getTopNews(stock.symbol)?.headline}
+                        {getTopNews(opportunity.ticker)?.headline}
                       </h4>
 
-                      {getTopNews(stock.symbol)?.summary && (
+                      {getTopNews(opportunity.ticker)?.summary && (
                         <p className="mt-2 line-clamp-3 text-sm leading-6 text-zinc-400">
-                          {getTopNews(stock.symbol)?.summary}
+                          {getTopNews(opportunity.ticker)?.summary}
                         </p>
                       )}
 
                       <p className="mt-2 text-xs text-zinc-600">
-                        {getTopNews(stock.symbol)?.source || "Market news"}
+                        {getTopNews(opportunity.ticker)?.source || "Market news"}
                       </p>
                     </div>
                   )}
@@ -12162,70 +12061,75 @@ function HomeInner() {
                       </p>
 
                       <div className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-black text-green-300">
-                        {getSetupGrade(getSetupScore(stock))} · {getSetupScore(stock)}/99
+                        {(opportunity.tier ?? "scanner").toUpperCase()} · {Math.round(opportunity.qualityScore)}/99
                       </div>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="mt-4 grid grid-cols-2 gap-2">
                       <div className="rounded-xl border border-white/10 bg-black/25 p-3">
                         <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                          Crowd
+                          Price Action
                         </p>
-                        <p className="mt-1 text-xs font-black text-white">
-                          {getCrowdStrength(stock)}
+                        <p className="mt-1 text-sm font-black text-white">
+                          {view.priceActionLabel}
                         </p>
                       </div>
 
                       <div className="rounded-xl border border-white/10 bg-black/25 p-3">
                         <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                          Risk
+                          Momentum
                         </p>
-                        <p className="mt-1 text-xs font-black text-white">
-                          {getRiskProfile(stock)}
+                        <p className="mt-1 text-sm font-black text-white">
+                          {view.momentumLabel}
                         </p>
                       </div>
+                    </div>
 
-                      <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-                        <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                          Bias
-                        </p>
-                        <p className="mt-1 text-xs font-black text-white">
-                          {getMomentumConfidence(getSetupScore(stock))}
-                        </p>
-                      </div>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {opportunity.riskTags.length > 0 ? (
+                        opportunity.riskTags.map((tag) => (
+                          <span key={tag} className="rounded-full border border-red-400/25 bg-red-500/[0.06] px-2.5 py-1 text-[10px] font-black text-red-300">
+                            ⚠ {tag}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-black text-zinc-400">
+                          Standard Setup
+                        </span>
+                      )}
                     </div>
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-4">
                     <p className="text-xs uppercase tracking-[0.2em] text-orange-400">
-                      AI Trade Plan
+                      Risk Note
                     </p>
                     <p className="mt-2 text-sm leading-6 text-zinc-400">
-                      {getTradePlan(stock)}
+                      {opportunity.riskNote}
                     </p>
                   </div>
 
                   <button
-                    onClick={() => toggleSavedSetup(stock.symbol)}
+                    onClick={() => toggleSavedSetup(opportunity.ticker)}
                     className={`mt-6 w-full rounded-2xl border px-4 py-3 text-sm font-black transition ${
-                      savedSetups.includes(stock.symbol)
+                      savedSetups.includes(opportunity.ticker)
                         ? "border-green-500/30 bg-green-500/10 text-green-300"
                         : "border-white/10 bg-white/[0.03] text-zinc-300 hover:border-green-500/30 hover:bg-green-500/10 hover:text-green-300"
                     }`}
                   >
-                    {savedSetups.includes(stock.symbol)
+                    {savedSetups.includes(opportunity.ticker)
                       ? "Saved Setup ✓"
                       : "Save Setup"}
                   </button>
 
                   <motion.button
-                    onClick={() => openAiModal(stock)}
+                    onClick={() => openAiModal(opportunityToStock(opportunity))}
                     disabled={aiLoading}
                     className="mt-3 w-full rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 py-4 text-sm font-black text-white shadow-lg shadow-orange-500/20 transition disabled:opacity-50"
                     whileHover={{ scale: aiLoading ? 1 : 1.02 }}
                     whileTap={{ scale: aiLoading ? 1 : 0.97 }}
                   >
-                    {aiLoading && selectedStock?.symbol === stock.symbol
+                    {aiLoading && selectedStock?.symbol === opportunity.ticker
                       ? "Analyzing..."
                       : "View AI Setup"}
                   </motion.button>
@@ -12233,7 +12137,7 @@ function HomeInner() {
               );
             })}
 
-            {stocks.length === 0 &&
+            {filteredOpportunities.length === 0 &&
               [1, 2, 3].map((item) => (
                 <div
                   key={item}

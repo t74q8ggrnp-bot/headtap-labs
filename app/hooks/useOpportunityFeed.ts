@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import {
+  mergeOpportunityLists,
   normalizeOpportunity,
   type Opportunity,
 } from "@/lib/opportunity-model";
@@ -24,6 +25,10 @@ export function useOpportunityFeed() {
   const [spotMomentumRunnersUp, setSpotMomentumRunnersUp] = useState<Opportunity[]>([]);
   const [catalyst, setCatalyst] = useState<Opportunity | null>(null);
   const [beforeCrowd, setBeforeCrowd] = useState<Opportunity[]>([]);
+  // Full ranked list — same endpoint, same scoring engine, same live data
+  // as everything else. Used by any surface that needs to show many
+  // candidates (e.g. the in-page Scanner feed), not just the top picks.
+  const [fullRankedList, setFullRankedList] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -32,6 +37,10 @@ export function useOpportunityFeed() {
       const secondaryRequest = Promise.all([
         fetch("/api/opportunities?type=catalyst&limit=3"),
         fetch("/api/opportunities?type=before_crowd&limit=5"),
+      ]);
+      const fullListRequest = Promise.all([
+        fetch("/api/opportunities?limit=100"),
+        fetch("/api/opportunities?type=before_crowd&limit=100"),
       ]);
 
       const primary = await readOpportunities(await primaryRequest);
@@ -46,6 +55,18 @@ export function useOpportunityFeed() {
       ]);
       setCatalyst(catalysts[0] ?? null);
       setBeforeCrowd(beforeCrowdOpportunities);
+
+      const [fullMomentumRes, fullBeforeCrowdRes] = await fullListRequest;
+      const [fullMomentumData, fullBeforeCrowdData]: [OpportunityPayload, OpportunityPayload] = await Promise.all([
+        fullMomentumRes.ok ? fullMomentumRes.json() : { opportunities: [] },
+        fullBeforeCrowdRes.ok ? fullBeforeCrowdRes.json() : { opportunities: [] },
+      ]);
+      setFullRankedList(
+        mergeOpportunityLists(
+          fullMomentumData.opportunities ?? [],
+          fullBeforeCrowdData.opportunities ?? [],
+        ).sort((a, b) => b.opportunityScore - a.opportunityScore),
+      );
     } catch (error) {
       // Preserve the last verified response during transient refresh failures.
       console.warn("API opportunities fetch failed:", error);
@@ -59,6 +80,7 @@ export function useOpportunityFeed() {
     spotMomentumRunnersUp,
     catalyst,
     beforeCrowd,
+    fullRankedList,
     loading,
     refresh,
   };
