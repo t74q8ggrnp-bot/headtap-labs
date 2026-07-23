@@ -116,16 +116,18 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   const breakout = getBreakoutPotential({
     change: c.change, relativeVolume: c.relativeVolume, momentumScore: c.momentumScore,
     crowdScore: c.crowdScore, trapScore: c.trapScore, catalystScore: c.catalystScore,
-  }, tf);
-  // Spot Momentum is "catch it while it's happening" — qualityScore's R:R/
-  // support-resistance math structurally scores an already-extended stock
-  // as a bad trade, which is true for entry timing but wrong for "should
-  // this be visible at all." Weight raw move/volume/catalyst fuel higher
-  // here so a verified 50-100%+ mover outranks a mild, clean 8-10% setup.
+  }, tf, strategy);
+  // Spot Momentum is "catch it while it's happening." qualityScore and even
+  // breakout.score still carry enough R:R/crowd/trap residue that a mild,
+  // clean 6% mover with capped-out volume can out-arithmetic a genuine 27%+
+  // mover on points alone — that happened in production (PETS beat AEHL).
+  // Anchoring half the score directly to raw move size makes "the bigger
+  // real move wins" a guarantee, not a coin flip of component weights.
   // Before The Crowd keeps quality-first: its whole thesis is entry timing
   // ahead of the crowd, not size of the move already made.
+  const magnitudeCore = Math.max(0, Math.min(100, c.change * 3));
   const strategyScore = strategy === "spot_momentum"
-    ? Math.round(qualityScore * 0.35 + breakout.score * 0.65)
+    ? Math.round(magnitudeCore * 0.5 + breakout.score * 0.35 + qualityScore * 0.15)
     : Math.round(qualityScore * 0.65 + breakout.score * 0.35);
   const tier = eligible && strategyScore >= 80 && ((tf.entryQuality ?? 0) >= 70 || isExtremeMomentum) ? "hero"
     : eligible && strategyScore >= 68 ? "feature" : eligible ? "watch" : "scanner";

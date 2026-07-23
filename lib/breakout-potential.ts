@@ -17,6 +17,7 @@ const clamp = (value: number) => Math.max(0, Math.min(100, value));
 export function getBreakoutPotential(
   input: BreakoutPotentialInput,
   framework: TradeFrameworkResult,
+  strategy: "spot_momentum" | "before_the_crowd" = "spot_momentum",
 ) {
   const move = Math.max(0, input.change);
   const volumeFuel = clamp(input.relativeVolume * 14);
@@ -31,14 +32,24 @@ export function getBreakoutPotential(
   const moveStage = move <= 2 ? move * 25 : clamp(50 + (move - 2) * 2.5);
   const technicalRoom = clamp((framework.upsideMax ?? 0) * 5);
 
+  // crowdTiming/trapSafety measure "is this early and uncrowded" — exactly
+  // Before The Crowd's thesis, so it keeps full weight there. Spot Momentum's
+  // thesis is the opposite: catch the move that's already happening. A big
+  // real move being crowded/high-trap-by-formula (trapScore is literally
+  // move% * 3.5) is not a weaker breakout, it's the point — that risk is
+  // named via riskTags instead of shrinking the score here.
+  const weights = strategy === "before_the_crowd"
+    ? { volume: 0.25, momentum: 0.2, catalyst: 0.15, crowd: 0.15, trap: 0.1, moveStage: 0.1, technical: 0.05 }
+    : { volume: 0.3, momentum: 0.25, catalyst: 0.15, crowd: 0.05, trap: 0.05, moveStage: 0.15, technical: 0.05 };
+
   const score = Math.round(clamp(
-    volumeFuel * 0.25 +
-    momentumFuel * 0.2 +
-    catalystFuel * 0.15 +
-    crowdTiming * 0.15 +
-    trapSafety * 0.1 +
-    moveStage * 0.1 +
-    technicalRoom * 0.05,
+    volumeFuel * weights.volume +
+    momentumFuel * weights.momentum +
+    catalystFuel * weights.catalyst +
+    crowdTiming * weights.crowd +
+    trapSafety * weights.trap +
+    moveStage * weights.moveStage +
+    technicalRoom * weights.technical,
   ));
 
   return {
