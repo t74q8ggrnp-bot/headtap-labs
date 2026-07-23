@@ -19,7 +19,7 @@ export default function OpportunityScorePanel({
 }: OpportunityScorePanelProps) {
   const score = opportunity.opportunityScore;
   return (
-    <div className="p-5 flex flex-col gap-4 bg-white/[0.01]">
+    <div className="p-5 flex flex-col gap-4">
       <div>
         <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700 mb-2">Opportunity Score</p>
         <div className="flex items-end gap-3">
