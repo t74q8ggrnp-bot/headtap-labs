@@ -14,15 +14,21 @@ async function readOpportunities(response: Response) {
   return (payload.opportunities ?? []).map(normalizeOpportunity);
 }
 
+// Fetched alongside the hero so the runner-ups are already on hand — same
+// canonical ranking, just not the #1 pick. Nobody should be locked into one
+// ticker with no visibility into what else is close behind.
+const MOMENTUM_CONTENDER_COUNT = 6;
+
 export function useOpportunityFeed() {
   const [spotMomentum, setSpotMomentum] = useState<Opportunity | null>(null);
+  const [spotMomentumRunnersUp, setSpotMomentumRunnersUp] = useState<Opportunity[]>([]);
   const [catalyst, setCatalyst] = useState<Opportunity | null>(null);
   const [beforeCrowd, setBeforeCrowd] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const primaryRequest = fetch("/api/opportunities?type=momentum&limit=1");
+      const primaryRequest = fetch(`/api/opportunities?type=momentum&limit=${MOMENTUM_CONTENDER_COUNT}`);
       const secondaryRequest = Promise.all([
         fetch("/api/opportunities?type=catalyst&limit=3"),
         fetch("/api/opportunities?type=before_crowd&limit=5"),
@@ -30,6 +36,7 @@ export function useOpportunityFeed() {
 
       const primary = await readOpportunities(await primaryRequest);
       setSpotMomentum(primary[0] ?? null);
+      setSpotMomentumRunnersUp(primary.slice(1));
       setLoading(false);
 
       const [catalystResponse, beforeCrowdResponse] = await secondaryRequest;
@@ -49,6 +56,7 @@ export function useOpportunityFeed() {
 
   return {
     spotMomentum,
+    spotMomentumRunnersUp,
     catalyst,
     beforeCrowd,
     loading,

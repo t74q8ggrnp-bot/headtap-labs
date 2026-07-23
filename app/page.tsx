@@ -14,6 +14,7 @@ import BullBearPanel from "./components/opportunity/BullBearPanel";
 import OpportunityStory from "./components/opportunity/OpportunityStory";
 import OpportunityBottomStats from "./components/opportunity/OpportunityBottomStats";
 import OpportunityScorePanel from "./components/opportunity/OpportunityScorePanel";
+import MomentumContenders from "./components/opportunity/MomentumContenders";
 import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileBeforeCrowdCard from "./components/opportunity/MobileBeforeCrowdCard";
 import MobileCardDetail from "./components/opportunity/MobileCardDetail";
@@ -482,6 +483,7 @@ function HomeInner() {
 
   const {
     spotMomentum: apiMomentum,
+    spotMomentumRunnersUp: apiMomentumRunnersUp,
     catalyst: apiCatalyst,
     beforeCrowd: apiBeforeCrowdList,
     loading: apiOpportunitiesLoading,
@@ -8866,29 +8868,35 @@ function HomeInner() {
                             <span className="text-[10px] font-black text-zinc-600">{mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}</span>
                           </div>
 
-                          <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] divide-y lg:divide-y-0 lg:divide-x divide-white/[0.06]">
+                          <div className="grid grid-cols-1 xl:grid-cols-[1.7fr_1fr] divide-y xl:divide-y-0 xl:divide-x divide-white/[0.06]">
 
-                            {/* ══ LEFT — The Story ══ */}
-                            {apiHero && (
-                              <OpportunityStory
-                                opportunity={apiHero}
-                                framework={smFramework}
-                                dualEngine={isDualEngineConfirmation}
-                                watched={watchlist.includes(apiHero.ticker)}
-                                onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
-                                onWatch={() => toggleWatchlist(apiHero.ticker)}
-                              />
-                            )}
+                            {/* ══ MAJOR LEFT — Story + Advanced Data, consolidated ══ */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-white/[0.06]">
+                              {apiHero && (
+                                <OpportunityStory
+                                  opportunity={apiHero}
+                                  framework={smFramework}
+                                  dualEngine={isDualEngineConfirmation}
+                                  watched={watchlist.includes(apiHero.ticker)}
+                                  onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
+                                  onWatch={() => toggleWatchlist(apiHero.ticker)}
+                                />
+                              )}
+                              {apiHero && (
+                                <OpportunityScorePanel
+                                  opportunity={apiHero}
+                                  trace={smTrace}
+                                  narrative={bullBearData?.ticker === heroTicker ? bullBearData.htRead : null}
+                                  narrativeLoading={bullBearLoading}
+                                />
+                              )}
+                            </div>
 
-                            {/* ══ RIGHT — Advanced Data ══ */}
-                            {apiHero && (
-                              <OpportunityScorePanel
-                                opportunity={apiHero}
-                                trace={smTrace}
-                                narrative={bullBearData?.ticker === heroTicker ? bullBearData.htRead : null}
-                                narrativeLoading={bullBearLoading}
-                              />
-                            )}
+                            {/* ══ RIGHT — Other Contenders — same canonical ranking, next in line ══ */}
+                            <MomentumContenders
+                              candidates={apiMomentumRunnersUp}
+                              onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
+                            />
                           </div>
                           {/* ── Bottom strip — 4 quick stats ── */}
                           {apiHero && <OpportunityBottomStats opportunity={apiHero} />}
