@@ -210,10 +210,21 @@ export async function GET(req: Request) {
     let eligible = ranked.filter((c) => c.eligibility.eligible);
     if (requestedType === "catalyst") eligible = eligible.filter((c) => c.catalystScore >= 20);
     if (requestedType === "before_crowd") eligible = eligible.filter((c) => c.isBeforeCrowd);
+    // Opt-in only, never affects the default response shape. Bounded sample
+    // of rejected candidates and why, same pattern as shadow-retrieval's
+    // exclusionSamples — for investigating gate behavior, not for the UI.
+    const debug = url.searchParams.get("debug") === "1";
     return NextResponse.json({
       opportunities: eligible.slice(0, limit), strategy,
       sourceRun: { id: run.id, completedAt: run.completed_at, engineVersion: run.engine_version, candidateCounts: run.candidate_counts },
       diagnostics: { runRows: rows?.length ?? 0, strategyCandidates: candidates.length, evaluated: evaluated.length, eligible: eligible.length, rejected: evaluated.length - eligible.length },
+      ...(debug ? {
+        rejectedSample: ranked.filter((c) => !c.eligibility.eligible).slice(0, 30).map((c) => ({
+          ticker: c.ticker, change: c.change, relativeVolume: c.relativeVolume,
+          crowdScore: c.crowdScore, trapScore: c.trapScore, strategyScore: c.strategyScore,
+          reasons: c.eligibility.reasons,
+        })),
+      } : {}),
       engineVersion: ENGINE_VERSION, timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
