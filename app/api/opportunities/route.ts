@@ -77,6 +77,12 @@ function isActiveMarketSession(now = new Date()) {
 
 function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   const reasons = [...tf.hardFailures];
+  // Resistance-distance upside is small by definition for a stock that
+  // hasn't broken out yet — the exact profile Before The Crowd wants. Only
+  // Spot Momentum ("is there room left to run") treats it as a hard gate.
+  if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible") {
+    reasons.push("Reward magnitude is negligible.");
+  }
   if (!isSupportedType(c.securityType)) {
     reasons.push(c.securityType
       ? `Unsupported security type: ${c.securityType}.`

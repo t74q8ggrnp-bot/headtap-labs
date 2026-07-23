@@ -142,6 +142,13 @@ function buildOpportunity(
   const signalState = String(row.signal_state ?? "");
 
   const rejectionReasons = [...framework.hardFailures];
+  // Mirrors app/api/opportunities/route.ts: resistance-distance upside is
+  // small by definition for a stock that hasn't broken out yet — the exact
+  // profile Before The Crowd wants. Only Spot Momentum treats it as a hard
+  // gate.
+  if (strategy === "spot_momentum" && framework.magnitudeQuality === "negligible") {
+    rejectionReasons.push("Reward magnitude is negligible.");
+  }
   if (!isSupportedType(row.security_type)) {
     rejectionReasons.push(row.security_type
       ? `Unsupported security type: ${row.security_type}.`

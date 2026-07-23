@@ -251,7 +251,14 @@ function computeFramework(
   } else if (rrRatio < 1.5) warnings.push(`R:R ${rrRatio}:1 is inside the caution band.`);
   if (!absoluteMagnitudePass) warnings.push("Projected maximum upside is below the provisional 5% absolute floor.");
   if (!relativeMagnitudePass) warnings.push("Projected maximum upside is below half of one normal ATR range.");
-  if (magnitudeQuality === "negligible") hardFailures.push("Reward magnitude is negligible.");
+  // Deliberately NOT pushed to hardFailures here. Upside is measured as
+  // distance to the next resistance level, which is small by definition for
+  // a stock that hasn't broken out yet — exactly the profile Before The
+  // Crowd exists to catch. Spot Momentum (where "is there room left to run"
+  // is the right question) applies this as a hard gate itself, strategy-
+  // side, using magnitudeQuality below. Before The Crowd relies on its own
+  // crowd/trap ceilings instead. Framework stays strategy-agnostic; the
+  // caller decides what's blocking.
   if (extensionRisk >= 75) warnings.push("The setup is extremely extended relative to ATR.");
   if (downsideRisk >= Math.max(20, atrPct * 4)) {
     const reason = "Modeled downside is excessive in absolute and volatility-relative terms.";
