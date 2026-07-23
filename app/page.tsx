@@ -8870,8 +8870,8 @@ function HomeInner() {
 
                           <div className="grid grid-cols-1 xl:grid-cols-[1.7fr_1fr] divide-y xl:divide-y-0 xl:divide-x divide-white/[0.06]">
 
-                            {/* ══ MAJOR LEFT — Story + Advanced Data, consolidated ══ */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-white/[0.06]">
+                            {/* ══ MAJOR LEFT — Story + Advanced Data, one unified panel ══ */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2">
                               {apiHero && (
                                 <OpportunityStory
                                   opportunity={apiHero}
