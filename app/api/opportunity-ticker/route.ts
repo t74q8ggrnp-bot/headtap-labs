@@ -19,6 +19,12 @@ export const maxDuration = 60;
 
 type Strategy = "spot_momentum" | "before_the_crowd";
 const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
+// Mirrors app/api/opportunities/route.ts exactly — this file is a parallel
+// implementation of the same eligibility/scoring logic for single-ticker
+// lookups, and the two must never disagree on the same ticker.
+const EXTREME_MOMENTUM_MIN_CHANGE = 25;
+const EXTREME_MOMENTUM_MIN_RVOL = 3;
+const SEASONED_BAR_COUNT = 21;
 
 type SignalRow = {
   ticker: string;
@@ -163,6 +169,10 @@ function buildOpportunity(
     rejectionReasons.push("Signal is too old to qualify during an active market session.");
   }
 
+  const isExtremeMomentum = strategy === "spot_momentum"
+    && change >= EXTREME_MOMENTUM_MIN_CHANGE
+    && relativeVolume >= EXTREME_MOMENTUM_MIN_RVOL;
+
   if (strategy === "spot_momentum") {
     if (!row.retrieved_for_sm && !row.retrieved_for_catalyst) {
       rejectionReasons.push("Ticker did not qualify for Spot Momentum retrieval.");
@@ -170,15 +180,17 @@ function buildOpportunity(
     if (change <= 0) {
       rejectionReasons.push("Spot Momentum requires positive price movement.");
     }
-    if (crowdScore >= 65) {
-      rejectionReasons.push(
-        `Crowd saturation (${Math.round(crowdScore)}) is already late for Spot Momentum.`,
-      );
-    }
-    if (trapScore >= 70) {
-      rejectionReasons.push(
-        `Trap risk (${Math.round(trapScore)}) exceeds the Spot Momentum ceiling.`,
-      );
+    if (!isExtremeMomentum) {
+      if (crowdScore >= 65) {
+        rejectionReasons.push(
+          `Crowd saturation (${Math.round(crowdScore)}) is already late for Spot Momentum.`,
+        );
+      }
+      if (trapScore >= 70) {
+        rejectionReasons.push(
+          `Trap risk (${Math.round(trapScore)}) exceeds the Spot Momentum ceiling.`,
+        );
+      }
     }
   } else {
     if (!row.retrieved_for_btc && !row.retrieved_for_catalyst) {
@@ -217,17 +229,29 @@ function buildOpportunity(
   );
   const breakout = getBreakoutPotential({
     change, relativeVolume, momentumScore, crowdScore, trapScore, catalystScore,
-  }, framework);
-  const strategyScore = Math.round(qualityScore * 0.65 + breakout.score * 0.35);
+  }, framework, strategy);
+  // Same magnitude-anchored formula as app/api/opportunities/route.ts: Spot
+  // Momentum anchors half the score directly to raw move size so a bigger
+  // real move can't lose to a smaller one on component arithmetic.
+  const strategyScore = strategy === "spot_momentum"
+    ? Math.round(Math.max(0, Math.min(100, change * 3)) * 0.5 + breakout.score * 0.35 + qualityScore * 0.15)
+    : Math.round(qualityScore * 0.65 + breakout.score * 0.35);
 
   let tier: "scanner" | "watch" | "feature" | "hero" = "scanner";
-  if (eligible && strategyScore >= 80 && (framework.entryQuality ?? 0) >= 70) {
+  if (eligible && strategyScore >= 80 && ((framework.entryQuality ?? 0) >= 70 || isExtremeMomentum)) {
     tier = "hero";
   } else if (eligible && strategyScore >= 68) {
     tier = "feature";
   } else if (eligible) {
     tier = "watch";
   }
+
+  const riskTags: string[] = [];
+  if (change >= 50) riskTags.push("Parabolic Move");
+  else if (isExtremeMomentum) riskTags.push("Extreme Momentum");
+  if ((framework.extensionRisk ?? 0) >= 75) riskTags.push("Extended — Chasing Risk");
+  if ((framework.volatility20d ?? 0) >= 8) riskTags.push("High Volatility");
+  if (framework.barCount !== null && framework.barCount < SEASONED_BAR_COUNT) riskTags.push("New Listing / Limited History");
 
   const displayedConfidence = eligible
     ? Math.min(99, strategyScore)
@@ -307,6 +331,7 @@ function buildOpportunity(
     eligible,
     rejectionReasons,
     eligibility: { eligible, reasons: rejectionReasons },
+    riskTags,
     stage,
     stageEmoji,
     whyItMatters,
