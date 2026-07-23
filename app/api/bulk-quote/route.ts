@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  resolveSnapshotChangePercent,
+  resolveSnapshotPrice,
+} from "@/lib/polygon-snapshot";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 
@@ -58,15 +62,9 @@ async function fetchPolygonSnapshot(symbols: string[]): Promise<Record<string, Q
   const data = await res.json();
   const result: Record<string, Quote> = {};
   for (const t of data?.tickers ?? []) {
-    // Price priority: lastTrade.p → day.c → prevDay.c
-    // lastTrade.p is the real-time last executed trade price.
-    // day.c updates periodically during market hours and can lag.
-    // prevDay.c is yesterday's close — genuine last resort only.
-    const price = Number(t?.lastTrade?.p || t?.day?.c || t?.prevDay?.c || 0);
+    const price = resolveSnapshotPrice(t);
     const prevClose = Number(t?.prevDay?.c || 0);
-    const change = prevClose > 0
-      ? ((price - prevClose) / prevClose) * 100
-      : Number(t?.todaysChangePerc || 0);
+    const change = resolveSnapshotChangePercent(t, price);
 
     // Volume: current day volume and previous day volume from Polygon.
     // avgVolume starts at 0 here — Yahoo pass below will fill it in for

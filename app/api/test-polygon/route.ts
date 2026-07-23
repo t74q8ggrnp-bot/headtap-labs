@@ -4,6 +4,7 @@
 // DELETE THIS FILE after testing
 
 import { NextResponse } from "next/server";
+import { resolveSnapshotPrice } from "@/lib/polygon-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -37,11 +38,13 @@ export async function GET(req: Request) {
   return NextResponse.json({
     snapshotResults: (snap1.tickers ?? []).map((t: any) => ({
       ticker: t.ticker,
-      price: t.lastTrade?.p || t.day?.c || t.prevDay?.c || 0,
+      price: resolveSnapshotPrice(t),
+      rawLastTrade: t.lastTrade?.p ?? null,
+      rawDayClose: t.day?.c ?? null,
       change: t.todaysChangePerc,
       dayVolume: t.day?.v,
       prevDayVolume: t.prevDay?.v,
-      hasData: !!(t.lastTrade?.p || t.day?.c || t.prevDay?.c),
+      hasData: resolveSnapshotPrice(t) > 0,
     })),
     snapshotCount: snap1.tickers?.length ?? 0,
     groupedResults,

@@ -1,6 +1,10 @@
 // app/api/market-context/route.ts
 
 import { NextResponse } from "next/server";
+import {
+  resolveSnapshotChangePercent,
+  resolveSnapshotPrice,
+} from "@/lib/polygon-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -33,18 +37,21 @@ export async function GET() {
     const parse = (symbol: string) => {
       const t = tickerMap[symbol];
       if (!t) return null;
-      const price = Number(t.lastTrade?.p || t.day?.c || t.prevDay?.c || 0);
-      const prevClose = Number(t.prevDay?.c || 0);
-      const change = prevClose > 0
-        ? ((price - prevClose) / prevClose) * 100
-        : Number(t.todaysChangePerc || 0);
+      const price = resolveSnapshotPrice(t);
+      const change = resolveSnapshotChangePercent(t, price);
+
       const volume = Number(t.day?.v || 0);
       const prevVolume = Number(t.prevDay?.v || 1);
-      const rvol = prevVolume > 0 ? volume / prevVolume : 1;
+      // Same issue applies to volume — day.v may not be populated pre-market.
+      // Rather than silently show a misleading "0.00x" (implying total
+      // inactivity), surface null so the frontend can show "—" instead of
+      // a false flat reading.
+      const rvol = volume > 0 && prevVolume > 0 ? volume / prevVolume : null;
+
       return {
         price: Number(price.toFixed(2)),
-        change: Number(change.toFixed(2)),
-        rvol: Number(rvol.toFixed(2)),
+        change: Number(Number(change).toFixed(2)),
+        rvol: rvol !== null ? Number(rvol.toFixed(2)) : null,
       };
     };
 

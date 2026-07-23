@@ -1,94 +1,62 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  mergeOpportunityLists,
+  type Opportunity as HTOpportunity,
+} from "@/lib/opportunity-model";
 
-const EXCLUDED = new Set(["SQQQ","TQQQ","SOXS","SOXL","UVXY","SVXY","SPXS","SPXL","LABD","LABU","TZA","TNA","FAZ","FAS","YANG","YINN","SDOW","UDOW","ERY","ERX","HIBL","HIBS","DRIP","GUSH"]);
+// ─────────────────────────────────────────────────────────────
+//  app/scanner/page.tsx
+//
+//  Scanner now consumes the exact same ranked signal dataset as
+//  Home — /api/opportunities — instead of its own hardcoded
+//  ~130-stock watchlist and a second, disconnected scoring engine.
+//
+//  Home displays the #1 signal (limit=1).
+//  Scanner displays the full ranked list (limit=100, matching
+//  signal-writer's top-100 write ceiling — that's the actual
+//  amount of real ranked data that exists at any moment).
+//
+//  One backend. One scoring engine. Two views of the same truth.
+// ─────────────────────────────────────────────────────────────
 
-const UNIVERSE = ["NVDA","PLTR","AMD","TSLA","QUBT","SNAL","SMCI","MSTR","HOOD","AAPL","MSFT","SPY","QQQ","IWM","XLK","XLF","XLE","SMH","ARKK","GOOGL","META","AMZN","NFLX","AVGO","ORCL","CRM","ADBE","NOW","UBER","SHOP","ARM","MU","TSM","INTC","MRVL","QCOM","CRWD","PANW","NET","DDOG","SNOW","AI","SOUN","BBAI","PATH","COIN","RIVN","SOFI","RDDT","DJT","GME","AMC","AFRM","UPST","CVNA","DKNG","RBLX","ROKU","PINS","NIO","XPEV","LI","LUNR","RKLB","ASTS","IONQ","RGTI","QBTS","ACHR","JOBY","KULR","SERV","IOVA","TEM","HIMS","RXRX","BEAM","CRSP","EDIT","NTLA","GERN","TGTX","SMMT","NVAX","MARA","RIOT","CLSK","HUT","WULF","JPM","BAC","GS","MS","WFC","PYPL","V","MA","AXP","SCHW","DIS","NKE","SBUX","CMG","COST","WMT","TGT","LULU","ELF","CELH","CAVA","RCL","CCL","DAL","UAL","AAL","XOM","CVX","OXY","FCX","NEM","CAT","GE","BA","LMT","RTX","LLY","NVO","MRNA","PFE","MRK","ABBV","UNH","ISRG"].filter(s => !EXCLUDED.has(s));
-
-type Stock = {
-  symbol: string;
-  price: number;
-  change: number;
-  volume?: number;
-  prevVolume?: number;
-  avgVolume?: number; // 10-day average — the correct rvol denominator
-};
-type ScannerFilter = "all" | "momentum" | "recovery" | "unusual" | "watchlist";
+type ScannerFilter = "all" | "momentum" | "before_crowd" | "catalyst" | "watchlist";
 
 const FILTERS: { label: string; value: ScannerFilter }[] = [
   { label: "All Names", value: "all" },
   { label: "🔥 Momentum", value: "momentum" },
-  { label: "📉 Recovery", value: "recovery" },
-  { label: "⚡ Unusual Volume", value: "unusual" },
+  { label: "👀 Before The Crowd", value: "before_crowd" },
+  { label: "⚡ Catalyst", value: "catalyst" },
   { label: "⭐ Watchlist", value: "watchlist" },
 ];
 
-// Returns real relative volume (current ÷ 10-day avg) or null if we don't
-// have a reliable baseline. Never fakes a number from price change.
-// Caller decides how to display null (e.g. "—" instead of a made-up "1.2x").
-const getRelVol = (s: Stock): number | null => {
-  const current = s.volume ?? 0;
-  // Best baseline: 10-day average daily volume from Yahoo
-  const avg = s.avgVolume ?? 0;
-  if (current > 0 && avg > 0) {
-    return Math.min(20, Math.max(0.1, current / avg));
-  }
-  // Acceptable fallback: previous day's volume from Polygon
-  const prev = s.prevVolume ?? 0;
-  if (current > 0 && prev > 0) {
-    return Math.min(20, Math.max(0.1, current / prev));
-  }
-  // No reliable baseline — return null rather than faking it
-  return null;
-};
-
-const formatRelVol = (rvol: number | null): string => {
-  if (rvol === null) return "—";
+const formatRelVol = (rvol: number): string => {
+  if (!rvol || rvol <= 0) return "—";
   return `${rvol.toFixed(1)}x`;
 };
 
-const getHTScore = (s: Stock) => {
-  const rvol = getRelVol(s);
-  const move = Math.abs(s.change);
-  let score = 0;
-
-  // Volume behavior — only score if we have real data, never fake it
-  if (rvol !== null) {
-    score += Math.min(50, rvol * 9);
-    if (rvol >= 3) score += 8;
-  }
-
-  score += Math.min(30, move * 3.5);
-  if (s.change > 0) score += 15;
-
-  return Math.min(99, Math.round(score));
-};
-
-const getLabel = (s: Stock) => {
-  const score = getHTScore(s);
-  const rvol = getRelVol(s);
-  if (s.change < 0 && rvol !== null && rvol >= 3) return { emoji: "📉", label: "Recovery Watch", color: "text-cyan-300" };
-  if (s.change < 0) return { emoji: "📉", label: "Buyers Needed", color: "text-red-300" };
-  if (rvol !== null && rvol >= 5 && Math.abs(s.change) > 8) return { emoji: "🔥", label: "Crowd Igniting", color: "text-orange-300" };
-  if (rvol !== null && rvol >= 3 && Math.abs(s.change) < 5) return { emoji: "👀", label: "Quiet Accumulation", color: "text-cyan-300" };
-  if (s.change >= 15) return { emoji: "🚀", label: "Parabolic Move", color: "text-orange-300" };
-  if (s.change >= 8) return { emoji: "🔥", label: "Hot Mover", color: "text-orange-300" };
-  if (score >= 88) return { emoji: "🎯", label: "Clean Breakout", color: "text-green-300" };
-  if (score >= 78) return { emoji: "🧲", label: "Attention Magnet", color: "text-orange-300" };
-  if (rvol !== null && rvol >= 2) return { emoji: "📈", label: "Active", color: "text-green-300" };
-  return { emoji: "🔎", label: "On Watch", color: "text-zinc-300" };
-};
-
+// Tier bucketing on the canonical strategy score scale (0-100).
 const getTier = (score: number) => {
-  if (score >= 95) return { label: "Elite", color: "text-orange-300 bg-orange-500/15 border-orange-500/30" };
+  if (score >= 90) return { label: "Elite", color: "text-orange-300 bg-orange-500/15 border-orange-500/30" };
   if (score >= 85) return { label: "Strong", color: "text-green-300 bg-green-500/10 border-green-500/20" };
-  if (score >= 70) return { label: "Developing", color: "text-yellow-300 bg-yellow-500/10 border-yellow-500/20" };
+  if (score >= 65) return { label: "Developing", color: "text-yellow-300 bg-yellow-500/10 border-yellow-500/20" };
   return { label: "Watchlist", color: "text-zinc-400 bg-white/5 border-white/10" };
 };
 
+const getLabel = (o: HTOpportunity) => {
+  if (o.catalystScore >= 20) return { emoji: "⚡", label: "Catalyst Active", color: "text-orange-300" };
+  if (o.isBeforeCrowd) return { emoji: "👀", label: "Before The Crowd", color: "text-cyan-300" };
+  if (o.relativeVolume >= 5 && o.change >= 5) return { emoji: "🔥", label: "Crowd Igniting", color: "text-orange-300" };
+  if (o.change >= 15) return { emoji: "🚀", label: "Parabolic Move", color: "text-orange-300" };
+  if (o.change >= 8) return { emoji: "🔥", label: "Hot Mover", color: "text-orange-300" };
+  if (o.opportunityScore >= 90) return { emoji: "🎯", label: "Clean Breakout", color: "text-green-300" };
+  if (o.relativeVolume >= 2) return { emoji: "📈", label: "Active", color: "text-green-300" };
+  return { emoji: "🔎", label: "On Watch", color: "text-zinc-300" };
+};
+
 export default function ScannerPage() {
-  const [stocks, setStocks] = useState<Stock[]>([]);
+  const [opportunities, setOpportunities] = useState<HTOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [filter, setFilter] = useState<ScannerFilter>("all");
@@ -96,9 +64,11 @@ export default function ScannerPage() {
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<"score" | "change" | "symbol">("score");
 
+  // Same localStorage key Home uses — so a star toggled here shows up
+  // there too. These were previously two different, disconnected lists.
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("htlabs-watchlist");
+      const saved = localStorage.getItem("headtap-watchlist");
       if (saved) setWatchlist(JSON.parse(saved));
     } catch {}
   }, []);
@@ -106,35 +76,31 @@ export default function ScannerPage() {
   const toggleWatchlist = (symbol: string) => {
     setWatchlist(prev => {
       const next = prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol];
-      localStorage.setItem("htlabs-watchlist", JSON.stringify(next));
+      localStorage.setItem("headtap-watchlist", JSON.stringify(next));
       return next;
     });
   };
 
   const fetchAll = useCallback(async () => {
     try {
-      const res = await fetch("/api/bulk-quote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols: UNIVERSE }),
-      });
-      const data = await res.json();
-      const quotes: Record<string, {
-        price: number;
-        change: number;
-        volume?: number;
-        prevVolume?: number;
-        avgVolume?: number;
-      }> = data.quotes ?? {};
-      const result: Stock[] = UNIVERSE.map(symbol => ({
-        symbol,
-        price: quotes[symbol]?.price ?? 0,
-        change: quotes[symbol]?.change ?? 0,
-        volume: quotes[symbol]?.volume ?? 0,
-        prevVolume: quotes[symbol]?.prevVolume ?? 0,
-        avgVolume: quotes[symbol]?.avgVolume ?? 0,
-      }));
-      setStocks(result);
+      // The full ranked list — same endpoint, same scoring engine,
+      // same live data Home's #1 pick comes from. No separate universe,
+      // no separate scoring logic, no legacy fallback watchlist.
+      const [momentumRes, beforeCrowdRes] = await Promise.all([
+        fetch("/api/opportunities?limit=100"),
+        fetch("/api/opportunities?type=before_crowd&limit=100"),
+      ]);
+      if (!momentumRes.ok || !beforeCrowdRes.ok) throw new Error("Ranked signal API unavailable");
+      const [momentumData, beforeCrowdData] = await Promise.all([
+        momentumRes.json(),
+        beforeCrowdRes.json(),
+      ]);
+      setOpportunities(
+        mergeOpportunityLists(
+          momentumData.opportunities ?? [],
+          beforeCrowdData.opportunities ?? [],
+        ),
+      );
       setLastUpdated(new Date());
     } catch (err) {
       console.error("Scanner fetch failed", err);
@@ -150,22 +116,26 @@ export default function ScannerPage() {
   }, [fetchAll]);
 
   const filtered = useMemo(() => {
-    let list = stocks.filter(s => !EXCLUDED.has(s.symbol));
-    if (search) list = list.filter(s => s.symbol.includes(search.toUpperCase()));
-    if (filter === "momentum") list = list.filter(s => s.change > 0 && (getRelVol(s) ?? 0) >= 2);
-    if (filter === "recovery") list = list.filter(s => s.change < 0 && (getRelVol(s) ?? 0) >= 2);
-    if (filter === "unusual") list = list.filter(s => (getRelVol(s) ?? 0) >= 3);
-    if (filter === "watchlist") list = list.filter(s => watchlist.includes(s.symbol));
-    if (sortBy === "score") list = [...list].sort((a, b) => getHTScore(b) - getHTScore(a));
+    let list = [...opportunities];
+    if (search) list = list.filter(o => o.ticker.includes(search.toUpperCase()));
+    if (filter === "momentum") list = list.filter(o => o.opportunityType === "momentum" || o.opportunityType === "breakout");
+    if (filter === "before_crowd") list = list.filter(o => o.isBeforeCrowd);
+    if (filter === "catalyst") list = list.filter(o => o.catalystScore >= 20);
+    if (filter === "watchlist") list = list.filter(o => watchlist.includes(o.ticker));
+    if (sortBy === "score") list = [...list].sort((a, b) => b.opportunityScore - a.opportunityScore);
     if (sortBy === "change") list = [...list].sort((a, b) => b.change - a.change);
-    if (sortBy === "symbol") list = [...list].sort((a, b) => a.symbol.localeCompare(b.symbol));
+    if (sortBy === "symbol") list = [...list].sort((a, b) => a.ticker.localeCompare(b.ticker));
     return list;
-  }, [stocks, filter, search, sortBy, watchlist]);
+  }, [opportunities, filter, search, sortBy, watchlist]);
 
-  const gainers = stocks.filter(s => s.change > 0).length;
-  const losers = stocks.filter(s => s.change < 0).length;
-  const unusual = stocks.filter(s => (getRelVol(s) ?? 0) >= 3).length;
-  const isMarketClosed = stocks.length > 0 && stocks.every(s => s.price === 0 && s.change === 0);
+  const gainers = opportunities.filter(o => o.change > 0).length;
+  const losers = opportunities.filter(o => o.change < 0).length;
+  const unusual = opportunities.filter(o => o.relativeVolume >= 3).length;
+
+  // Honest "market quiet" signal — same freshness labeling used across
+  // the rest of the product, not a fake "everything is 0" heuristic.
+  const isShowingStaleData = opportunities.length > 0 &&
+    opportunities.every(o => o.freshnessLabel === "Last Verified Signal");
 
   return (
     <div className="min-h-screen bg-[#050505] text-white">
@@ -200,16 +170,16 @@ export default function ScannerPage() {
         <div className="mb-8">
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-400">HT Labs</p>
           <h1 className="mt-1 text-4xl font-black tracking-tight">Full Scanner</h1>
-          <p className="mt-2 text-sm text-zinc-500">Every name HT is watching — ranked by conviction. Auto-refreshes every 30s.</p>
+          <p className="mt-2 text-sm text-zinc-500">The full ranked list from the same engine that picks Home's #1 signal. Auto-refreshes every 30s.</p>
         </div>
 
         {!loading && (
           <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[
-              { label: "Scanned", value: stocks.length, color: "text-white" },
+              { label: "Ranked", value: opportunities.length, color: "text-white" },
               { label: "Green", value: gainers, color: "text-green-300" },
               { label: "Red", value: losers, color: "text-red-300" },
-              { label: "Unusual Flow", value: unusual, color: "text-orange-300" },
+              { label: "Unusual Volume", value: unusual, color: "text-orange-300" },
             ].map(({ label, value, color }) => (
               <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.025] px-4 py-3">
                 <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600">{label}</p>
@@ -219,13 +189,20 @@ export default function ScannerPage() {
           </div>
         )}
 
-        {!loading && isMarketClosed && (
+        {!loading && isShowingStaleData && (
           <div className="mb-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/[0.05] px-5 py-3 flex items-center gap-3">
             <span className="text-lg">🌙</span>
             <div>
-              <p className="text-sm font-black text-yellow-300">Market Closed</p>
-              <p className="text-[10px] font-semibold text-zinc-500">Showing last session prices. Live data resumes at market open.</p>
+              <p className="text-sm font-black text-yellow-300">Market Quiet</p>
+              <p className="text-[10px] font-semibold text-zinc-500">Showing the last verified signals. Live scanning resumes when the market reopens.</p>
             </div>
+          </div>
+        )}
+
+        {!loading && opportunities.length === 0 && (
+          <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.025] px-5 py-3">
+            <p className="text-sm font-black text-zinc-300">No verified signals yet.</p>
+            <p className="text-[10px] font-semibold text-zinc-500">The scanner hasn't found a qualifying candidate this cycle.</p>
           </div>
         )}
 
@@ -269,7 +246,7 @@ export default function ScannerPage() {
           <div className="flex items-center justify-center py-32">
             <div className="text-center">
               <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
-              <p className="mt-4 text-sm font-semibold text-zinc-500">Scanning {UNIVERSE.length} tickers...</p>
+              <p className="mt-4 text-sm font-semibold text-zinc-500">Loading ranked signals...</p>
             </div>
           </div>
         ) : filtered.length === 0 ? (
@@ -278,16 +255,13 @@ export default function ScannerPage() {
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((stock, index) => {
-              const score = getHTScore(stock);
-              const tier = getTier(score);
-              const { emoji, label, color } = getLabel(stock);
-              const rvol = getRelVol(stock);
-              const isBullish = stock.change >= 0;
-              const hasRealVol = rvol !== null;
+            {filtered.map((o, index) => {
+              const tier = getTier(o.opportunityScore);
+              const { emoji, label, color } = getLabel(o);
+              const isBullish = o.change >= 0;
               return (
                 <div
-                  key={stock.symbol}
+                  key={o.ticker}
                   className="group relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/70 p-5 transition hover:border-orange-500/30"
                 >
                   <div className="flex items-start justify-between">
@@ -296,57 +270,63 @@ export default function ScannerPage() {
                         #{index + 1}
                       </div>
                       <div>
-                        <p className="text-2xl font-black">{stock.symbol}</p>
+                        <p className="text-2xl font-black">{o.ticker}</p>
                         <p className={`text-[10px] font-black ${color}`}>{emoji} {label}</p>
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black ${tier.color}`}>
-                        {tier.label} · {score}
+                        {tier.label} · {o.opportunityScore}
                       </span>
                       <button
-                        onClick={() => toggleWatchlist(stock.symbol)}
+                        onClick={() => toggleWatchlist(o.ticker)}
                         className="text-sm transition hover:scale-110"
                       >
-                        {watchlist.includes(stock.symbol) ? "⭐" : "☆"}
+                        {watchlist.includes(o.ticker) ? "⭐" : "☆"}
                       </button>
                     </div>
                   </div>
 
                   <div className="mt-4 flex items-center justify-between">
                     <div>
-                      <p className="text-2xl font-mono font-black">${stock.price.toFixed(2)}</p>
+                      <p className="text-2xl font-mono font-black">${o.price.toFixed(2)}</p>
                       <p className={`text-sm font-black ${isBullish ? "text-green-300" : "text-red-300"}`}>
-                        {isBullish ? "+" : ""}{stock.change.toFixed(2)}%
+                        {isBullish ? "+" : ""}{o.change.toFixed(2)}%
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-[9px] font-black uppercase tracking-[0.15em] text-zinc-600">Rel. Volume</p>
                       <p className={`font-mono text-lg font-black ${
-                        !hasRealVol ? "text-zinc-600" :
-                        rvol! >= 3 ? "text-orange-300" : "text-zinc-300"
+                        o.relativeVolume >= 3 ? "text-orange-300" : "text-zinc-300"
                       }`}>
-                        {formatRelVol(rvol)}
+                        {formatRelVol(o.relativeVolume)}
                       </p>
-                      {!hasRealVol && (
-                        <p className="text-[8px] text-zinc-700">no baseline</p>
-                      )}
                     </div>
                   </div>
 
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <div className={`rounded-full px-3 py-1 text-[10px] font-black ${
                       isBullish ? "bg-green-500/10 text-green-300" : "bg-red-500/10 text-red-300"
                     }`}>
                       {isBullish ? "↑ Bullish" : "↓ Bearish"}
                     </div>
-                    {hasRealVol && rvol! >= 3 && (
+                    {o.relativeVolume >= 3 && (
                       <div className="rounded-full bg-orange-500/10 px-3 py-1 text-[10px] font-black text-orange-300">
                         ⚡ Unusual Vol
                       </div>
                     )}
+                    {o.isBeforeCrowd && (
+                      <div className="rounded-full bg-cyan-500/10 px-3 py-1 text-[10px] font-black text-cyan-300">
+                        👀 Before Crowd
+                      </div>
+                    )}
+                    {o.freshnessLabel === "Last Verified Signal" && (
+                      <div className="rounded-full bg-zinc-500/10 px-3 py-1 text-[10px] font-black text-zinc-400">
+                        Last Verified
+                      </div>
+                    )}
                     <a
-                      href={`/?ticker=${stock.symbol}`}
+                      href={`/?ticker=${o.ticker}`}
                       className="ml-auto rounded-full border border-orange-500/30 px-3 py-1 text-[10px] font-black text-orange-400 transition hover:bg-orange-500/10"
                     >
                       Full Read →
@@ -359,7 +339,7 @@ export default function ScannerPage() {
         )}
 
         <p className="mt-8 text-center text-[10px] font-semibold text-zinc-700">
-          {filtered.length} names shown · Scanning {UNIVERSE.length} total · Refreshes every 30s
+          {filtered.length} names shown · {opportunities.length} ranked total · Same engine as Home · Refreshes every 30s
         </p>
       </main>
     </div>

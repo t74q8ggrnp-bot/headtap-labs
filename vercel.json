@@ -2,15 +2,35 @@
   "crons": [
     {
       "path": "/api/signal-writer?secret=htlabs-internal",
-      "schedule": "*/5 9-16 * * 1-5"
+      "schedule": "*/5 8-23 * * 1-5"
     },
     {
-      "path": "/api/outcome-tracker?secret=htlabs-internal",
-      "schedule": "0 16 * * 1-5"
+      "path": "/api/signal-writer?secret=htlabs-internal",
+      "schedule": "*/5 0 * * 2-6"
+    },
+    {
+      "path": "/api/shadow-retrieval?secret=htlabs-internal",
+      "schedule": "*/5 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/shadow-retrieval?secret=htlabs-internal",
+      "schedule": "*/5 0 * * 2-6"
+    },
+    {
+      "path": "/api/catalyst-discovery?secret=htlabs-internal",
+      "schedule": "*/5 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/catalyst-discovery?secret=htlabs-internal",
+      "schedule": "*/5 0 * * 2-6"
     },
     {
       "path": "/api/outcome-tracker?secret=htlabs-internal",
       "schedule": "0 20 * * 1-5"
+    },
+    {
+      "path": "/api/outcome-tracker?secret=htlabs-internal",
+      "schedule": "0 0 * * 2-6"
     }
   ]
 }

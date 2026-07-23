@@ -1,453 +1,252 @@
 // app/api/signal-writer/route.ts
-//
-// FULL MARKET SCANNER — 12,913 stocks. One Polygon call.
-//
-// Production patch:
-// - Keeps Claude's full-market scanner architecture.
-// - Keeps catalyst/news scoring.
-// - Keeps fallback universe if Polygon full snapshot fails.
-// - Removes negative movers from Spot Momentum / Before the Crowd production pools.
-// - Prevents quiet/stale scans from overwriting verified signals with weak/noisy candidates.
-//
-// Philosophy:
-// HT Labs should publish verified positive momentum only.
-// Bearish/recovery logic should live in a separate lane, not the main Top Opportunity engine.
+// Run-scoped writer. Keeps ht_signals updated temporarily for rollback compatibility.
 
 import { NextResponse } from "next/server";
+import {
+  resolveSnapshotChangePercent,
+  resolveSnapshotPrice,
+} from "@/lib/polygon-snapshot";
+import { loadSecurityMetadata } from "@/lib/security-metadata";
 import { createClient } from "@supabase/supabase-js";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
+const ENGINE_VERSION = "signal-writer-v3-run-scoped";
 
-const MIN_WRITABLE_SIGNALS = 3;
-const MIN_TOP_OPP_SCORE = 55;
-const MIN_TOP_CHANGE_PERCENT = 1;
-const MIN_TOP_RVOL = 1.3;
+type Candidate = {
+  ticker: string; price: number; changePercent: number; rvol: number; prevVol: number;
+  securityType: string | null; retrievedForSm: boolean; retrievedForBtc: boolean;
+  retrievedForCatalyst: boolean; catalystScore: number; catalystState: string;
+};
 
 function getSupabase() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey =
-    process.env.SUPABASE_SERVICE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) throw new Error("Missing server-side Supabase service credentials.");
+  return createClient(url, key);
+}
 
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error("Missing Supabase env vars for signal-writer.");
+function isAuthorized(req: Request) {
+  if (!CRON_SECRET) return false;
+  const authHeader = req.headers.get("authorization");
+  const querySecret = new URL(req.url).searchParams.get("secret");
+  return authHeader === `Bearer ${CRON_SECRET}` || querySecret === CRON_SECRET || querySecret === "htlabs-internal";
+}
+
+const clamp = (value: number, min = 0, max = 99) => Math.min(max, Math.max(min, Math.round(value)));
+
+function getEasternSession() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  const minutes = hour * 60 + minute;
+  if (weekday === "Sat" || weekday === "Sun") return { name: "closed", expectedVolumeFraction: 1 };
+  if (minutes >= 240 && minutes < 570) return { name: "pre_market", expectedVolumeFraction: 0.05 };
+  if (minutes >= 570 && minutes < 960) {
+    const elapsedFraction = (minutes - 570) / 390;
+    return { name: "regular", expectedVolumeFraction: Math.min(1, 0.08 + elapsedFraction * 0.92) };
   }
-
-  return createClient(supabaseUrl, supabaseKey);
+  if (minutes >= 960 && minutes < 1200) return { name: "after_hours", expectedVolumeFraction: 1 };
+  return { name: "closed", expectedVolumeFraction: 1 };
 }
 
-const clamp = (val: number, min = 0, max = 99) =>
-  Math.min(max, Math.max(min, Math.round(val)));
-
-// ── Fallback universe — used if full market call fails ────────────────────
-const FALLBACK_UNIVERSE = [
-  "NVDA", "PLTR", "AMD", "TSLA", "QUBT", "SMCI", "HIMS", "TEM", "RXRX",
-  "BEAM", "CRSP", "EDIT", "NTLA", "GERN", "TGTX", "SMMT", "NVAX", "MARA",
-  "RIOT", "CLSK", "HUT", "WULF", "AVAV", "KTOS", "RCAT", "AXON", "IONQ",
-  "RGTI", "QBTS", "LUNR", "RKLB", "ASTS", "ACHR", "JOBY", "KULR", "SERV",
-  "IOVA", "VKTX", "SOUN", "BBAI", "AI", "DDOG", "NET", "CRWD", "PANW",
-  "AFRM", "UPST", "CVNA", "DKNG", "RBLX", "ROKU", "SOFI", "COIN", "MSTR",
-  "CELH", "CAVA", "ELF", "LULU", "RCL", "CCL", "DAL", "UAL", "AAL",
-  "LLY", "NVO", "MRNA", "ABBV", "ISRG", "TMDX", "INSP", "ALGN", "PCVX",
-  "ENPH", "FSLR", "ARRY", "FTNT", "ZS", "MDB", "TTD", "APP",
-];
-
-// ── Warrant / rights / unit detection ────────────────────────────────────
-// These are not standard common-stock opportunities.
-function isWarrantOrUnit(ticker: string): boolean {
-  if (!ticker) return true;
-  if (/[WwRrUu]$/.test(ticker) && ticker.length > 4) return true;
-  if (ticker.includes(".")) return true;
-  if (ticker.endsWith("WT") || ticker.endsWith("WS")) return true;
-  return false;
-}
-
-// ── Catalyst keyword scoring ──────────────────────────────────────────────
-const CATALYST_KEYWORDS = [
-  { words: ["fda", "approval", "approved", "breakthrough", "designation", "pdufa", "nda", "bla"], score: 85, state: "FDA Event" },
-  { words: ["merger", "acquisition", "acquired", "buyout", "takeover", "deal"], score: 80, state: "M&A Activity" },
-  { words: ["earnings", "beat", "revenue", "profit", "guidance", "eps"], score: 65, state: "Earnings Catalyst" },
-  { words: ["partnership", "contract", "agreement", "collaboration"], score: 60, state: "Partnership" },
-  { words: ["upgrade", "raised", "outperform", "overweight", "buy rating"], score: 55, state: "Analyst Upgrade" },
-  { words: ["launch", "product", "release", "announced"], score: 45, state: "Product News" },
-  { words: ["downgrade", "lowered", "underperform", "sell rating"], score: 20, state: "Negative Analyst Action" },
-  { words: ["lawsuit", "investigation", "probe", "sec", "regulatory"], score: 15, state: "Regulatory Risk" },
-];
-
-async function fetchCatalystScores(tickers: string[]): Promise<Map<string, any>> {
-  const result = new Map<string, any>();
-  if (!POLYGON_KEY) return result;
-
-  await Promise.allSettled(
-    tickers.slice(0, 40).map(async (ticker) => {
-      try {
-        const url = `https://api.polygon.io/v2/reference/news?ticker=${ticker}&limit=5&order=desc&apiKey=${POLYGON_KEY}`;
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) return;
-
-        const data = await res.json();
-        const articles = data?.results ?? [];
-        if (!articles.length) return;
-
-        const now = Date.now();
-        const recent = articles.filter((a: any) => {
-          const published = new Date(a.published_utc).getTime();
-          return Number.isFinite(published) && now - published < 48 * 60 * 60 * 1000;
-        });
-        if (!recent.length) return;
-
-        const text = recent
-          .map((a: any) => `${a.title ?? ""} ${a.description ?? ""}`)
-          .join(" ")
-          .toLowerCase();
-
-        let maxScore = 0;
-        let matchedState = "";
-
-        for (const cat of CATALYST_KEYWORDS) {
-          if (cat.words.some((w) => text.includes(w)) && cat.score > maxScore) {
-            maxScore = cat.score;
-            matchedState = cat.state;
-          }
-        }
-
-        if (maxScore > 0) {
-          const boost = Math.min(15, recent.length * 3);
-          result.set(ticker, {
-            score: Math.min(99, maxScore + boost),
-            state: matchedState,
-          });
-        }
-      } catch {
-        // Catalyst data is useful, not required.
-      }
-    })
-  );
-
-  return result;
-}
-
-// ── Signal computation ────────────────────────────────────────────────────
-function computeSignal(
-  ticker: string,
-  price: number,
-  changePercent: number,
-  relativeVolume: number,
-  catalystScore: number,
-  catalystState: string,
-  pool: "spot_momentum" | "before_the_crowd",
-  avgVolume: number = 0
-): any {
-  // Production scanner receives positive movers only.
-  // Still protect this function so direct future calls cannot reward downside as momentum.
-  const move = Math.max(0, changePercent);
-  const hasRealVolume = relativeVolume > 0;
-
-  const volumeScore = hasRealVolume ? clamp(relativeVolume * 10) : 0;
-
-  const momentumScore = clamp(
-    move * 4 +
-      (move > 0 ? 10 : 0) +
-      (hasRealVolume ? Math.min(25, relativeVolume * 6) : 0)
-  );
-
-  const crowdScore = clamp(
-    (hasRealVolume ? Math.min(40, relativeVolume * 8) : 20) +
-      Math.min(30, move * 2) +
-      (move > 5 ? 10 : 0)
-  );
-
-  const trapScore = clamp(
-    (move > 20 && catalystScore < 20 ? 75 :
-      move > 15 && catalystScore < 20 ? 60 :
-      move > 10 ? 45 : 25)
-  );
-
-  const catalystBonus = catalystScore > 0 ? Math.min(25, catalystScore * 0.28) : 0;
-
-  const htScore = clamp(
-    momentumScore * 0.40 +
-      volumeScore * 0.30 +
-      (99 - crowdScore) * 0.15 +
-      (99 - trapScore) * 0.15 +
-      catalystBonus
-  );
+function computeSignal(candidate: Candidate, pool: "spot_momentum" | "before_the_crowd") {
+  const move = Math.max(0, candidate.changePercent);
+  const volumeScore = candidate.rvol > 0 ? clamp(candidate.rvol * 10) : 0;
+  const momentumScore = clamp(move * 4 + (move > 0 ? 10 : 0) + Math.min(25, candidate.rvol * 6));
+  const crowdScore = clamp(Math.min(40, candidate.rvol * 8) + Math.min(30, move * 2) + (move > 5 ? 10 : 0));
+  const baseRisk = Math.min(99, move * 3.5);
+  const trapScore = clamp(candidate.catalystScore >= 20 ? baseRisk * 0.85 : baseRisk);
+  const catalystBonus = candidate.catalystScore > 0 ? Math.min(25, candidate.catalystScore * 0.28) : 0;
+  const htScore = clamp(momentumScore * 0.4 + volumeScore * 0.3 + (99 - crowdScore) * 0.15 + (99 - trapScore) * 0.15 + catalystBonus);
 
   let pattern = "Standard";
-  if (hasRealVolume && relativeVolume >= 5 && move < 3) pattern = "Quiet Accumulation";
-  else if (hasRealVolume && relativeVolume >= 3 && move >= 5) pattern = "Crowd Ignition";
-  else if (move >= 15 && catalystScore < 20) pattern = "Exhaustion Risk";
-  else if (catalystScore >= 60 && move >= 5) pattern = "Catalyst Momentum";
-  else if (catalystScore >= 40) pattern = "Catalyst Building";
-  else if (hasRealVolume && relativeVolume >= 2 && move >= 2 && crowdScore < 40) pattern = "Pressure Coil";
+  if (candidate.rvol >= 5 && move < 3) pattern = "Quiet Accumulation";
+  else if (candidate.rvol >= 3 && move >= 5) pattern = "Crowd Ignition";
+  else if (move >= 15 && candidate.catalystScore < 20) pattern = "Exhaustion Risk";
+  else if (candidate.catalystScore >= 60 && move >= 5) pattern = "Catalyst Momentum";
+  else if (candidate.catalystScore >= 40) pattern = "Catalyst Building";
+  else if (candidate.rvol >= 2 && move >= 2 && crowdScore < 40) pattern = "Pressure Coil";
 
-  const signalState = momentumScore >= 70 ? "Strong Momentum" :
-    momentumScore >= 50 ? "Developing" : "Watch";
-
+  const signalState = momentumScore >= 70 ? "Strong Momentum" : momentumScore >= 50 ? "Developing" : "Watch";
   let oppScore = htScore;
-
-  if (catalystScore >= 60) oppScore += 22;
-  else if (catalystScore >= 40) oppScore += 14;
-  else if (catalystScore >= 20) oppScore += 7;
-
-  if (relativeVolume >= 5) oppScore += 14;
-  else if (relativeVolume >= 3) oppScore += 10;
-  else if (relativeVolume >= 2) oppScore += 6;
-  else if (relativeVolume >= 1.5) oppScore += 3;
-
+  if (candidate.catalystScore >= 60) oppScore += 22;
+  else if (candidate.catalystScore >= 40) oppScore += 14;
+  else if (candidate.catalystScore >= 20) oppScore += 7;
+  if (candidate.rvol >= 5) oppScore += 14;
+  else if (candidate.rvol >= 3) oppScore += 10;
+  else if (candidate.rvol >= 2) oppScore += 6;
+  else if (candidate.rvol >= 1.5) oppScore += 3;
   if (move >= 10) oppScore += 14;
   else if (move >= 5) oppScore += 10;
   else if (move >= 3) oppScore += 6;
   else if (move >= 1) oppScore += 3;
-
   if (crowdScore < 30) oppScore += 14;
   else if (crowdScore < 45) oppScore += 8;
   else if (crowdScore > 70) oppScore -= 10;
-
-  if (pattern === "Quiet Accumulation") oppScore += 8;
-  else if (pattern === "Pressure Coil") oppScore += 8;
+  if (pattern === "Quiet Accumulation" || pattern === "Pressure Coil") oppScore += 8;
   else if (pattern === "Catalyst Momentum") oppScore += 6;
   else if (pattern === "Exhaustion Risk") oppScore -= 14;
   else if (pattern === "Crowd Ignition") oppScore += 5;
-
   if (trapScore >= 75) oppScore -= 10;
   else if (trapScore >= 60) oppScore -= 5;
-
   if (pool === "before_the_crowd") {
-    oppScore += crowdScore < 35 ? 8 : 0;
-    oppScore -= crowdScore > 60 ? 8 : 0;
+    if (crowdScore < 35) oppScore += 8;
+    if (crowdScore > 60) oppScore -= 8;
   }
 
   return {
-    ticker,
-    price,
-    change_percent: Number(changePercent.toFixed(4)),
-    relative_volume: Number(relativeVolume.toFixed(4)),
-    avg_volume: Math.round(avgVolume),
-    ht_score: htScore,
-    momentum_score: momentumScore,
-    crowd_score: crowdScore,
-    trap_score: trapScore,
-    catalyst_score: catalystScore,
-    volume_score: volumeScore,
-    pattern,
-    state: catalystState || "",
-    signal_state: signalState,
-    scanned_at: new Date().toISOString(),
-    _oppScore: oppScore,
-    _pool: pool,
+    ticker: candidate.ticker, price: candidate.price,
+    change_percent: Number(candidate.changePercent.toFixed(4)),
+    relative_volume: Number(candidate.rvol.toFixed(4)), avg_volume: Math.round(candidate.prevVol),
+    ht_score: htScore, momentum_score: momentumScore, crowd_score: crowdScore,
+    trap_score: trapScore, catalyst_score: candidate.catalystScore, volume_score: volumeScore,
+    pattern, state: candidate.catalystState, signal_state: signalState,
+    security_type: candidate.securityType,
+    retrieved_for_sm: candidate.retrievedForSm,
+    retrieved_for_btc: candidate.retrievedForBtc,
+    retrieved_for_catalyst: candidate.retrievedForCatalyst,
+    scanned_at: new Date().toISOString(), _oppScore: oppScore, _pool: pool,
   };
 }
 
-function isAuthorized(req: Request): boolean {
-  const authHeader = req.headers.get("authorization");
-  const { searchParams } = new URL(req.url);
-  const querySecret = searchParams.get("secret");
-
-  return Boolean(
-    !CRON_SECRET ||
-      authHeader === `Bearer ${CRON_SECRET}` ||
-      querySecret === CRON_SECRET ||
-      querySecret === "htlabs-internal"
-  );
+async function readActiveCatalysts(supabase: ReturnType<typeof getSupabase>) {
+  const map = new Map<string, { score: number; state: string }>();
+  const activeSince = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase.from("ht_catalyst_state")
+    .select("ticker,score,category,last_seen_at")
+    .eq("decay_state", "active")
+    .gte("last_seen_at", activeSince);
+  if (error) { console.warn("[signal-writer] catalyst state unavailable:", error.message); return map; }
+  for (const row of data ?? []) {
+    const ticker = String(row?.ticker ?? "").toUpperCase();
+    const score = Number(row?.score ?? 0);
+    if (!ticker || !Number.isFinite(score)) continue;
+    const existing = map.get(ticker);
+    if (!existing || score > existing.score) map.set(ticker, { score, state: String(row?.category ?? "Verified Catalyst") });
+  }
+  return map;
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────
 export async function GET(req: Request) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!POLYGON_KEY) return NextResponse.json({ error: "Missing POLYGON_API_KEY" }, { status: 500 });
 
-  if (!POLYGON_KEY) {
-    return NextResponse.json({ error: "Missing POLYGON_API_KEY", written: 0 }, { status: 500 });
-  }
-
-  const startTime = Date.now();
+  const supabase = getSupabase();
+  const startedMs = Date.now();
+  const { data: run, error: runError } = await supabase.from("ht_scan_runs")
+    .insert({ engine_version: ENGINE_VERSION, run_type: "signal_writer_v3", status: "running" })
+    .select("id").single();
+  if (runError || !run) return NextResponse.json({ error: "Failed to create scan run", detail: runError?.message }, { status: 500 });
 
   try {
-    let allTickers: any[] = [];
-    let usedFallback = false;
+    const catalystMap = await readActiveCatalysts(supabase);
+    const marketSession = getEasternSession();
+    const response = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Polygon snapshot failed: ${response.status}`);
+    const payload = await response.json();
+    const tickers: any[] = payload?.tickers ?? [];
+    if (!tickers.length) throw new Error("Polygon returned an empty market snapshot.");
 
-    const snapshotRes = await fetch(
-      `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?include_otc=false&apiKey=${POLYGON_KEY}`,
-      { cache: "no-store" }
-    );
-
-    if (snapshotRes.ok) {
-      const data = await snapshotRes.json();
-      allTickers = data.tickers ?? [];
-      console.log(`[signal-writer] Full market snapshot: ${allTickers.length} tickers`);
-    } else {
-      console.warn(`[signal-writer] Full snapshot failed: ${snapshotRes.status} — using fallback universe`);
-      usedFallback = true;
-    }
-
-    if (usedFallback || allTickers.length === 0) {
-      const fallbackRes = await fetch(
-        `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${FALLBACK_UNIVERSE.join(",")}&apiKey=${POLYGON_KEY}`,
-        { cache: "no-store" }
-      );
-
-      if (fallbackRes.ok) {
-        const data = await fallbackRes.json();
-        allTickers = data.tickers ?? [];
-        console.log(`[signal-writer] Fallback universe: ${allTickers.length} tickers`);
-      }
-    }
-
-    if (allTickers.length === 0) {
-      return NextResponse.json({
-        success: false,
-        error: "No data from Polygon. Existing verified signals were not overwritten.",
-        written: 0,
-      });
-    }
-
-    const smPool: any[] = [];
-    const btcPool: any[] = [];
-
-    for (const t of allTickers) {
-      const ticker = t.ticker;
+    const candidates = new Map<string, Candidate>();
+    for (const row of tickers) {
+      const ticker = String(row?.ticker ?? "").toUpperCase();
       if (!ticker) continue;
-      if (isWarrantOrUnit(ticker)) continue;
-
-      const price = Number(t.lastTrade?.p || t.day?.c || t.prevDay?.c || 0);
-      const prevClose = Number(t.prevDay?.c || 0);
-      const changePercent = prevClose > 0
-        ? ((price - prevClose) / prevClose) * 100
-        : Number(t.todaysChangePerc || 0);
-      const currentVol = Number(t.day?.v || 0);
-      const prevVol = Number(t.prevDay?.v || 0);
-
-      if (prevVol < 10000) continue;
-      if (price <= 0) continue;
-
-      const rvol = currentVol > 0 ? currentVol / prevVol : 0;
-
-      // Production fix:
-      // Main HT signal pools are bullish/positive momentum only.
-      // A -8% selloff may be interesting, but it is not Spot Momentum Before the Crowd.
-      // That should be a separate bearish/recovery engine later.
-      if (changePercent <= 0) continue;
-
-      if (rvol >= 2 && changePercent >= 1) {
-        smPool.push({ ticker, price, changePercent, rvol, prevVol });
-      } else if (rvol >= 1.3 && changePercent >= 0.5) {
-        btcPool.push({ ticker, price, changePercent, rvol, prevVol });
-      }
-    }
-
-    console.log(`[signal-writer] SM pool: ${smPool.length} candidates, BTC pool: ${btcPool.length} candidates`);
-
-    const topForNews = [
-      ...smPool
-        .sort((a, b) => (b.rvol * b.changePercent) - (a.rvol * a.changePercent))
-        .slice(0, 25),
-      ...btcPool
-        .sort((a, b) => (b.rvol * b.changePercent) - (a.rvol * a.changePercent))
-        .slice(0, 15),
-    ].map((t) => t.ticker);
-
-    const catalystData = await fetchCatalystScores([...new Set(topForNews)]);
-
-    const scored: any[] = [];
-
-    for (const t of smPool) {
-      const cat = catalystData.get(t.ticker);
-      scored.push(computeSignal(
-        t.ticker,
-        t.price,
-        t.changePercent,
-        t.rvol,
-        cat?.score ?? 0,
-        cat?.state ?? "",
-        "spot_momentum",
-        t.prevVol
-      ));
-    }
-
-    for (const t of btcPool) {
-      const cat = catalystData.get(t.ticker);
-      scored.push(computeSignal(
-        t.ticker,
-        t.price,
-        t.changePercent,
-        t.rvol,
-        cat?.score ?? 0,
-        cat?.state ?? "",
-        "before_the_crowd",
-        t.prevVol
-      ));
-    }
-
-    const sorted = scored.sort((a, b) => b._oppScore - a._oppScore);
-    const topCandidate = sorted[0];
-
-    const isQuietOrWeakMarket =
-      !topCandidate ||
-      sorted.length < MIN_WRITABLE_SIGNALS ||
-      topCandidate._oppScore < MIN_TOP_OPP_SCORE ||
-      topCandidate.change_percent < MIN_TOP_CHANGE_PERCENT ||
-      topCandidate.relative_volume < MIN_TOP_RVOL;
-
-    if (isQuietOrWeakMarket) {
-      return NextResponse.json({
-        success: true,
-        marketState: "quiet_or_weak",
-        message: "No new verified positive momentum signal. Existing verified signals were not overwritten.",
-        totalScanned: allTickers.length,
-        smCandidates: smPool.length,
-        btcCandidates: btcPool.length,
-        written: 0,
-        usedFallback,
-        topOpportunities: topCandidate
-          ? [`${topCandidate.ticker}(${topCandidate.change_percent.toFixed(1)}% rvol:${topCandidate.relative_volume.toFixed(1)}x score:${Math.round(topCandidate._oppScore)})`]
-          : [],
-        elapsed: `${Date.now() - startTime}ms`,
-        timestamp: new Date().toISOString(),
+      const price = resolveSnapshotPrice(row);
+      const changePercent = resolveSnapshotChangePercent(row, price);
+      const currentVolume = Math.max(Number(row?.day?.v || 0), Number(row?.min?.av || 0));
+      const previousVolume = Number(row?.prevDay?.v || 0);
+      if (price <= 0 || previousVolume < 10_000) continue;
+      const rawVolumeRatio = currentVolume > 0 ? currentVolume / previousVolume : 0;
+      const rvol = Math.min(25, rawVolumeRatio / marketSession.expectedVolumeFraction);
+      const catalyst = catalystMap.get(ticker);
+      const retrievedForSm = changePercent > 0 && rvol >= 1.5 && changePercent >= 0.5;
+      const retrievedForBtc = changePercent > 0 && rvol >= 1.2 && changePercent >= 0.2;
+      const retrievedForCatalyst = Boolean(catalyst && catalyst.score >= 20);
+      if (!retrievedForSm && !retrievedForBtc && !retrievedForCatalyst) continue;
+      candidates.set(ticker, {
+        ticker, price, changePercent, rvol, prevVol: previousVolume, securityType: null,
+        retrievedForSm, retrievedForBtc, retrievedForCatalyst,
+        catalystScore: catalyst?.score ?? 0, catalystState: catalyst?.state ?? "",
       });
     }
 
-    const top100 = sorted
-      .slice(0, 100)
-      .map(({ _oppScore, _pool, ...row }) => row);
+    // Production fails closed on security type. Cache misses are enriched on
+    // demand through Polygon, so a cron race with shadow retrieval cannot let
+    // ETFs, warrants, units, or unknown instruments enter a promoted run.
+    const metadata = await loadSecurityMetadata(supabase, [...candidates.keys()]);
+    let unsupportedSecurityTypes = 0;
+    let unknownSecurityTypes = 0;
+    for (const [ticker, candidate] of candidates) {
+      const security = metadata.byTicker.get(ticker);
+      if (!security?.security_type) {
+        unknownSecurityTypes += 1;
+        candidates.delete(ticker);
+        continue;
+      }
+      if (!security.is_supported) {
+        unsupportedSecurityTypes += 1;
+        candidates.delete(ticker);
+        continue;
+      }
+      candidate.securityType = security.security_type;
+    }
 
-    const topTickers = sorted.slice(0, 5).map((r) =>
-      `${r.ticker}(${r.change_percent.toFixed(1)}% rvol:${r.relative_volume.toFixed(1)}x score:${Math.round(r._oppScore)})`
-    );
-
-    console.log(`[signal-writer] Top 5: ${topTickers.join(", ")}`);
+    const rows = [...candidates.values()].map((candidate) => ({
+      ...computeSignal(candidate, candidate.retrievedForSm ? "spot_momentum" : "before_the_crowd"),
+      scan_run_id: run.id,
+    }));
+    if (rows.length < 3) {
+      await supabase.from("ht_scan_runs").update({
+        status: "success", completed_at: new Date().toISOString(), promoted: false,
+        candidate_counts: { totalSnapshotTickers: tickers.length, runRows: rows.length, note: "Quiet market. No promotion." },
+      }).eq("id", run.id);
+      return NextResponse.json({ success: true, runId: run.id, marketState: "quiet_or_weak", written: 0, candidates: rows.length });
+    }
 
     let written = 0;
-    const supabase = getSupabase();
-
-    for (let i = 0; i < top100.length; i += 25) {
-      const batch = top100.slice(i, i + 25);
-      const { error } = await supabase
-        .from("ht_signals")
-        .upsert(batch, { onConflict: "ticker" });
-
-      if (error) console.error("[signal-writer] Upsert error:", error.message);
-      else written += batch.length;
+    for (let i = 0; i < rows.length; i += 100) {
+      const batch = rows.slice(i, i + 100).map(({ _oppScore, _pool, ...row }) => row);
+      const { error } = await supabase.from("ht_signal_run_rows").insert(batch);
+      if (error) throw new Error(`Run-row insert failed: ${error.message}`);
+      written += batch.length;
     }
 
-    return NextResponse.json({
-      success: true,
-      marketState: "active_verified",
-      message: "Verified positive momentum signals written.",
-      totalScanned: allTickers.length,
-      smCandidates: smPool.length,
-      btcCandidates: btcPool.length,
-      written,
-      usedFallback,
-      topOpportunities: topTickers,
-      elapsed: `${Date.now() - startTime}ms`,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err: any) {
-    console.error("[signal-writer] Fatal:", err.message);
-    return NextResponse.json({ error: err.message, written: 0 }, { status: 500 });
+    const compatibility = [...rows].sort((a, b) => b._oppScore - a._oppScore).slice(0, 100)
+      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, _oppScore, _pool, ...row }) => row);
+    for (let i = 0; i < compatibility.length; i += 25) {
+      const { error } = await supabase.from("ht_signals").upsert(compatibility.slice(i, i + 25), { onConflict: "ticker" });
+      if (error) console.error("[signal-writer] compatibility write failed:", error.message);
+    }
+
+    await supabase.from("ht_scan_runs").update({
+      status: "success", completed_at: new Date().toISOString(), promoted: true, promoted_at: new Date().toISOString(),
+      candidate_counts: {
+        totalSnapshotTickers: tickers.length, runRows: rows.length, marketSession: marketSession.name,
+        retrievedForSm: rows.filter((r) => r.retrieved_for_sm).length,
+        retrievedForBtc: rows.filter((r) => r.retrieved_for_btc).length,
+        retrievedForCatalyst: rows.filter((r) => r.retrieved_for_catalyst).length,
+        securityMetadataCacheHits: metadata.cacheHits,
+        securityMetadataFetched: metadata.fetched,
+        securityMetadataFetchFailures: metadata.fetchFailures,
+        unsupportedSecurityTypes,
+        unknownSecurityTypes,
+      },
+    }).eq("id", run.id);
+
+    return NextResponse.json({ success: true, runId: run.id, engineVersion: ENGINE_VERSION, runRowsWritten: written, elapsedMs: Date.now() - startedMs });
+  } catch (error: any) {
+    await supabase.from("ht_scan_runs").update({ status: "failed", completed_at: new Date().toISOString(), error_summary: error?.message ?? "Unknown failure" }).eq("id", run.id);
+    return NextResponse.json({ error: error?.message ?? "Signal writer failed", runId: run.id }, { status: 500 });
   }
 }

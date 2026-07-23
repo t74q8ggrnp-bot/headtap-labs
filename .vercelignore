@@ -1,0 +1,4 @@
+copy file/
+copy file.zip
+app/lock-test/
+*.backup

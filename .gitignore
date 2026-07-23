@@ -40,3 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# local project snapshots / transfer artifacts
+/copy file/
+/copy file.zip

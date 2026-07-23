@@ -29,12 +29,6 @@ body {
    Applied before React hydrates so old sections never flash.
    ─────────────────────────────────────────────────────────── */
 
-/* Hide old home/marketing section before React loads */
-#home { display: none !important; }
-
-/* Hide old premium terminal */
-#premium-terminal { display: none !important; }
-
 /* On mobile: hide desktop layout before mobile overlay mounts */
 @media (max-width: 767px) {
   .ht-simplified-ui > .relative.z-10 {

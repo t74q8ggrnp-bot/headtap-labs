@@ -1,0 +1,57 @@
+"use client";
+
+import { useCallback, useState } from "react";
+import {
+  normalizeOpportunity,
+  type Opportunity,
+} from "@/lib/opportunity-model";
+
+type OpportunityPayload = { opportunities?: unknown[] };
+
+async function readOpportunities(response: Response) {
+  if (!response.ok) throw new Error(`Opportunity request failed (${response.status})`);
+  const payload = (await response.json()) as OpportunityPayload;
+  return (payload.opportunities ?? []).map(normalizeOpportunity);
+}
+
+export function useOpportunityFeed() {
+  const [spotMomentum, setSpotMomentum] = useState<Opportunity | null>(null);
+  const [catalyst, setCatalyst] = useState<Opportunity | null>(null);
+  const [beforeCrowd, setBeforeCrowd] = useState<Opportunity[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    try {
+      const primaryRequest = fetch("/api/opportunities?type=momentum&limit=1");
+      const secondaryRequest = Promise.all([
+        fetch("/api/opportunities?type=catalyst&limit=3"),
+        fetch("/api/opportunities?type=before_crowd&limit=5"),
+      ]);
+
+      const primary = await readOpportunities(await primaryRequest);
+      setSpotMomentum(primary[0] ?? null);
+      setLoading(false);
+
+      const [catalystResponse, beforeCrowdResponse] = await secondaryRequest;
+      const [catalysts, beforeCrowdOpportunities] = await Promise.all([
+        readOpportunities(catalystResponse),
+        readOpportunities(beforeCrowdResponse),
+      ]);
+      setCatalyst(catalysts[0] ?? null);
+      setBeforeCrowd(beforeCrowdOpportunities);
+    } catch (error) {
+      // Preserve the last verified response during transient refresh failures.
+      console.warn("API opportunities fetch failed:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return {
+    spotMomentum,
+    catalyst,
+    beforeCrowd,
+    loading,
+    refresh,
+  };
+}

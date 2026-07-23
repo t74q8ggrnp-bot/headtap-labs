@@ -22,7 +22,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const MAX_SIGNAL_AGE_HOURS = 96;
+const ACTIVE_MAX_SIGNAL_AGE_HOURS = 20 / 60;
+const CLOSED_MAX_SIGNAL_AGE_HOURS = 8;
 
 type HealthCheck = {
   name: string;
@@ -36,6 +37,22 @@ function hoursSince(value: any) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return Infinity;
   return (Date.now() - timestamp) / (1000 * 60 * 60);
+}
+
+function isActiveMarketSession(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? NaN);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? NaN);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || weekday === "Sat" || weekday === "Sun") return false;
+  const minutes = hour * 60 + minute;
+  return minutes >= 240 && minutes < 1200;
 }
 
 function getSupabase() {
@@ -54,6 +71,9 @@ function getSupabase() {
 
 export async function GET() {
   const checks: HealthCheck[] = [];
+  const maxSignalAgeHours = isActiveMarketSession()
+    ? ACTIVE_MAX_SIGNAL_AGE_HOURS
+    : CLOSED_MAX_SIGNAL_AGE_HOURS;
 
   const hasSupabaseUrl = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const hasSupabaseKey = Boolean(
@@ -96,6 +116,62 @@ export async function GET() {
       checks,
       timestamp: new Date().toISOString(),
     }, { status: 500 });
+  }
+
+  // Home and Scanner read the latest promoted run-scoped dataset.
+  try {
+    const { data: promotedRun, error: promotedRunError } = await supabase
+      .from("ht_scan_runs")
+      .select("id,completed_at,engine_version,candidate_counts")
+      .eq("run_type", "signal_writer_v3")
+      .eq("status", "success")
+      .eq("promoted", true)
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (promotedRunError) throw promotedRunError;
+
+    const runAge = hoursSince(promotedRun?.completed_at);
+    checks.push({
+      name: "promoted_run_freshness",
+      ok: Boolean(promotedRun) && runAge <= maxSignalAgeHours,
+      message: !promotedRun
+        ? "No promoted authoritative scan run exists."
+        : runAge <= maxSignalAgeHours
+          ? "Latest authoritative scan run is fresh."
+          : "Latest authoritative scan run is stale.",
+      detail: promotedRun ? {
+        runId: promotedRun.id,
+        completedAt: promotedRun.completed_at,
+        ageHours: Number.isFinite(runAge) ? Number(runAge.toFixed(2)) : null,
+        engineVersion: promotedRun.engine_version,
+      } : null,
+    });
+
+    let runRowCount = 0;
+    if (promotedRun?.id) {
+      const { count, error: countError } = await supabase
+        .from("ht_signal_run_rows")
+        .select("*", { count: "exact", head: true })
+        .eq("scan_run_id", promotedRun.id);
+      if (countError) throw countError;
+      runRowCount = count ?? 0;
+    }
+    checks.push({
+      name: "promoted_run_rows",
+      ok: runRowCount > 0,
+      message: runRowCount > 0
+        ? "Authoritative run rows are available to Home and Scanner."
+        : "The latest authoritative run has no readable rows.",
+      detail: { count: runRowCount },
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "promoted_run_pipeline",
+      ok: false,
+      message: "Could not verify the authoritative run-scoped pipeline.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 
   let latestSignal: any = null;
@@ -157,13 +233,13 @@ export async function GET() {
 
     checks.push({
       name: "signal_freshness",
-      ok: age <= MAX_SIGNAL_AGE_HOURS,
-      message: age <= MAX_SIGNAL_AGE_HOURS
+      ok: age <= maxSignalAgeHours,
+      message: age <= maxSignalAgeHours
         ? "Latest verified signal is within acceptable freshness window."
         : "Latest signal is too stale for homepage confidence.",
       detail: {
         ageHours: Number.isFinite(age) ? Number(age.toFixed(2)) : null,
-        maxAgeHours: MAX_SIGNAL_AGE_HOURS,
+        maxAgeHours: Number(maxSignalAgeHours.toFixed(2)),
         scanned_at: latestSignal.scanned_at,
       },
     });
