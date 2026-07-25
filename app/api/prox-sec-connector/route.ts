@@ -157,6 +157,27 @@ const ITEM_CODE_CATEGORY_PRIORITY: [string, ProxCatalystCategory][] = [
   ["3.01", "delisting_compliance"],
 ];
 
+// Phase 4 (partial) — SEC's own submissions API publishes each company's
+// former names with date ranges. Free, deterministic, no AI needed. Only
+// fetched once per entity (new entity, or one whose former_names is still
+// empty) — former names essentially never change, no reason to re-fetch
+// on every run.
+async function fetchFormerNames(cik: number): Promise<{ name: string; from: string | null; to: string | null }[]> {
+  try {
+    const paddedCik = String(cik).padStart(10, "0");
+    const res = await fetch(`https://data.sec.gov/submissions/CIK${paddedCik}.json`, {
+      headers: { "User-Agent": SEC_USER_AGENT },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const formerNames = Array.isArray(data?.formerNames) ? data.formerNames : [];
+    return formerNames.map((f: any) => ({ name: String(f?.name ?? ""), from: f?.from ?? null, to: f?.to ?? null }));
+  } catch {
+    return [];
+  }
+}
+
 function classifyEvent(formType: FormType, itemCodes: string[]): ProxCatalystCategory {
   if (formType === "4") return "insider_transaction";
   if (formType === "8-K") {
@@ -170,7 +191,7 @@ function classifyEvent(formType: FormType, itemCodes: string[]): ProxCatalystCat
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const diagnostics = { fetched: 0, newEvents: 0, duplicates: 0, resolved: 0, unresolved: 0, errors: 0 };
+  const diagnostics = { fetched: 0, newEvents: 0, duplicates: 0, resolved: 0, unresolved: 0, errors: 0, formerNamesFetched: 0 };
 
   try {
     const supabase = getSupabase();
@@ -266,18 +287,44 @@ export async function GET(req: Request) {
 
         if (tickerEntry && entry.cik !== null) {
           diagnostics.resolved++;
-          const { data: entity } = await supabase
+          const cikStr = String(entry.cik);
+
+          const { data: existingEntity } = await supabase
             .from("prox_entities")
-            .upsert(
-              { cik: String(entry.cik), company_name: tickerEntry.title, ticker: tickerEntry.ticker, updated_at: new Date().toISOString() },
-              { onConflict: "cik" },
-            )
-            .select("id")
-            .single();
+            .select("id, former_names")
+            .eq("cik", cikStr)
+            .maybeSingle();
+
+          let entityId: string | null = existingEntity?.id ?? null;
+          const needsFormerNames =
+            !existingEntity || !Array.isArray(existingEntity.former_names) || existingEntity.former_names.length === 0;
+
+          if (needsFormerNames) {
+            const formerNames = await fetchFormerNames(entry.cik);
+            if (formerNames.length > 0) diagnostics.formerNamesFetched++;
+            if (existingEntity) {
+              await supabase
+                .from("prox_entities")
+                .update({ company_name: tickerEntry.title, ticker: tickerEntry.ticker, former_names: formerNames, updated_at: new Date().toISOString() })
+                .eq("id", existingEntity.id);
+            } else {
+              const { data: newEntity } = await supabase
+                .from("prox_entities")
+                .insert({ cik: cikStr, company_name: tickerEntry.title, ticker: tickerEntry.ticker, former_names: formerNames })
+                .select("id")
+                .single();
+              entityId = newEntity?.id ?? null;
+            }
+          } else {
+            await supabase
+              .from("prox_entities")
+              .update({ company_name: tickerEntry.title, ticker: tickerEntry.ticker, updated_at: new Date().toISOString() })
+              .eq("id", existingEntity!.id);
+          }
 
           await supabase.from("prox_event_tickers").insert({
             event_id: insertedEvent.id,
-            entity_id: entity?.id ?? null,
+            entity_id: entityId,
             ticker: tickerEntry.ticker,
             match_confidence: 100,
             match_method: "cik_lookup",

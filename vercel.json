@@ -35,6 +35,10 @@
     {
       "path": "/api/prox-sec-connector?secret=htlabs-internal",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/prox-market-sensor?secret=htlabs-internal",
+      "schedule": "*/2 * * * *"
     }
   ]
 }
