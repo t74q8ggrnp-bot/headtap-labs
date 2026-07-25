@@ -31,6 +31,10 @@
     {
       "path": "/api/outcome-tracker?secret=htlabs-internal",
       "schedule": "0 0 * * 2-6"
+    },
+    {
+      "path": "/api/prox-sec-connector?secret=htlabs-internal",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
