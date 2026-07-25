@@ -1,11 +1,17 @@
 // app/api/prox-sec-connector/route.ts
 //
-// Pro X Phase 2 — first real connector. Fetches recent SEC EDGAR 8-K and
-// 6-K filings, resolves company -> ticker via SEC's own CIK-to-ticker
-// mapping, deduplicates by accession number, classifies 8-K catalysts
-// deterministically from the Item numbers SEC itself publishes (no AI,
-// no guessing), and stores every event with a direct link to the primary
-// filing as evidence.
+// Pro X Phase 2 — first real connector. Fetches recent SEC EDGAR 8-K, 6-K,
+// and Form 4 (insider transaction) filings, resolves company -> ticker via
+// SEC's own CIK-to-ticker mapping, deduplicates by accession number,
+// classifies 8-K catalysts deterministically from the Item numbers SEC
+// itself publishes (no AI, no guessing), and stores every event with a
+// direct link to the primary filing as evidence.
+//
+// Form 4 quirk: each filing publishes two linked feed entries sharing one
+// accession number — one tagged "(Reporting)" for the insider person, one
+// "(Issuer)" for the actual public company. Only the CIK on the Issuer
+// entry maps to a ticker, so the Reporting entry is dropped at parse time
+// rather than raced against dedup.
 //
 // Discovery only. Does not read from or write to any ht_* table, and does
 // not feed the canonical HT Labs engine — see docs/PROX_ARCHITECTURE.md
@@ -13,7 +19,9 @@
 //
 // Requires supabase/migrations/0001_prox_foundation.sql to have been run
 // first (creates prox_sources, prox_entities, prox_events, prox_evidence,
-// prox_event_tickers and seeds the two SEC source rows).
+// prox_event_tickers). Source rows themselves are self-healing — see
+// REQUIRED_SOURCES below — so adding a new form type never needs a second
+// manual migration.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -30,8 +38,23 @@ const CRON_SECRET = process.env.CRON_SECRET;
 // SEC requires a descriptive User-Agent with real contact info per its
 // fair-access policy — update the email if this ever needs to change.
 const SEC_USER_AGENT = "HT Labs Pro X research@gethtlabs.com";
-const FORM_TYPES = ["8-K", "6-K"] as const;
+const FORM_TYPES = ["8-K", "6-K", "4"] as const;
 type FormType = (typeof FORM_TYPES)[number];
+
+const SOURCE_KEY_BY_FORM: Record<FormType, string> = {
+  "8-K": "sec_edgar_8k",
+  "6-K": "sec_edgar_6k",
+  "4": "sec_edgar_form4",
+};
+
+// Self-healing: upserted every run instead of requiring a manual seed step.
+// Adding a new form type to FORM_TYPES only needs an entry here, never a
+// second manual migration.
+const REQUIRED_SOURCES = [
+  { source_key: "sec_edgar_8k", display_name: "SEC EDGAR — Form 8-K", tier: "primary", base_credibility: 95 },
+  { source_key: "sec_edgar_6k", display_name: "SEC EDGAR — Form 6-K", tier: "primary", base_credibility: 95 },
+  { source_key: "sec_edgar_form4", display_name: "SEC EDGAR — Form 4 (insider transaction)", tier: "primary", base_credibility: 95 },
+];
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -69,13 +92,14 @@ async function fetchCikTickerMap(): Promise<Map<number, TickerMapEntry>> {
 type SecFeedEntry = {
   cik: number | null;
   companyRaw: string;
+  role: string | null; // 'Filer' | 'Issuer' | 'Reporting' | ...
   linkHref: string;
   accessionNumber: string;
   filedAt: string | null;
   itemCodes: string[];
 };
 
-function parseSecAtomFeed(xml: string): SecFeedEntry[] {
+function parseSecAtomFeed(xml: string, formType: FormType): SecFeedEntry[] {
   const entries: SecFeedEntry[] = [];
   const blocks = xml.split("<entry>").slice(1);
   for (const block of blocks) {
@@ -87,10 +111,17 @@ function parseSecAtomFeed(xml: string): SecFeedEntry[] {
     const title = titleMatch[1].trim();
     const cikMatch = title.match(/\((\d{10})\)/);
     const cik = cikMatch ? Number(cikMatch[1]) : null;
+    const roleMatch = title.match(/\(([A-Za-z]+)\)\s*$/);
+    const role = roleMatch ? roleMatch[1] : null;
     const companyRaw = title
       .replace(/^[\w.-]+\s*-\s*/, "")
-      .replace(/\(\d{10}\)\s*\(Filer\)\s*$/, "")
+      .replace(/\(\d{10}\)\s*\([A-Za-z]+\)\s*$/, "")
       .trim();
+
+    // Form 4 publishes one entry per party on the filing (insider + issuer,
+    // same accession number). Only the Issuer entry's CIK maps to a public
+    // ticker — drop everything else here, before dedup ever sees it.
+    if (formType === "4" && role !== "Issuer") continue;
 
     const summaryMatch = block.match(/<summary type="html">([\s\S]*?)<\/summary>/);
     const summary = summaryMatch ? summaryMatch[1] : "";
@@ -101,6 +132,7 @@ function parseSecAtomFeed(xml: string): SecFeedEntry[] {
     entries.push({
       cik,
       companyRaw,
+      role,
       linkHref: linkMatch[1],
       accessionNumber: idMatch[1],
       filedAt: filedMatch
@@ -125,9 +157,12 @@ const ITEM_CODE_CATEGORY_PRIORITY: [string, ProxCatalystCategory][] = [
   ["3.01", "delisting_compliance"],
 ];
 
-function classifyFromItemCodes(itemCodes: string[]): ProxCatalystCategory {
-  for (const [code, category] of ITEM_CODE_CATEGORY_PRIORITY) {
-    if (itemCodes.includes(code)) return category;
+function classifyEvent(formType: FormType, itemCodes: string[]): ProxCatalystCategory {
+  if (formType === "4") return "insider_transaction";
+  if (formType === "8-K") {
+    for (const [code, category] of ITEM_CODE_CATEGORY_PRIORITY) {
+      if (itemCodes.includes(code)) return category;
+    }
   }
   return "unclassified";
 }
@@ -140,32 +175,45 @@ export async function GET(req: Request) {
   try {
     const supabase = getSupabase();
 
-    const { data: sources, error: sourcesError } = await supabase
+    // Table existence still requires the manual migration (no DDL access
+    // here), but the rows inside it are self-healing — this makes adding
+    // a new form type a one-line change to REQUIRED_SOURCES, not a second
+    // trip to the SQL editor.
+    const { error: upsertSourcesError } = await supabase
       .from("prox_sources")
-      .select("id, source_key")
-      .in("source_key", ["sec_edgar_8k", "sec_edgar_6k"]);
-    if (sourcesError) throw sourcesError;
-    const sourceIdByKey = new Map((sources ?? []).map((s: any) => [s.source_key as string, s.id as string]));
-    if (!sourceIdByKey.has("sec_edgar_8k") || !sourceIdByKey.has("sec_edgar_6k")) {
+      .upsert(REQUIRED_SOURCES, { onConflict: "source_key" });
+    if (upsertSourcesError) {
       return NextResponse.json(
-        { error: "prox_sources not seeded — run supabase/migrations/0001_prox_foundation.sql first." },
+        {
+          error: `Could not write prox_sources (${upsertSourcesError.message}) — has supabase/migrations/0001_prox_foundation.sql been run yet?`,
+        },
         { status: 500 },
       );
     }
 
+    const { data: sources, error: sourcesError } = await supabase
+      .from("prox_sources")
+      .select("id, source_key")
+      .in("source_key", Object.values(SOURCE_KEY_BY_FORM));
+    if (sourcesError) throw sourcesError;
+    const sourceIdByKey = new Map((sources ?? []).map((s: any) => [s.source_key as string, s.id as string]));
+
     const cikMap = await fetchCikTickerMap();
 
     for (const formType of FORM_TYPES as readonly FormType[]) {
-      const sourceKey = formType === "8-K" ? "sec_edgar_8k" : "sec_edgar_6k";
-      const sourceId = sourceIdByKey.get(sourceKey)!;
-      const url = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=${formType}&company=&dateb=&owner=include&count=100&output=atom`;
+      const sourceId = sourceIdByKey.get(SOURCE_KEY_BY_FORM[formType]);
+      if (!sourceId) {
+        diagnostics.errors++;
+        continue;
+      }
+      const url = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=${encodeURIComponent(formType)}&company=&dateb=&owner=include&count=100&output=atom`;
 
       const res = await fetch(url, { headers: { "User-Agent": SEC_USER_AGENT }, cache: "no-store" });
       if (!res.ok) {
         diagnostics.errors++;
         continue;
       }
-      const entries = parseSecAtomFeed(await res.text());
+      const entries = parseSecAtomFeed(await res.text(), formType);
       diagnostics.fetched += entries.length;
 
       for (const entry of entries) {
@@ -181,8 +229,7 @@ export async function GET(req: Request) {
         }
 
         const tickerEntry = entry.cik ? cikMap.get(entry.cik) : undefined;
-        const catalystCategory: ProxCatalystCategory =
-          formType === "8-K" ? classifyFromItemCodes(entry.itemCodes) : "unclassified";
+        const catalystCategory: ProxCatalystCategory = classifyEvent(formType, entry.itemCodes);
 
         const { data: insertedEvent, error: insertError } = await supabase
           .from("prox_events")
