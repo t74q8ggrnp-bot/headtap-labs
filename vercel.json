@@ -39,6 +39,10 @@
     {
       "path": "/api/prox-market-sensor?secret=htlabs-internal",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/trading-bot?secret=htlabs-internal",
+      "schedule": "*/5 8-23 * * 1-5"
     }
   ]
 }
