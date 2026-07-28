@@ -113,8 +113,16 @@ function computeBotScore(candidate: CanonicalOpportunity): number | null {
   return entryQuality + rrBonus - riskTagPenalty;
 }
 
-async function fetchTopCandidates(baseUrl: string): Promise<CanonicalOpportunity[]> {
-  const res = await fetch(`${baseUrl}/api/opportunities?type=momentum&limit=10`, { cache: "no-store" });
+// Deliberately NOT derived from req.url's origin. Vercel Cron invokes this
+// route on a per-deployment *.vercel.app URL, which sits behind Vercel's
+// Deployment Protection (SSO wall) — an internal fetch built from that origin
+// gets redirected to a login page instead of real data, throws parsing invalid
+// JSON, and 500s the whole cycle before a single candidate is ever evaluated.
+// The custom domain isn't behind that wall, so it's hardcoded here instead.
+const SITE_ORIGIN = "https://gethtlabs.com";
+
+async function fetchTopCandidates(): Promise<CanonicalOpportunity[]> {
+  const res = await fetch(`${SITE_ORIGIN}/api/opportunities?type=momentum&limit=10`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch canonical opportunities: ${res.status}`);
   const data = await res.json();
   return (data.opportunities ?? []) as CanonicalOpportunity[];
@@ -234,8 +242,7 @@ export async function GET(req: Request) {
       .eq("status", "open");
 
     if ((openCount ?? 0) < MAX_CONCURRENT_POSITIONS) {
-      const baseUrl = new URL(req.url).origin;
-      const candidates = await fetchTopCandidates(baseUrl);
+      const candidates = await fetchTopCandidates();
       diagnostics.candidatesConsidered = candidates.length;
 
       const heldTickers = new Set((openTrades ?? []).map((t) => t.ticker));
