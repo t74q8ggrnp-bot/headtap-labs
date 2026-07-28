@@ -96,3 +96,16 @@ export type AlpacaOrder = { id: string; status: string; filled_avg_price: string
 export async function getOrder(orderId: string): Promise<AlpacaOrder> {
   return alpacaFetch(`/v2/orders/${orderId}`);
 }
+
+// Best-effort cleanup for an order that never confirmed filled within the
+// poll window (see pollForFill) — clears it so a retry next cycle doesn't
+// collide with a stale pending order. Swallow failures: if it already filled
+// or already got cancelled/expired on Alpaca's side, DELETE just 404s, which
+// isn't this caller's problem to handle.
+export async function cancelOrder(orderId: string): Promise<void> {
+  try {
+    await alpacaFetch(`/v2/orders/${orderId}`, { method: "DELETE" });
+  } catch {
+    // best-effort
+  }
+}

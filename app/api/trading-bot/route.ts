@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   alpacaConfigured,
+  cancelOrder,
   getAccount,
   getOrder,
   getPositions,
@@ -81,23 +82,30 @@ function isAuthorized(req: Request) {
   return authHeader === `Bearer ${CRON_SECRET}`;
 }
 
-// Market orders on Alpaca's paper API usually fill within a second, but not
-// synchronously with the order-placement response — filled_avg_price is null
-// until it does. Polling briefly here keeps entry/exit price (and therefore
-// stop-loss math and booked P&L) tied to what actually filled, not the
-// scan-time snapshot or a stale pre-sell quote.
-async function pollFilledPrice(orderId: string, fallbackPrice: number): Promise<number> {
+// Market orders on Alpaca's paper API usually fill within a second when
+// placed during regular market hours — but a "day" order placed outside
+// regular hours (no extended_hours flag is set anywhere in this file) simply
+// never fills, full stop. Confirmed live: a sell submitted 5 minutes after
+// the 4pm ET close never filled, yet the old code fell back to a snapshot
+// price and declared it closed anyway — bot_trades said "sold, -5.35%" while
+// the position sat fully open and unmonitored on Alpaca for hours afterward,
+// because a row marked closed never gets checked again. Returning whether it
+// actually filled (instead of silently substituting a fallback price and
+// assuming success) lets the caller refuse to lie about order state.
+async function pollForFill(orderId: string): Promise<{ filled: true; price: number } | { filled: false; price: null }> {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const order = await getOrder(orderId);
       const filledPrice = Number(order?.filled_avg_price);
-      if (order?.status === "filled" && Number.isFinite(filledPrice) && filledPrice > 0) return filledPrice;
+      if (order?.status === "filled" && Number.isFinite(filledPrice) && filledPrice > 0) {
+        return { filled: true, price: filledPrice };
+      }
     } catch (err) {
       console.error(`[trading-bot] order status poll failed for ${orderId}:`, err);
     }
     if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  return fallbackPrice;
+  return { filled: false, price: null };
 }
 
 // Some assets Alpaca lists reject notional (dollar-amount) orders outright —
@@ -219,6 +227,7 @@ export async function GET(req: Request) {
     closed: 0,
     candidatesConsidered: 0,
     opened: 0,
+    unfilled: 0,
     errors: 0,
   };
 
@@ -290,7 +299,24 @@ export async function GET(req: Request) {
       if (hitHardStop || hitTrailingStop || pastMaxHold) {
         try {
           const order = await placeSellQty(trade.ticker, position.qty);
-          const exitPrice = order?.id ? await pollFilledPrice(order.id, currentPrice) : currentPrice;
+          const fillResult = order?.id
+            ? await pollForFill(order.id)
+            : ({ filled: false, price: null } as const);
+
+          if (!fillResult.filled) {
+            // Do NOT mark this closed — it isn't. Likely cause: the order
+            // was placed outside regular hours (no extended_hours flag set)
+            // and simply won't fill until the next session. Leaving status
+            // "open" means the next cycle re-checks it and retries the exit,
+            // instead of the database claiming a sale that never happened
+            // while the real position sits unmanaged.
+            if (order?.id) await cancelOrder(order.id);
+            diagnostics.unfilled++;
+            console.error(`[trading-bot] sell for ${trade.ticker} did not fill (order ${order?.id ?? "none"}) — left open for retry`);
+            continue;
+          }
+
+          const exitPrice = fillResult.price;
           const exitReason = hitTrailingStop ? "trailing_stop" : hitHardStop ? "stop" : "time_limit";
           const pnl = (exitPrice - entryPrice) * Number(position.qty);
           const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : null;
@@ -362,7 +388,22 @@ export async function GET(req: Request) {
           }
 
           const { order, qty } = await placeBuyOrder(candidate.ticker, positionNotional, candidate.price);
-          const entryPrice = order?.id ? await pollFilledPrice(order.id, candidate.price) : candidate.price;
+          const fillResult = order?.id ? await pollForFill(order.id) : ({ filled: false, price: null } as const);
+
+          if (!fillResult.filled) {
+            // Same principle as the exit side: don't record a position that
+            // isn't real. Most likely cause outside regular hours (no
+            // extended_hours flag) is the order just never fills — cancel it
+            // and let the next cycle try again with a fresh top candidate,
+            // rather than inserting an "open" row for a position that was
+            // never actually bought.
+            if (order?.id) await cancelOrder(order.id);
+            diagnostics.unfilled++;
+            console.error(`[trading-bot] buy for ${candidate.ticker} did not fill (order ${order?.id ?? "none"}) — skipped`);
+            return NextResponse.json({ success: true, diagnostics, timestamp: new Date().toISOString() });
+          }
+
+          const entryPrice = fillResult.price;
           const now = new Date();
           await supabase.from("bot_trades").insert({
             ticker: candidate.ticker,

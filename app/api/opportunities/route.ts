@@ -76,11 +76,26 @@ function isActiveMarketSession(now = new Date()) {
 }
 
 function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
-  const reasons = [...tf.hardFailures];
-  // Resistance-distance upside is small by definition for a stock that
-  // hasn't broken out yet — the exact profile Before The Crowd wants. Only
-  // Spot Momentum ("is there room left to run") treats it as a hard gate.
-  if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible") {
+  const isExtremeMomentum = strategy === "spot_momentum"
+    && c.change >= EXTREME_MOMENTUM_MIN_CHANGE
+    && c.relativeVolume >= EXTREME_MOMENTUM_MIN_RVOL;
+
+  // A verified, high-volume move this large already IS the thesis working —
+  // same principle as the crowd/trap bypass below, extended to the R:R/
+  // magnitude hard gate itself. That gate measures upside as distance to the
+  // nearest resistance level in the last 20 daily bars, which reads as ~zero
+  // once a stock has already blown through every recent high (confirmed
+  // live: INLF ran 40-70%+ intraday and never appeared anywhere in Spot
+  // Momentum, hero tier or otherwise, because of exactly this). That's a gap
+  // in what the model measures, not evidence the move isn't real. Insufficient-
+  // data and stale-price hard failures are NOT bypassed here — those are
+  // actual data-quality problems, unrelated to how extended the move is.
+  const isMagnitudeRelatedHardFailure = (r: string) =>
+    r.startsWith("R:R ") || r === "Modeled downside is excessive in absolute and volatility-relative terms.";
+  const reasons = isExtremeMomentum
+    ? tf.hardFailures.filter((r) => !isMagnitudeRelatedHardFailure(r))
+    : [...tf.hardFailures];
+  if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible" && !isExtremeMomentum) {
     reasons.push("Reward magnitude is negligible.");
   }
   if (!isSupportedType(c.securityType)) {
@@ -96,9 +111,6 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   ) {
     reasons.push("Signal is too old to rank during an active market session.");
   }
-  const isExtremeMomentum = strategy === "spot_momentum"
-    && c.change >= EXTREME_MOMENTUM_MIN_CHANGE
-    && c.relativeVolume >= EXTREME_MOMENTUM_MIN_RVOL;
   if (strategy === "spot_momentum") {
     if (!c.retrievedForSm && !c.retrievedForCatalyst) reasons.push("Did not qualify for Spot Momentum retrieval.");
     if (c.change <= 0) reasons.push("Spot Momentum requires positive movement.");
@@ -116,21 +128,15 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
     if (c.trapScore >= 55) reasons.push("Trap risk exceeds the Before The Crowd ceiling.");
   }
   const eligible = reasons.length === 0;
-  // A stock up 50-70%+ in a day has already blown through every resistance
-  // level in its recent daily bars, so the framework's upside (distance to
-  // next resistance) reads as ~zero and it hard-fails R:R/magnitude — not
-  // because the trade is bad, but because "distance to a ceiling that no
-  // longer exists" doesn't describe a runaway mover. This flags candidates
-  // that are ONLY excluded for that reason (every other gate — security
-  // type, freshness, retrieval, positive movement — still passes) so a
-  // consumer that wants to reason about continuation (real volume, still
-  // climbing) rather than modeled R:R can consider them. Never added to the
-  // default `opportunities` list; strictly opt-in via `includeExtreme=1`.
-  const isMagnitudeRelatedReason = (r: string) =>
-    r.startsWith("R:R ") || r === "Reward magnitude is negligible." ||
-    r === "Modeled downside is excessive in absolute and volatility-relative terms.";
-  const otherReasons = reasons.filter((r) => !isMagnitudeRelatedReason(r));
-  const extremeMomentumEligible = strategy === "spot_momentum" && isExtremeMomentum && !eligible && otherReasons.length === 0;
+  // A genuinely clean extreme-momentum candidate — every gate other than the
+  // (now-bypassed-above) magnitude one passes. For most of these `eligible`
+  // above is already true, since the bypass already dropped the R:R/downside
+  // reasons from `reasons` directly. This flag stays independent of that
+  // (not `!eligible`) so the trading bot's separate continuation-scoring
+  // pool (see /api/trading-bot — it can't use modeled R:R here either, since
+  // upsideMax is the same near-zero number) still gets populated even in the
+  // rarer case something else on top still blocks full eligibility.
+  const extremeMomentumEligible = strategy === "spot_momentum" && isExtremeMomentum && reasons.length === 0;
   const strength = signalStrength(c, strategy);
   const tradeQuality = tf.rrRatio === null ? 0 : Math.max(0, Math.min(100, Math.round(Math.min(1, tf.rrRatio / 3) * 55 + (tf.magnitudeQuality === "meaningful" ? 25 : 0) + Math.max(0, 100 - (tf.extensionRisk ?? 100)) * 0.2)));
   const qualityScore = Math.round(strength * 0.55 + tradeQuality * 0.3 + (tf.entryQuality ?? 0) * 0.15);
