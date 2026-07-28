@@ -77,3 +77,9 @@ export async function placeSellQty(ticker: string, qty: string) {
     }),
   });
 }
+
+export type AlpacaOrder = { id: string; status: string; filled_avg_price: string | null };
+
+export async function getOrder(orderId: string): Promise<AlpacaOrder> {
+  return alpacaFetch(`/v2/orders/${orderId}`);
+}

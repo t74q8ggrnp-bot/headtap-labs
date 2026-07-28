@@ -20,6 +20,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   alpacaConfigured,
   getAccount,
+  getOrder,
   getPositions,
   placeBuyNotional,
   placeSellQty,
@@ -57,11 +58,34 @@ function getSupabase() {
   return createClient(url, key);
 }
 
+// No hardcoded fallback secret here (unlike other routes in this codebase) —
+// this route places real orders against the paper account, and the repo is
+// public, so a guessable bypass string would let anyone force trades outside
+// the cron schedule. Vercel auto-injects the real Authorization header on its
+// own cron calls, so this alone is sufficient for the schedule to keep working.
 function isAuthorized(req: Request) {
   if (!CRON_SECRET) return false;
   const authHeader = req.headers.get("authorization");
-  const querySecret = new URL(req.url).searchParams.get("secret");
-  return authHeader === `Bearer ${CRON_SECRET}` || querySecret === CRON_SECRET || querySecret === "htlabs-internal";
+  return authHeader === `Bearer ${CRON_SECRET}`;
+}
+
+// Market orders on Alpaca's paper API usually fill within a second, but not
+// synchronously with the order-placement response — filled_avg_price is null
+// until it does. Polling briefly here keeps entry/exit price (and therefore
+// stop-loss math and booked P&L) tied to what actually filled, not the
+// scan-time snapshot or a stale pre-sell quote.
+async function pollFilledPrice(orderId: string, fallbackPrice: number): Promise<number> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const order = await getOrder(orderId);
+      const filledPrice = Number(order?.filled_avg_price);
+      if (order?.status === "filled" && Number.isFinite(filledPrice) && filledPrice > 0) return filledPrice;
+    } catch (err) {
+      console.error(`[trading-bot] order status poll failed for ${orderId}:`, err);
+    }
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return fallbackPrice;
 }
 
 type CanonicalOpportunity = {
@@ -178,15 +202,16 @@ export async function GET(req: Request) {
       if (hitHardStop || hitTrailingStop || pastMaxHold) {
         try {
           const order = await placeSellQty(trade.ticker, position.qty);
+          const exitPrice = order?.id ? await pollFilledPrice(order.id, currentPrice) : currentPrice;
           const exitReason = hitTrailingStop ? "trailing_stop" : hitHardStop ? "stop" : "time_limit";
-          const pnl = (currentPrice - entryPrice) * Number(position.qty);
-          const pnlPercent = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : null;
+          const pnl = (exitPrice - entryPrice) * Number(position.qty);
+          const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : null;
           await supabase
             .from("bot_trades")
             .update({
               status: "closed",
               exit_order_id: order?.id ?? null,
-              exit_price: currentPrice,
+              exit_price: exitPrice,
               exit_at: now.toISOString(),
               exit_reason: exitReason,
               pnl,
@@ -234,7 +259,7 @@ export async function GET(req: Request) {
           }
 
           const order = await placeBuyNotional(candidate.ticker, positionNotional);
-          const entryPrice = candidate.price;
+          const entryPrice = order?.id ? await pollFilledPrice(order.id, candidate.price) : candidate.price;
           const now = new Date();
           await supabase.from("bot_trades").insert({
             ticker: candidate.ticker,
