@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-declare global { interface Window { _htScannerLastFetch?: number } }
+declare global { interface Window { _htScannerLastFetch?: number; _htOpportunitiesLastFetch?: number } }
 
 import { motion } from "framer-motion";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -6942,17 +6942,32 @@ function HomeInner() {
 
 
   useEffect(() => {
-    // Fetch news for top stocks so hero card always has context
-    const topStocksForFetch = stocks.slice(0, 12);
-    if (liveHeroTarget && !topStocksForFetch.find(s => s.symbol === liveHeroTarget.symbol)) {
-      topStocksForFetch.push(liveHeroTarget);
-    }
-    topStocksForFetch.forEach((stock) => {
-      fetchNews(stock.symbol);
-    });
+    // fetchAPIOpportunities hits /api/opportunities 5x, each evaluating up to
+    // 100 tickers against live Polygon/Supabase data — expensive. This effect
+    // re-runs on every `stocks` update, which happens at minimum every 30s
+    // (the fetchStocks interval below) and more often during initial load as
+    // several data sources resolve — but the underlying opportunities data
+    // only actually changes every 5 minutes (the signal-writer cron cadence).
+    // Confirmed live: this was firing the same 5-request + 12-news-request
+    // burst far more often than that, the dominant cost behind slow/flaky
+    // mobile loads. Same throttle idiom as scanner_expansion right below,
+    // just applied here too — 60s keeps it feeling live without redoing work
+    // the backend hasn't refreshed yet.
+    if (!window._htOpportunitiesLastFetch || Date.now() - window._htOpportunitiesLastFetch > 60 * 1000) {
+      window._htOpportunitiesLastFetch = Date.now();
 
-    // Fetch API opportunities on every scan
-    fetchAPIOpportunities();
+      // Fetch news for top stocks so hero card always has context
+      const topStocksForFetch = stocks.slice(0, 12);
+      if (liveHeroTarget && !topStocksForFetch.find(s => s.symbol === liveHeroTarget.symbol)) {
+        topStocksForFetch.push(liveHeroTarget);
+      }
+      topStocksForFetch.forEach((stock) => {
+        fetchNews(stock.symbol);
+      });
+
+      // Fetch API opportunities on every scan
+      fetchAPIOpportunities();
+    }
 
     // Fetch expanded scanner universe every 5 minutes
     if (!window._htScannerLastFetch || Date.now() - window._htScannerLastFetch > 5 * 60 * 1000) {
