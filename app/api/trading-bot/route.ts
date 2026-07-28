@@ -38,6 +38,17 @@ const POSITION_SIZE_PERCENT = 0.05;
 const MAX_CONCURRENT_POSITIONS = 3;
 const MIN_RR_RATIO = 1.5;
 const MAX_HOLD_DAYS = 3;
+// Hard floor under the canonical framework's own downsideRisk. That number
+// comes from ATR/support-distance on daily bars and can come out under 1% —
+// which on names volatile enough to swing double digits inside a minute
+// means getting stopped out by ordinary noise before a real move even starts
+// (confirmed happening live: MDT and LU both got stopped at <2% moves within
+// the same hour they were bought). A tight downsideRisk also mechanically
+// inflates R:R (it's upside ÷ downside), so without this floor the scoring
+// was structurally biased toward picking the most fragile stops, not the
+// safest trades. User's explicit ask: "four to five percent before it even
+// looks like it might go down" — 5% chosen, the wider end of that range.
+const MIN_STOP_LOSS_PERCENT = 5;
 
 // Trailing-stop exit, confirmed with the user against real math before
 // building it. A single fixed take-profit computed once at entry sells a
@@ -95,6 +106,19 @@ type CanonicalOpportunity = {
   tradeFramework: { rrRatio: number | null; entryQuality: number | null; upsideMax: number | null; downsideRisk: number | null } | null;
 };
 
+// Effective downside is never tighter than MIN_STOP_LOSS_PERCENT, regardless
+// of what the framework's own downsideRisk says — this is the actual distance
+// the bot will place its stop at (see entry construction below), so R:R and
+// the eligibility floor both need to be judged against that real number, not
+// the framework's optimistic tight-stop figure. Using tf.rrRatio directly
+// here previously meant a stock with a razor-thin theoretical stop scored
+// artificially high (tiny downside inflates upside÷downside), which is
+// exactly backwards — it rewarded the most fragile setups, not the safest.
+function effectiveDownsidePercent(tf: NonNullable<CanonicalOpportunity["tradeFramework"]>): number | null {
+  if (tf.downsideRisk === null) return null;
+  return Math.max(tf.downsideRisk, MIN_STOP_LOSS_PERCENT);
+}
+
 // Deliberately the opposite emphasis from the canonical hero's display
 // ranking. HT Labs' own opportunityScore now favors raw magnitude — the
 // right call for "what should the headline show." It's the wrong call
@@ -105,9 +129,11 @@ type CanonicalOpportunity = {
 // anything below a 1.5 R:R outright rather than just scoring it lower.
 function computeBotScore(candidate: CanonicalOpportunity): number | null {
   const tf = candidate.tradeFramework;
-  const rr = tf?.rrRatio ?? null;
+  if (!tf || tf.upsideMax === null) return null;
+  const downside = effectiveDownsidePercent(tf);
+  const rr = downside && downside > 0 ? tf.upsideMax / downside : null;
   if (rr === null || rr < MIN_RR_RATIO) return null;
-  const entryQuality = tf?.entryQuality ?? 0;
+  const entryQuality = tf.entryQuality ?? 0;
   const rrBonus = Math.min(30, rr * 10);
   const riskTagPenalty = candidate.riskTags.length * 10;
   return entryQuality + rrBonus - riskTagPenalty;
@@ -279,7 +305,10 @@ export async function GET(req: Request) {
             // trailing stop below, not this fixed number. Kept so the
             // viewer can still show "what HT Labs originally modeled."
             target_price: tf.upsideMax !== null ? entryPrice * (1 + tf.upsideMax / 100) : null,
-            stop_price: tf.downsideRisk !== null ? entryPrice * (1 - tf.downsideRisk / 100) : null,
+            stop_price: (() => {
+              const downside = effectiveDownsidePercent(tf);
+              return downside !== null ? entryPrice * (1 - downside / 100) : null;
+            })(),
             high_water_mark: entryPrice,
             max_hold_until: new Date(now.getTime() + MAX_HOLD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
             bot_score: score,
