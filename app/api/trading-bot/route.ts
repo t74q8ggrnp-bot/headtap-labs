@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   alpacaConfigured,
+  getAccount,
   getPositions,
   placeBuyNotional,
   placeSellQty,
@@ -29,7 +30,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const CRON_SECRET = process.env.CRON_SECRET;
-const POSITION_NOTIONAL = 1000;
+// Position size is a % of *current* account equity, not a flat dollar
+// amount — stays proportional as the paper account grows/shrinks from
+// testing, rather than becoming meaningless at a fixed number.
+const POSITION_SIZE_PERCENT = 0.05;
 const MAX_CONCURRENT_POSITIONS = 3;
 const MIN_RR_RATIO = 1.5;
 const MAX_HOLD_DAYS = 3;
@@ -193,7 +197,14 @@ export async function GET(req: Request) {
         const { candidate, score } = best;
         const tf = candidate.tradeFramework!;
         try {
-          const order = await placeBuyNotional(candidate.ticker, POSITION_NOTIONAL);
+          const account = await getAccount();
+          const equity = Number(account?.equity ?? account?.cash ?? 0);
+          const positionNotional = Math.round(equity * POSITION_SIZE_PERCENT * 100) / 100;
+          if (!Number.isFinite(positionNotional) || positionNotional <= 0) {
+            throw new Error(`Could not determine a valid position size from account equity (${equity}).`);
+          }
+
+          const order = await placeBuyNotional(candidate.ticker, positionNotional);
           const entryPrice = candidate.price;
           const now = new Date();
           await supabase.from("bot_trades").insert({
@@ -202,7 +213,7 @@ export async function GET(req: Request) {
             entry_order_id: order?.id ?? null,
             entry_price: entryPrice,
             entry_at: now.toISOString(),
-            position_notional: POSITION_NOTIONAL,
+            position_notional: positionNotional,
             target_price: tf.upsideMax !== null ? entryPrice * (1 + tf.upsideMax / 100) : null,
             stop_price: tf.downsideRisk !== null ? entryPrice * (1 - tf.downsideRisk / 100) : null,
             max_hold_until: new Date(now.getTime() + MAX_HOLD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
