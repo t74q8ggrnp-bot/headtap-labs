@@ -1,4 +1,79 @@
-# Session handoff — 2026-07-27
+# Session handoff — 2026-07-27 (updated 2026-07-28)
+
+## Update 2026-07-28 — trading bot fully wired, one switch away from live
+
+Everything below "What's in progress right now" is now further along.
+Read this update section first, it supersedes some of the original text.
+
+**Confirmed done since the original handoff:**
+- Alpaca paper keys are in Vercel (`ALPACA_API_KEY`, `ALPACA_SECRET_KEY`),
+  verified with a real account check (status ACTIVE, account
+  `PA3U5LCNTQLK`, real balance data returned) — not just "env vars
+  present," Alpaca itself accepted the credentials.
+- `supabase/migrations/0003_trading_bot.sql` confirmed run in the
+  correct **HT Labs** project (`htlabs-v1`, not Bettr Vision — verified
+  in Table Editor).
+- Position sizing changed from a flat $1,000 to **5% of current account
+  equity per trade** (fetched live from Alpaca at entry time, not
+  hardcoded), max 3 concurrent — both user-confirmed.
+- **Exit logic rebuilt as a tiered trailing stop** (replaced the
+  original flat "sell at modeled target" logic, which had the exact "oh
+  we made 8%, sell" problem the user wanted to avoid):
+  - Under 8% gain: no trailing yet, just the original hard stop-loss
+    (from canonical `downsideRisk`).
+  - 8-25% gain: trail 15% behind the peak price reached since entry.
+  - Above 25% gain: trail tightened to **5%** behind the peak (was 8%,
+    tightened per explicit user request — "four to five percent...
+    lock in some profits").
+  - Original stop-loss and 3-day max hold both still apply throughout as
+    absolute backstops regardless of trailing state.
+  - `target_price` is now informational only (still shows what HT Labs
+    originally modeled) — the trailing stop is what actually decides
+    the exit.
+  - Requires `supabase/migrations/0004_bot_trades_high_water_mark.sql`
+    (adds the `high_water_mark` tracking column) —
+    **confirm this has been run** before enabling the bot. If it
+    hasn't: a buy order could execute successfully through Alpaca but
+    fail to save its tracking row (untracked open position). Same
+    verify-before-enabling pattern as migration 0003.
+- Re-entry after a close already works with no code change — confirmed
+  with the user via a worked example (buy JEM $2 → sell $2.50 → rebuy
+  $2.05 → sell $2.55, repeat). A closed position just isn't "held"
+  anymore, so the ticker is fully eligible again next cycle if it still
+  qualifies.
+
+**Not yet done — the actual "go" switch**: `TRADING_BOT_ENABLED` is
+still not set to `"true"`. Confirmed via live check as of this update:
+`alpacaConfigured: true`, `enabled: false`. Everything is ready; this is
+a deliberate, still-open decision point, not an oversight.
+
+**New, well-scoped follow-up requested by the user — not built yet**:
+a "fast rate" exit refinement. The user wants a sharp, fast drop (their
+words: "drops more than four to five percent at a fast rate") to be
+treated differently from a slow drift of the same magnitude — i.e., the
+*velocity* of a pullback should matter, not just how far it's pulled
+back. This maps directly onto data Pro X's market sensor already
+computes (`prox_market_features.velocity_1m` / `acceleration_5m`) but
+the trading bot currently does NOT read any Pro X data at all — it's
+strategy-independent of Pro X entirely right now, reading only
+`/api/opportunities`. Building this properly means:
+1. Deciding exactly what "fast" means quantitatively (e.g., a specific
+   `velocity_1m` threshold, or "X% pullback within N minutes" using
+   `prox_market_features`'s `computed_at` timestamps to measure rate).
+2. Having the trading-bot route query `prox_market_features` for each
+   held ticker (a genuine, deliberate cross-system read — still fine
+   architecturally, since Pro X was always meant to be usable as "a
+   tool," per the user's own framing, just not done yet).
+3. Deciding what happens on a "fast drop" detection: sell immediately
+   regardless of the tiered trail's current threshold? Only fast-track
+   the exit if already past the 8% trail-start point? This is a real
+   design decision, not just an implementation detail — needs the same
+   propose-concrete-numbers-and-confirm treatment as the trailing stop
+   was built with.
+
+This is a good next thing to build once picked back up — don't rush it
+into a partial implementation; it deserves the same care the trailing
+stop got.
 
 Continuing work on HT Labs (headtap-labs repo). This session hit ~83% of
 context; picking up in a new chat. Read this whole file before doing
