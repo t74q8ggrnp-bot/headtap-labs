@@ -48,7 +48,7 @@ const MAX_HOLD_DAYS = 3;
 const MIN_PROFIT_TO_TRAIL_PERCENT = 8; // below this, no trailing yet — just the hard stop
 const WIDE_TRAIL_PERCENT = 15; // pullback from peak allowed while gain is 8-25%
 const EXTENDED_GAIN_THRESHOLD_PERCENT = 25;
-const TIGHT_TRAIL_PERCENT = 8; // pullback from peak allowed once gain exceeds 25%
+const TIGHT_TRAIL_PERCENT = 5; // pullback from peak allowed once gain exceeds 25% (user: "4-5%, lock in profits")
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
