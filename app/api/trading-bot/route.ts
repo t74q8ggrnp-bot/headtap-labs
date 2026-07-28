@@ -38,6 +38,18 @@ const MAX_CONCURRENT_POSITIONS = 3;
 const MIN_RR_RATIO = 1.5;
 const MAX_HOLD_DAYS = 3;
 
+// Trailing-stop exit, confirmed with the user against real math before
+// building it. A single fixed take-profit computed once at entry sells a
+// real winner the moment it clears a small target — this instead trails
+// behind the peak price since entry, tightening only once a move is
+// genuinely extended, so it locks in gains without capping the upside of
+// a real run. The original stop-loss (from downsideRisk) stays active as
+// an absolute floor the whole time regardless of trailing state.
+const MIN_PROFIT_TO_TRAIL_PERCENT = 8; // below this, no trailing yet — just the hard stop
+const WIDE_TRAIL_PERCENT = 15; // pullback from peak allowed while gain is 8-25%
+const EXTENDED_GAIN_THRESHOLD_PERCENT = 25;
+const TIGHT_TRAIL_PERCENT = 8; // pullback from peak allowed once gain exceeds 25%
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -143,15 +155,32 @@ export async function GET(req: Request) {
       }
 
       const currentPrice = Number(position.current_price);
-      const hitTarget = trade.target_price !== null && currentPrice >= trade.target_price;
-      const hitStop = trade.stop_price !== null && currentPrice <= trade.stop_price;
+      const entryPrice = Number(trade.entry_price);
+      const priorHighWaterMark = Number(trade.high_water_mark ?? entryPrice);
+      const highWaterMark = Math.max(priorHighWaterMark, currentPrice);
+      if (highWaterMark > priorHighWaterMark) {
+        await supabase
+          .from("bot_trades")
+          .update({ high_water_mark: highWaterMark, updated_at: now.toISOString() })
+          .eq("id", trade.id);
+      }
 
-      if (hitTarget || hitStop || pastMaxHold) {
+      const gainFromEntry = entryPrice > 0 ? ((highWaterMark - entryPrice) / entryPrice) * 100 : 0;
+      const hitHardStop = trade.stop_price !== null && currentPrice <= trade.stop_price;
+
+      let hitTrailingStop = false;
+      if (gainFromEntry >= MIN_PROFIT_TO_TRAIL_PERCENT) {
+        const trailPercent = gainFromEntry >= EXTENDED_GAIN_THRESHOLD_PERCENT ? TIGHT_TRAIL_PERCENT : WIDE_TRAIL_PERCENT;
+        const trailingStopPrice = highWaterMark * (1 - trailPercent / 100);
+        if (currentPrice <= trailingStopPrice) hitTrailingStop = true;
+      }
+
+      if (hitHardStop || hitTrailingStop || pastMaxHold) {
         try {
           const order = await placeSellQty(trade.ticker, position.qty);
-          const exitReason = hitTarget ? "target" : hitStop ? "stop" : "time_limit";
-          const pnl = (currentPrice - Number(trade.entry_price)) * Number(position.qty);
-          const pnlPercent = trade.entry_price ? ((currentPrice - trade.entry_price) / trade.entry_price) * 100 : null;
+          const exitReason = hitTrailingStop ? "trailing_stop" : hitHardStop ? "stop" : "time_limit";
+          const pnl = (currentPrice - entryPrice) * Number(position.qty);
+          const pnlPercent = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : null;
           await supabase
             .from("bot_trades")
             .update({
@@ -214,8 +243,12 @@ export async function GET(req: Request) {
             entry_price: entryPrice,
             entry_at: now.toISOString(),
             position_notional: positionNotional,
+            // Informational only now — the actual sell decision is the
+            // trailing stop below, not this fixed number. Kept so the
+            // viewer can still show "what HT Labs originally modeled."
             target_price: tf.upsideMax !== null ? entryPrice * (1 + tf.upsideMax / 100) : null,
             stop_price: tf.downsideRisk !== null ? entryPrice * (1 - tf.downsideRisk / 100) : null,
+            high_water_mark: entryPrice,
             max_hold_until: new Date(now.getTime() + MAX_HOLD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
             bot_score: score,
             entry_snapshot: candidate,

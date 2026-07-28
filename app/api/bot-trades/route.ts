@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 
     const { data: trades, error } = await supabase
       .from("bot_trades")
-      .select("id, ticker, status, entry_price, entry_at, position_notional, target_price, stop_price, max_hold_until, exit_price, exit_at, exit_reason, pnl, pnl_percent, bot_score")
+      .select("id, ticker, status, entry_price, entry_at, position_notional, target_price, stop_price, high_water_mark, max_hold_until, exit_price, exit_at, exit_reason, pnl, pnl_percent, bot_score")
       .order("entry_at", { ascending: false })
       .limit(limit);
     if (error) throw error;

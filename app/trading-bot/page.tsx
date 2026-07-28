@@ -16,6 +16,7 @@ type BotTrade = {
   position_notional: number;
   target_price: number | null;
   stop_price: number | null;
+  high_water_mark: number | null;
   max_hold_until: string | null;
   exit_price: number | null;
   exit_at: string | null;
@@ -138,7 +139,9 @@ export default function TradingBotPage() {
                       {trade.pnl >= 0 ? "+" : ""}${trade.pnl.toFixed(2)} ({trade.pnl_percent?.toFixed(1)}%)
                     </p>
                   ) : (
-                    <p className="text-xs text-zinc-500">target ${trade.target_price?.toFixed(2) ?? "—"} / stop ${trade.stop_price?.toFixed(2) ?? "—"}</p>
+                    <p className="text-xs text-zinc-500">
+                      peak ${trade.high_water_mark?.toFixed(2) ?? "—"} / hard stop ${trade.stop_price?.toFixed(2) ?? "—"}
+                    </p>
                   )}
                 </div>
               </div>
