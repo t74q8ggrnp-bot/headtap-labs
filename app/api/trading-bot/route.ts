@@ -23,6 +23,7 @@ import {
   getOrder,
   getPositions,
   placeBuyNotional,
+  placeBuyQty,
   placeSellQty,
   type AlpacaPosition,
 } from "@/lib/trading-bot/alpaca";
@@ -97,6 +98,24 @@ async function pollFilledPrice(orderId: string, fallbackPrice: number): Promise<
     if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 500));
   }
   return fallbackPrice;
+}
+
+// Some assets Alpaca lists reject notional (dollar-amount) orders outright —
+// "asset X is not fractionable" — which previously meant the bot's top pick
+// silently failed and it did nothing that whole cycle, every cycle, for as
+// long as that ticker stayed the best-scored candidate (confirmed live:
+// APUS failed this way on back-to-back 5-minute cycles). Falling back to a
+// whole-share order preserves the actual pick instead of skipping it over a
+// pure execution-mechanics technicality that has nothing to do with trade
+// quality.
+async function placeBuyOrder(ticker: string, notional: number, price: number): Promise<{ order: any; qty: number | null }> {
+  try {
+    return { order: await placeBuyNotional(ticker, notional), qty: null };
+  } catch (err: any) {
+    if (!String(err?.message ?? "").includes("not fractionable")) throw err;
+    const qty = Math.max(1, Math.floor(notional / price));
+    return { order: await placeBuyQty(ticker, qty), qty };
+  }
 }
 
 type CanonicalOpportunity = {
@@ -342,7 +361,7 @@ export async function GET(req: Request) {
             throw new Error(`Could not determine a valid position size from account equity (${equity}).`);
           }
 
-          const order = await placeBuyNotional(candidate.ticker, positionNotional);
+          const { order, qty } = await placeBuyOrder(candidate.ticker, positionNotional, candidate.price);
           const entryPrice = order?.id ? await pollFilledPrice(order.id, candidate.price) : candidate.price;
           const now = new Date();
           await supabase.from("bot_trades").insert({
@@ -351,7 +370,9 @@ export async function GET(req: Request) {
             entry_order_id: order?.id ?? null,
             entry_price: entryPrice,
             entry_at: now.toISOString(),
-            position_notional: positionNotional,
+            // Whole-share fallback (see placeBuyOrder) buys qty*price, not
+            // the original notional target — record what was actually spent.
+            position_notional: qty !== null ? Math.round(qty * entryPrice * 100) / 100 : positionNotional,
             // Informational only now — the actual sell decision is the
             // trailing stop below, not this fixed number. Kept so the
             // viewer can still show "what HT Labs originally modeled."

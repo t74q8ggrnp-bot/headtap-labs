@@ -65,6 +65,19 @@ export async function placeBuyNotional(ticker: string, notional: number) {
   });
 }
 
+export async function placeBuyQty(ticker: string, qty: number) {
+  return alpacaFetch("/v2/orders", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: ticker,
+      qty: qty.toString(),
+      side: "buy",
+      type: "market",
+      time_in_force: "day",
+    }),
+  });
+}
+
 export async function placeSellQty(ticker: string, qty: string) {
   return alpacaFetch("/v2/orders", {
     method: "POST",
