@@ -1,5 +1,82 @@
 # Session handoff — 2026-07-27 (updated 2026-07-28)
 
+## Update 2026-07-28 (later) — bot is LIVE
+
+The "one switch away" section right below this is now fully resolved —
+the bot is enabled and running unattended. If picking up in a new
+session, read this section first.
+
+**Since the last update:**
+- `supabase/migrations/0004_bot_trades_high_water_mark.sql` confirmed run
+  in the HT Labs project (verified via a temp diagnostic route, then
+  removed — same pattern as 0003).
+- Two hardening fixes shipped before enabling, both user-requested after
+  a walkthrough of the full pipeline (scan pool → opportunities ranking →
+  bot scoring → entry/exit):
+  1. **`isAuthorized()` in `app/api/trading-bot/route.ts` no longer
+     accepts a hardcoded fallback secret.** Other routes in this repo
+     (signal-writer, shadow-retrieval, etc.) still accept
+     `?secret=htlabs-internal` as a convenience for manual curling — that
+     was fine for read-only/diagnostic routes, but this repo is **public
+     on GitHub**, and this route places real orders, so a guessable
+     bypass string sitting in public source would let anyone force
+     trades outside the cron schedule. Removed for this route only.
+     Vercel's auto-injected `Authorization: Bearer $CRON_SECRET` header
+     on real cron invocations is unaffected — the schedule keeps working
+     exactly the same. **Tradeoff, confirmed with the user**: nobody,
+     including Claude, can manually force a trading-bot cycle anymore
+     (can't retrieve the real `CRON_SECRET` value even via
+     `vercel env pull` — see the gotcha below). It's fully autonomous on
+     its own schedule now; verification has to happen after the fact by
+     reading results, not by triggering a cycle on demand.
+  2. **Entry/exit price now polls Alpaca for the real `filled_avg_price`**
+     (`pollFilledPrice()`, up to 5 tries / 500ms apart) instead of trusting
+     the scan-time snapshot price (buy) or the position's last-known quote
+     before the sell was submitted (sell). Matters because Spot Momentum
+     names are moving fast by definition — stale reference prices would
+     skew stop-loss timing and booked P&L.
+  - Both fixes deployed and spot-checked live: the old bypass URL now
+    returns 401; `tsc --noEmit` was clean before deploying.
+- Checked the Alpaca paper account directly before flipping the switch:
+  clean, $100k equity, zero open positions, zero stray orders from
+  earlier credential-testing. No confusion risk for the bot's position
+  tracking.
+- **`TRADING_BOT_ENABLED` set to `"true"` in Vercel production, with the
+  user's explicit go-ahead, and redeployed.** Confirmed live via
+  `vercel env ls`. This was a deliberate decision point, not a default —
+  see the "Working style notes" section, this user wants confirmation
+  before this kind of flip and gave it explicitly ("green light... let's
+  run it").
+- Talked through expectations honestly before flipping: told the user
+  the code is solid (gates work, math checks out, hardening's done) but
+  that *profitability is genuinely unknown* — zero trades placed yet, no
+  backtest behind the trailing-stop percentages, this is what the paper
+  run is for. Not investment advice either way.
+- **Cron cadence reminder**: `/api/trading-bot` runs `*/5 8-23 * * 1-5`
+  UTC only (no after-midnight wraparound line, unlike the other crons in
+  `vercel.json`) — so it goes quiet after ~00:00 UTC and picks back up at
+  08:00 UTC (~4:00 AM Eastern, pre-market open). As of this update it was
+  just enabled at ~05:12 UTC, so the first live cycle was expected
+  ~08:00 UTC the same day. User plans to check back around 8–8:30 AM
+  Eastern their time and look at `/trading-bot` / `/api/bot-trades` for
+  what happened overnight.
+- **To disable/stop the bot at any point**: this is NOT harder now than
+  before — `vercel env rm TRADING_BOT_ENABLED production` (or set it to
+  anything other than `"true"`) then redeploy. The auth hardening only
+  removed the ability to force an *unscheduled* run; the on/off switch
+  is untouched and just as easy as it was to turn on. User was
+  reassured on this point after worrying the bot was now
+  uncontrollable — it isn't.
+
+**Still outstanding, not built**: the "fast rate exit" follow-up
+described in the update below (Pro X velocity/acceleration data isn't
+read by the trading bot yet) — nothing changed there this round.
+
+**Next session should probably**: check `/api/bot-trades` for what
+actually happened overnight before doing anything else — don't assume
+either "it worked great" or "it broke," go look at the real rows, same
+standard as everything else in this project.
+
 ## Update 2026-07-28 — trading bot fully wired, one switch away from live
 
 Everything below "What's in progress right now" is now further along.
