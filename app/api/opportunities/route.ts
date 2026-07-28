@@ -116,6 +116,21 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
     if (c.trapScore >= 55) reasons.push("Trap risk exceeds the Before The Crowd ceiling.");
   }
   const eligible = reasons.length === 0;
+  // A stock up 50-70%+ in a day has already blown through every resistance
+  // level in its recent daily bars, so the framework's upside (distance to
+  // next resistance) reads as ~zero and it hard-fails R:R/magnitude — not
+  // because the trade is bad, but because "distance to a ceiling that no
+  // longer exists" doesn't describe a runaway mover. This flags candidates
+  // that are ONLY excluded for that reason (every other gate — security
+  // type, freshness, retrieval, positive movement — still passes) so a
+  // consumer that wants to reason about continuation (real volume, still
+  // climbing) rather than modeled R:R can consider them. Never added to the
+  // default `opportunities` list; strictly opt-in via `includeExtreme=1`.
+  const isMagnitudeRelatedReason = (r: string) =>
+    r.startsWith("R:R ") || r === "Reward magnitude is negligible." ||
+    r === "Modeled downside is excessive in absolute and volatility-relative terms.";
+  const otherReasons = reasons.filter((r) => !isMagnitudeRelatedReason(r));
+  const extremeMomentumEligible = strategy === "spot_momentum" && isExtremeMomentum && !eligible && otherReasons.length === 0;
   const strength = signalStrength(c, strategy);
   const tradeQuality = tf.rrRatio === null ? 0 : Math.max(0, Math.min(100, Math.round(Math.min(1, tf.rrRatio / 3) * 55 + (tf.magnitudeQuality === "meaningful" ? 25 : 0) + Math.max(0, 100 - (tf.extensionRisk ?? 100)) * 0.2)));
   const qualityScore = Math.round(strength * 0.55 + tradeQuality * 0.3 + (tf.entryQuality ?? 0) * 0.15);
@@ -160,6 +175,7 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
     floatDataStatus: breakout.floatDataStatus,
     displayedConfidence: eligible ? Math.min(99, strategyScore) : Math.min(49, Math.round(strength * 0.5)),
     tier, eligibility: { eligible, reasons }, tradeFramework: tf, engineVersion: ENGINE_VERSION,
+    extremeMomentumEligible,
     opportunityScore: strategyScore,
     opportunityType,
     riskTags,
@@ -220,6 +236,11 @@ export async function GET(req: Request) {
     // of rejected candidates and why, same pattern as shadow-retrieval's
     // exclusionSamples — for investigating gate behavior, not for the UI.
     const debug = url.searchParams.get("debug") === "1";
+    // Also opt-in only, and additive — never merged into `opportunities`.
+    // Full objects (not the trimmed rejectedSample shape) since a consumer
+    // evaluating continuation potential needs pattern/momentumScore/crowdScore/
+    // trapScore/tradeFramework, not just the headline numbers.
+    const includeExtreme = url.searchParams.get("includeExtreme") === "1";
     return NextResponse.json({
       opportunities: eligible.slice(0, limit), strategy,
       sourceRun: { id: run.id, completedAt: run.completed_at, engineVersion: run.engine_version, candidateCounts: run.candidate_counts },
@@ -230,6 +251,9 @@ export async function GET(req: Request) {
           crowdScore: c.crowdScore, trapScore: c.trapScore, strategyScore: c.strategyScore,
           reasons: c.eligibility.reasons,
         })),
+      } : {}),
+      ...(includeExtreme ? {
+        extremeCandidates: ranked.filter((c) => c.extremeMomentumEligible).sort((a, b) => b.change - a.change).slice(0, 10),
       } : {}),
       engineVersion: ENGINE_VERSION, timestamp: new Date().toISOString(),
     });

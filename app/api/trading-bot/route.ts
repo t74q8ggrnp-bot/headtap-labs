@@ -104,6 +104,12 @@ type CanonicalOpportunity = {
   price: number;
   riskTags: string[];
   tradeFramework: { rrRatio: number | null; entryQuality: number | null; upsideMax: number | null; downsideRisk: number | null } | null;
+  pattern?: string;
+  momentumScore?: number;
+  crowdScore?: number;
+  trapScore?: number;
+  relativeVolume?: number;
+  signalState?: string;
 };
 
 // Effective downside is never tighter than MIN_STOP_LOSS_PERCENT, regardless
@@ -139,6 +145,32 @@ function computeBotScore(candidate: CanonicalOpportunity): number | null {
   return entryQuality + rrBonus - riskTagPenalty;
 }
 
+// Continuation candidates (see /api/opportunities' extremeMomentumEligible)
+// already guarantee real current volume by construction — everything in that
+// pool is >=25% change AND >=3x relative volume, that's what got it excluded
+// from the modeled-R:R path in the first place rather than just scored low.
+// What this adds is the "isn't stalling" half of that gate. There's no real
+// intrabar deceleration signal available to this bot today (that's what
+// hooking up Pro X's velocity/acceleration data would give — not done, a
+// known gap, not this fix's job to solve) — so this uses the closest proxy
+// the base signal actually has: "Exhaustion Risk" is this codebase's own
+// existing label for "big move, no catalyst backing it, red flag it's
+// running out of steam" (see signal-writer's computeSignal), and momentum
+// still reading strong right now rather than having already cooled off.
+const CONTINUATION_MIN_MOMENTUM_SCORE = 70;
+
+function computeContinuationScore(candidate: CanonicalOpportunity): number | null {
+  if (candidate.pattern === "Exhaustion Risk") return null;
+  const momentumScore = candidate.momentumScore ?? 0;
+  const stillStrong = momentumScore >= CONTINUATION_MIN_MOMENTUM_SCORE || candidate.signalState === "Strong Momentum";
+  if (!stillStrong) return null;
+  const volumeBonus = Math.min(25, (candidate.relativeVolume ?? 0) * 1.5);
+  const crowdPenalty = (candidate.crowdScore ?? 0) * 0.25;
+  const trapPenalty = (candidate.trapScore ?? 0) * 0.25;
+  const riskTagPenalty = candidate.riskTags.length * 10;
+  return Math.max(0, Math.round(momentumScore * 0.6 + volumeBonus - crowdPenalty - trapPenalty - riskTagPenalty));
+}
+
 // Deliberately NOT derived from req.url's origin. Vercel Cron invokes this
 // route on a per-deployment *.vercel.app URL, which sits behind Vercel's
 // Deployment Protection (SSO wall) — an internal fetch built from that origin
@@ -147,11 +179,14 @@ function computeBotScore(candidate: CanonicalOpportunity): number | null {
 // The custom domain isn't behind that wall, so it's hardcoded here instead.
 const SITE_ORIGIN = "https://gethtlabs.com";
 
-async function fetchTopCandidates(): Promise<CanonicalOpportunity[]> {
-  const res = await fetch(`${SITE_ORIGIN}/api/opportunities?type=momentum&limit=10`, { cache: "no-store" });
+async function fetchTopCandidates(): Promise<{ standard: CanonicalOpportunity[]; continuation: CanonicalOpportunity[] }> {
+  const res = await fetch(`${SITE_ORIGIN}/api/opportunities?type=momentum&limit=10&includeExtreme=1`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch canonical opportunities: ${res.status}`);
   const data = await res.json();
-  return (data.opportunities ?? []) as CanonicalOpportunity[];
+  return {
+    standard: (data.opportunities ?? []) as CanonicalOpportunity[],
+    continuation: (data.extremeCandidates ?? []) as CanonicalOpportunity[],
+  };
 }
 
 export async function GET(req: Request) {
@@ -268,25 +303,41 @@ export async function GET(req: Request) {
       .eq("status", "open");
 
     if ((openCount ?? 0) < MAX_CONCURRENT_POSITIONS) {
-      const candidates = await fetchTopCandidates();
-      diagnostics.candidatesConsidered = candidates.length;
+      const { standard, continuation } = await fetchTopCandidates();
+      diagnostics.candidatesConsidered = standard.length + continuation.length;
 
       const heldTickers = new Set((openTrades ?? []).map((t) => t.ticker));
-      let best: { candidate: CanonicalOpportunity; score: number } | null = null;
-      for (const candidate of candidates) {
+      let best: { candidate: CanonicalOpportunity; score: number; isContinuation: boolean } | null = null;
+      for (const candidate of standard) {
         if (heldTickers.has(candidate.ticker)) continue;
         const score = computeBotScore(candidate);
         if (score === null) continue;
-        if (!best || score > best.score) best = { candidate, score };
+        if (!best || score > best.score) best = { candidate, score, isContinuation: false };
+      }
+      // Considered alongside, not instead of, standard picks — the "safest
+      // probable trade" path stays the default; this only fills in when a
+      // real continuation setup scores higher, or when nothing on the
+      // standard path qualifies at all.
+      for (const candidate of continuation) {
+        if (heldTickers.has(candidate.ticker)) continue;
+        const score = computeContinuationScore(candidate);
+        if (score === null) continue;
+        if (!best || score > best.score) best = { candidate, score, isContinuation: true };
       }
 
       if (best) {
-        const { candidate, score } = best;
+        const { candidate, score, isContinuation } = best;
         const tf = candidate.tradeFramework!;
         try {
           const account = await getAccount();
           const equity = Number(account?.equity ?? account?.cash ?? 0);
-          const positionNotional = Math.round(equity * POSITION_SIZE_PERCENT * 100) / 100;
+          // Continuation entries are a higher-variance bet than the modeled
+          // R:R path (no reliable upside number, just volume + momentum
+          // still confirming) — half the normal size for the same reason
+          // the stop-loss floor exists: real exposure, not a guess dressed
+          // up as precision.
+          const sizePercent = isContinuation ? POSITION_SIZE_PERCENT / 2 : POSITION_SIZE_PERCENT;
+          const positionNotional = Math.round(equity * sizePercent * 100) / 100;
           if (!Number.isFinite(positionNotional) || positionNotional <= 0) {
             throw new Error(`Could not determine a valid position size from account equity (${equity}).`);
           }
@@ -312,7 +363,7 @@ export async function GET(req: Request) {
             high_water_mark: entryPrice,
             max_hold_until: new Date(now.getTime() + MAX_HOLD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
             bot_score: score,
-            entry_snapshot: candidate,
+            entry_snapshot: { ...candidate, isContinuationEntry: isContinuation },
           });
           diagnostics.opened++;
         } catch (err) {
