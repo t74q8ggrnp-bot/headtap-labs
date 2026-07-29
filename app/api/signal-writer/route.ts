@@ -20,6 +20,7 @@ type Candidate = {
   ticker: string; price: number; changePercent: number; rvol: number; prevVol: number;
   securityType: string | null; retrievedForSm: boolean; retrievedForBtc: boolean;
   retrievedForCatalyst: boolean; catalystScore: number; catalystState: string;
+  persistenceCount: number;
 };
 
 function getSupabase() {
@@ -64,7 +65,19 @@ function computeSignal(candidate: Candidate, pool: "spot_momentum" | "before_the
   const move = Math.max(0, candidate.changePercent);
   const volumeScore = candidate.rvol > 0 ? clamp(candidate.rvol * 10) : 0;
   const momentumScore = clamp(move * 4 + (move > 0 ? 10 : 0) + Math.min(25, candidate.rvol * 6));
-  const crowdScore = clamp(Math.min(40, candidate.rvol * 8) + Math.min(30, move * 2) + (move > 5 ? 10 : 0));
+  // Genuine independence from momentumScore: how long this ticker has
+  // actually been showing up as an active mover (persistenceCount, from
+  // readRecentPersistence — real scan history, not derivable from this
+  // single snapshot) drives most of the score, blended with a smaller
+  // current-volume component. A first-appearance ticker hasn't had time for
+  // a crowd to arrive yet regardless of how big today's move already reads;
+  // one that's been elevated for the full 30-minute window has, regardless
+  // of its current move%. Previously this was Math.min(40, rvol*8) +
+  // Math.min(30, move*2) — a pure re-derivation of the same two inputs
+  // already driving momentumScore above, with no independent signal at all.
+  const PERSISTENCE_CAP = 6; // ~30 minutes at this cron's 5-minute cadence
+  const persistenceRatio = Math.min(1, candidate.persistenceCount / PERSISTENCE_CAP);
+  const crowdScore = clamp(persistenceRatio * 65 + Math.min(35, candidate.rvol * 5));
   const baseRisk = Math.min(99, move * 3.5);
   const trapScore = clamp(candidate.catalystScore >= 20 ? baseRisk * 0.85 : baseRisk);
   const catalystBonus = candidate.catalystScore > 0 ? Math.min(25, candidate.catalystScore * 0.28) : 0;
@@ -138,6 +151,39 @@ async function readActiveCatalysts(supabase: ReturnType<typeof getSupabase>) {
   return map;
 }
 
+// Genuine independence for "crowd saturation": how many of the recent scan
+// cycles a ticker has already shown up as an active mover, not "how big is
+// the move right now" — which is what momentumScore/rvol already measure,
+// and what crowdScore used to be a pure re-derivation of. A ticker on its
+// first appearance hasn't had time for a crowd to arrive yet, no matter how
+// large today's move already reads; one that's been elevated for 30+
+// minutes has. Bounded to a 30-minute window (~6 cycles at this cadence) so
+// the query stays cheap — not a full-day scan.
+const PERSISTENCE_WINDOW_MS = 30 * 60 * 1000;
+
+async function readRecentPersistence(supabase: ReturnType<typeof getSupabase>, tickers: string[]) {
+  const counts = new Map<string, number>();
+  if (!tickers.length) return counts;
+  const since = new Date(Date.now() - PERSISTENCE_WINDOW_MS).toISOString();
+  const { data, error } = await supabase
+    .from("ht_signal_run_rows")
+    .select("ticker,scan_run_id")
+    .eq("retrieved_for_sm", true)
+    .gte("scanned_at", since)
+    .in("ticker", tickers);
+  if (error) { console.warn("[signal-writer] persistence lookup unavailable:", error.message); return counts; }
+  const runsByTicker = new Map<string, Set<string>>();
+  for (const row of data ?? []) {
+    const ticker = String(row?.ticker ?? "").toUpperCase();
+    const runId = String(row?.scan_run_id ?? "");
+    if (!ticker || !runId) continue;
+    if (!runsByTicker.has(ticker)) runsByTicker.set(ticker, new Set());
+    runsByTicker.get(ticker)!.add(runId);
+  }
+  for (const [ticker, runs] of runsByTicker) counts.set(ticker, runs.size);
+  return counts;
+}
+
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!POLYGON_KEY) return NextResponse.json({ error: "Missing POLYGON_API_KEY" }, { status: 500 });
@@ -178,7 +224,13 @@ export async function GET(req: Request) {
         ticker, price, changePercent, rvol, prevVol: previousVolume, securityType: null,
         retrievedForSm, retrievedForBtc, retrievedForCatalyst,
         catalystScore: catalyst?.score ?? 0, catalystState: catalyst?.state ?? "",
+        persistenceCount: 0,
       });
+    }
+
+    const persistenceMap = await readRecentPersistence(supabase, [...candidates.keys()]);
+    for (const candidate of candidates.values()) {
+      candidate.persistenceCount = persistenceMap.get(candidate.ticker) ?? 0;
     }
 
     // Production fails closed on security type. Cache misses are enriched on
