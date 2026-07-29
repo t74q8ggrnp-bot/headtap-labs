@@ -44,19 +44,11 @@ import {
   getConfidence,
   getRiskProfile,
   getInvalidationRule,
-  getBestTraderFit,
   getConfirmationTrigger,
   getHCECategory,
   isHighConvictionEvent,
-  getNextTriggerShort,
   getRiskGuardrailShort,
 } from "@/app/lib/legacy-stock-scoring";
-
-type MarketBadge = {
-  symbol: string;
-  label: string;
-  change: number;
-};
 
 type ScannerFilter = "all" | "hot" | "bullish" | "watchlist";
 type AllocationStyle = "short" | "swing" | "long";
@@ -68,20 +60,6 @@ type PortfolioHolding = {
   id: string;
   symbol: string;
   amount: string;
-};
-
-type Catalyst = {
-  symbol: string;
-  title: string;
-  impact: "High" | "Medium" | "Watch";
-  note: string;
-};
-
-type HeatSignal = {
-  symbol: string;
-  mentions: string;
-  sentiment: string;
-  score: number;
 };
 
 type NewsItem = {
@@ -132,34 +110,6 @@ const fallbackQuotes: Record<string, Stock> = {
   QQQ: { symbol: "QQQ", price: 534.42, change: 0.91 },
   DIA: { symbol: "DIA", price: 412.2, change: -0.12 },
 };
-
-const catalystRadar: Catalyst[] = [
-  {
-    symbol: "SNAL",
-    title: "Retail Attention Spike",
-    impact: "High",
-    note: "Small-cap attention is moving fast. HT is watching whether crowd interest becomes durable participation. Watch volume retention and pullback behavior.",
-  },
-  {
-    symbol: "NVDA",
-    title: "AI Leadership Tape",
-    impact: "Medium",
-    note: "NVDA is a bellwether for AI risk appetite. Watch whether strength spreads into AMD, SMCI, and QQQ.",
-  },
-  {
-    symbol: "QUBT",
-    title: "Speculative Quantum Watch",
-    impact: "Watch",
-    note: "High-beta quantum attention. Watch continuation after pullbacks instead of chasing first green candles.",
-  },
-];
-
-const heatSignals: HeatSignal[] = [
-  { symbol: "SNAL", mentions: "+214%", sentiment: "Explosive", score: 94 },
-  { symbol: "QUBT", mentions: "+88%", sentiment: "Speculative", score: 81 },
-  { symbol: "PLTR", mentions: "+42%", sentiment: "Accumulating", score: 76 },
-  { symbol: "NVDA", mentions: "+31%", sentiment: "Institutional", score: 72 },
-];
 
 const defaultStarterTickers = [
   "NVDA",
@@ -273,10 +223,10 @@ function HomeInner() {
   const [aiAnalysis, setAiAnalysis] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
-  const [isRefreshing, setIsRefreshing] = useState(true);
+  const [, setIsRefreshing] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scannerFilter, setScannerFilter] = useState<ScannerFilter>("all");
-  const [marketSession, setMarketSession] = useState<
+  const [marketSession] = useState<
     "live" | "premarket" | "afterhours"
   >("live");
   const [news, setNews] = useState<Record<string, NewsItem[]>>({});
@@ -525,9 +475,8 @@ function HomeInner() {
   const [cloudSyncMessage, setCloudSyncMessage] = useState("");
   const [signalMemoryInsight, setSignalMemoryInsight] = useState<SignalMemoryInsight | null>(null);
   const lastSignalMemoryKey = useRef("");
-  const lastOutcomeEvaluationKey = useRef("");
   const [savedSetups, setSavedSetups] = useState<string[]>([]);
-  const [traderMode, setTraderMode] = useState<
+  const [traderMode] = useState<
     "Scalper" | "Momentum" | "Swing" | "Conservative" | "Aggressive"
   >("Momentum");
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
@@ -582,16 +531,6 @@ function HomeInner() {
   const clampScore = (value: number, min = 0, max = 99) => {
     return Math.min(max, Math.max(min, Math.round(value)));
   };
-
-  const marketBadges: MarketBadge[] = [
-    { symbol: "SPY", label: "Broad Market", change: fallbackQuotes.SPY.change },
-    {
-      symbol: "QQQ",
-      label: "Tech Strength",
-      change: fallbackQuotes.QQQ.change,
-    },
-    { symbol: "DIA", label: "Blue Chips", change: fallbackQuotes.DIA.change },
-  ];
 
   const getNewsArticles = (symbol: string) => {
     return newsIntel[symbol]?.articles || news[symbol] || [];
@@ -808,15 +747,6 @@ function HomeInner() {
     return apiFullRankedList;
   }, [scannerFilter, apiFullRankedList, watchlist]);
 
-  const topGainers = useMemo(
-    () =>
-      [...stocks]
-        .filter((stock) => stock.change > 0)
-        .sort((a, b) => b.change - a.change)
-        .slice(0, 3),
-    [stocks],
-  );
-
   const topLosers = useMemo(
     () =>
       [...stocks]
@@ -858,23 +788,6 @@ function HomeInner() {
     if (isSaved) score += 5;
 
     return Math.min(99, Math.max(35, Math.round(score)));
-  };
-
-
-  const getNotificationTrigger = (stock: Stock) => {
-    const attention = getAttentionScore(stock);
-    const signal = getSignalQuality(stock);
-    const rvol = getRelativeVolume(stock);
-
-    if (attention >= 90 && signal >= 85)
-      return "Push-worthy: attention + signal quality aligned.";
-    if (attention >= 80 && rvol >= 3)
-      return "Notify watchlist users if momentum holds.";
-    if (signal >= 85)
-      return "High-quality pressure pocket forming; monitor for the breakout trigger before the crowd piles in.";
-    if (stock.change < 0) return "No push. Wait for reclaim confirmation.";
-
-    return "Monitor only. HT has not detected a crowd-pressure shift worth alerting yet.";
   };
 
 
@@ -1065,36 +978,6 @@ function HomeInner() {
     bullishCount,
     bearishCount,
   ]);
-
-  const dailyActionItems = useMemo(() => {
-    const leader = attentionLeaders[0] || signalLeaders[0];
-
-    return [
-      leader
-        ? `Watch ${leader.symbol} first. Attention score ${getAttentionScore(leader)} with ${getSignalQuality(leader)}/99 signal quality.`
-        : "Wait for scanner data to populate.",
-      hotStocks.length
-        ? "Do not chase extended names. Let pullbacks or reclaim levels form first."
-        : "No major hot-mover cluster yet. Wait for attention expansion.",
-      watchlist.length
-        ? "Check saved watchlist names for alert upgrades before scanning random tickers."
-        : "Add 3-5 tickers to your watchlist to unlock a better daily workflow.",
-    ];
-  }, [stocks, news, watchlist, savedSetups]);
-
-
-
-
-  const traderModes = [
-    "Scalper",
-    "Momentum",
-    "Swing",
-    "Conservative",
-    "Aggressive",
-  ] as const;
-
-
-
 
   const getConvictionScore = (stock: Stock) => {
     const signal = getSignalQuality(stock);
@@ -1324,26 +1207,6 @@ function HomeInner() {
 
 
   type SignalMemoryStatus = "tracking" | "watching" | "winner" | "strong_winner" | "neutral" | "failed" | "failed_momentum" | "fake_momentum" | "trap";
-
-  type OutcomeStatus = "tracking" | "strong_winner" | "winner" | "neutral" | "failed" | "failed_momentum" | "fake_momentum" | "trap";
-
-  type SignalMemoryRow = {
-    id: string;
-    symbol: string;
-    entry_price: number | null;
-    picked_at: string | null;
-    discovery_score: number | null;
-    acceleration_score: number | null;
-    crowd_saturation_score: number | null;
-    opportunity_window: OpportunityWindow | string | null;
-    status: SignalMemoryStatus | string | null;
-    outcome_status: OutcomeStatus | string | null;
-    max_gain: number | null;
-    max_drawdown: number | null;
-    price_1d: number | null;
-    price_3d: number | null;
-    price_5d: number | null;
-  };
 
   type SignalMemoryInsight = {
     tracked: number;
@@ -2814,32 +2677,6 @@ function HomeInner() {
   const secondaryTarget = convictionLeaders[1];
   const dangerTarget = topLosers[0];
 
-  const commandCenterLeaders = convictionLeaders.slice(0, 3);
-  const v26ReadinessScore = priorityTarget
-    ? Math.round(
-        getConvictionScore(priorityTarget) * 0.45 +
-          getAttentionScore(priorityTarget) * 0.3 +
-          getSignalQuality(priorityTarget) * 0.25,
-      )
-    : 0;
-
-  const v26CommandStatus =
-    v26ReadinessScore >= 90
-      ? "Attack Mode"
-      : v26ReadinessScore >= 82
-        ? "Prime Watch"
-        : v26ReadinessScore >= 72
-          ? "Building"
-          : "Standby";
-
-  const v26RiskRule = priorityTarget
-    ? Math.abs(priorityTarget.change) >= 10
-      ? "Do not chase the first vertical move. Wait for pullback, reclaim, or clear continuation."
-      : priorityTarget.change < 0
-        ? "Risk is defensive. Wait for reclaim before treating this as a long idea."
-        : "Attention Spike is tradable only if volume and structure continue confirming."
-    : "Scanner is warming up. Wait for the first clean priority target.";
-
   const canonicalNarrativeReads = mergeOpportunityLists(
     apiMomentum ? [apiMomentum] : [],
     apiBeforeCrowdList,
@@ -2855,35 +2692,6 @@ function HomeInner() {
   const getMarketNarrativeBody = () => canonicalNarrativeLeader
     ? `${canonicalNarrativeLeader.whyItMatters} ${canonicalNarrativeLeader.riskNote}`
     : "HT Labs is continuing to scan without forcing a market opportunity.";
-
-  const getNarrativeShift = () => canonicalNarrativeRotation
-    ? `${canonicalNarrativeRotation.ticker} is the next eligible read if attention rotates. ${canonicalNarrativeRotation.whyItMatters}`
-    : "No secondary opportunity currently clears the canonical gates.";
-
-  const getWhatChanged = () => canonicalNarrativeLeader?.whatChanged
-    ?? "No confirmed backend signal change is available.";
-
-  const narrativeFeed = useMemo(() => {
-    return [
-      {
-        label: "Market Tone",
-        value: getMarketNarrativeHeadline(),
-      },
-      {
-        label: "Rotation",
-        value: getNarrativeShift(),
-      },
-      {
-        label: "What Changed",
-        value: getWhatChanged(),
-      },
-      {
-        label: "Risk Read",
-        value: getDailyRiskEnvironment(),
-      },
-    ];
-  }, [canonicalNarrativeLeader, canonicalNarrativeRotation]);
-
 
   const liveDeskFeed = useMemo(() => {
     const leader = canonicalNarrativeLeader;
@@ -3097,7 +2905,6 @@ function HomeInner() {
     const signal = getSignalQuality(stock);
     const participation = getParticipationScore(stock);
     const continuation = getContinuationStrengthScore(stock);
-    const hasNews = Boolean(getNewsArticles(stock.symbol)[0]?.headline);
     const newsVelocity = getNewsVelocityScore(stock);
     const newsCatalyst = getNewsCatalystScore(stock);
     const catalystStrength = getCatalystStrength(stock);
@@ -3348,7 +3155,6 @@ function HomeInner() {
       const score = getHTScore(stock);
       const hce = isHighConvictionEvent(stock);
       const saturation = getBackgroundOpportunityEngine(stock).crowdSaturationScore;
-      const stack = buildPressureStack(stock);
       const extensionRisk = getExtensionRiskScore(stock);
 
       // Hard floor
@@ -3585,7 +3391,6 @@ function HomeInner() {
       const extensionRisk = getExtensionRiskScore(winner);
       const rrQuality = getRiskRewardQualityScore(winner);
       const pattern = detectPatternSignal(winner).name;
-      const stack = buildPressureStack(winner);
       const absChange = Math.abs(winner.change ?? 0);
 
       // ── Primary Drivers — what made this stock win ──────────────────────
@@ -3718,57 +3523,6 @@ function HomeInner() {
       };
     }
   };
-
-
-  // Shows top 5 candidates with full score breakdown so we can verify
-  // the engine is making the right decisions. Logs to console only.
-  const logSelectionDebug = (
-    candidates: Stock[],
-    winner: Stock | null,
-    mode: "spot_momentum" | "before_the_crowd",
-    gate: (s: Stock) => boolean
-  ) => {
-    if (typeof window === "undefined") return; // server only
-    if (!window.location.hostname.includes("localhost")) return; // dev only
-    try {
-      const qualified = candidates.filter(gate);
-      const ranked = qualified
-        .map(s => ({
-          symbol: s.symbol,
-          htScore: getHTScore(s),
-          catalystScore: s.catalystScore ?? 0,
-          oppScore: getOpportunityScore(s, mode),
-          saturation: getBackgroundOpportunityEngine(s).crowdSaturationScore,
-          rvol: getRelativeVolume(s).toFixed(2),
-          hce: isHighConvictionEvent(s),
-          isMegaCap: PERMANENTLY_SATURATED.has(s.symbol),
-          passedGate: gate(s),
-        }))
-        .sort((a, b) => b.oppScore - a.oppScore)
-        .slice(0, 5);
-
-      const metaData = candidates.find(s => s.symbol === "META");
-      if (metaData) {
-        const metaGate = gate(metaData);
-        console.log(`[HT ${mode.toUpperCase()}] META debug:`, {
-          passedGate: metaGate,
-          htScore: getHTScore(metaData),
-          catalystScore: metaData.catalystScore ?? 0,
-          oppScore: getOpportunityScore(metaData, mode),
-          saturation: getBackgroundOpportunityEngine(metaData).crowdSaturationScore,
-          rvol: getRelativeVolume(metaData).toFixed(2),
-          isMegaCap: PERMANENTLY_SATURATED.has("META"),
-          reason: metaGate ? "PASSED gate (unexpected)" : "BLOCKED by eligibility gate",
-        });
-      }
-
-      console.log(`[HT ${mode.toUpperCase()}] Top 5 candidates:`, ranked);
-      console.log(`[HT ${mode.toUpperCase()}] Winner: ${winner?.symbol ?? "NONE"} | oppScore: ${winner ? getOpportunityScore(winner, mode) : 0} | htScore: ${winner ? getHTScore(winner) : 0}`);
-    } catch (e) {
-      console.warn("[HT debug] logging error:", e);
-    }
-  };
-
 
 
   const getSimpleConvictionRead = (stock: Stock) => {
@@ -4576,7 +4330,6 @@ function HomeInner() {
 
 
   const convictionEngineTarget = firstSignal?.stock || priorityTarget || htScoreLeaders[0] || topStock;
-  const topConviction = convictionEngineTarget;
 
   // ── Single source of truth for "Before The Crowd" ticker selection ──
   // Mirrors the eligibility logic used by the hero card itself (HT Score ≥ 65
@@ -5098,20 +4851,6 @@ function HomeInner() {
     ];
   };
 
-  const getEntryBiasShort = (stock: Stock) => {
-    if (Math.abs(stock.change) >= 10) return "Do not chase";
-    if (getBreakoutProbability(stock) >= 82) return "Watch breakout";
-    if (stock.change < 0) return "Wait only";
-    return "Build watch";
-  };
-
-  const getSetupRoleShort = (stock: Stock) => {
-    if (getHTScore(stock) >= 88) return "Main focus";
-    if (getAttentionScore(stock) >= 80) return "Crowd watch";
-    if (stock.change < 0) return "Risk filter";
-    return "Secondary watch";
-  };
-
   const getMarketRank = (stock: Stock) => {
     const ranked = [...stocks].sort((a, b) => getLiveConvictionScore(b) - getLiveConvictionScore(a));
     const index = ranked.findIndex((item) => item.symbol === stock.symbol);
@@ -5182,7 +4921,6 @@ function HomeInner() {
 
   // CONFIDENCE BREAKDOWN — show where the score comes from
   const getConfidenceBreakdown = (stock: Stock) => {
-    const stack = buildPressureStack(stock);
     const rvol = getRelativeVolume(stock);
     const attention = getAttentionScore(stock);
     const continuation = getContinuationStrengthScore(stock);
@@ -5277,7 +5015,6 @@ function HomeInner() {
 
   // HT STANCE — clear action directive
   const getHTStance = (stock: Stock) => {
-    const read = getSimpleConvictionRead(stock);
     const ht = getHTScore(stock);
     const trapRisk = getTrapRiskScore(stock);
     const entryQuality = getEntryQualityScore(stock);
@@ -5346,341 +5083,6 @@ function HomeInner() {
 
     return `${stock.symbol} is being monitored until pressure separates from noise. #${rank} active read • ${read.scoreLabel}.`;
   };
-
-  const convictionEngineMetrics = useMemo(() => {
-    const leader = convictionEngineTarget;
-
-    if (!leader) {
-      return [
-        ["Next Trigger", "--", "what HT needs next"],
-        ["Entry Bias", "--", "how to treat it"],
-        ["Risk Guardrail", "--", "what can break it"],
-        ["Setup Role", "--", "where it fits"],
-      ];
-    }
-
-    return [
-      ["Next Trigger", getNextTriggerShort(leader), getConfirmationTrigger(leader)],
-      ["Entry Bias", getEntryBiasShort(leader), getBestTraderFit(leader)],
-      ["Risk Guardrail", getRiskGuardrailShort(leader), getInvalidationRule(leader)],
-      ["Setup Role", getSetupRoleShort(leader), getEdgeStatus(leader)],
-    ];
-  }, [convictionEngineTarget, stocks, news, traderMode, watchlist, savedSetups]);
-
-  const convictionHistory = useMemo(() => {
-    const leader = convictionEngineTarget;
-    const second = secondaryTarget || htScoreLeaders[1];
-    const heat = attentionLeaders[1] || topMovers[1];
-
-    return [
-      {
-        label: "HT Detected",
-        symbol: leader?.symbol || "--",
-        result: leader ? `${getBeforeCrowdScore(leader)}/99 before-crowd pressure` : "Scanning",
-        note: leader
-          ? "Top Conviction logged before the move becomes obvious to the wider crowd."
-          : "Waiting for a clean pressure pocket.",
-      },
-      {
-        label: "Confidence Expanded",
-        symbol: leader?.symbol || "--",
-        result: leader ? `${getHTScore(leader)}% HT confidence` : "No read",
-        note: leader
-          ? "HT confidence rises when attention, signal quality, and participation compress together."
-          : "No confidence expansion yet.",
-      },
-      {
-        label: "Attention Shift",
-        symbol: heat?.symbol || "--",
-        result: heat ? `${getAttentionScore(heat)}/99 crowd attention` : "No shift",
-        note: heat
-          ? "Crowd behavior is being tracked before it turns into noisy consensus."
-          : "Crowd heat is still scattered.",
-      },
-      {
-        label: "Next Edge Watch",
-        symbol: second?.symbol || "--",
-        result: second ? `${getBreakoutProbability(second)}% breakout probability` : "No rotation",
-        note: second
-          ? "If the lead signal fades, HT checks whether pressure rotates here or disappears."
-          : "No secondary edge pocket yet.",
-      },
-    ];
-  }, [convictionEngineTarget, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, stocks, news, traderMode]);
-
-  const beginnerRead = convictionEngineTarget
-    ? `${convictionEngineTarget.symbol} is the current HT read. Translation: attention is moving here first, but HT still wants participation quality to confirm before calling it clean.`
-    : "HT is scanning for the first clean pressure pocket. Translation: no forced trade, no fake urgency.";
-
-
-  const getConvictionVerdict = (stock: Stock) => {
-    const confidence = getHTScore(stock);
-    const breakout = getBreakoutProbability(stock);
-    const attention = getAttentionScore(stock);
-    const signal = getSignalQuality(stock);
-
-    if (confidence >= 90 && breakout >= 84 && signal >= 84) {
-      return "Highest-conviction read on the board. Pressure quality, attention, and signal integrity are aligned.";
-    }
-
-    if (attention >= 86 && confidence >= 80) {
-      return "Crowd attention is waking up, but HT is still checking whether participation quality supports continuation.";
-    }
-
-    if (breakout >= 74 && confidence >= 74) {
-      return "Developing conviction. The read is improving, but HT still wants cleaner confirmation before calling it elite.";
-    }
-
-    if (stock.change < 0) {
-      return "Defensive read. HT is filtering this until reclaim strength proves pressure is returning.";
-    }
-
-    return "Monitor only. HT sees possible pressure, but not enough alignment to make this the main read yet.";
-  };
-
-  const convictionFlow = useMemo(() => {
-    const leader = convictionEngineTarget;
-
-    if (!leader) {
-      return [
-        ["Pressure Quality", 0, "scanning"],
-        ["Crowd Timing", 0, "waiting"],
-        ["Risk Control", 0, "neutral"],
-        ["Signal Strength", 0, "no read"],
-      ];
-    }
-
-    const pressureQuality = Math.min(99, Math.round((getHTScore(leader) + getSignalQuality(leader)) / 2));
-    const crowdTiming = Math.min(99, Math.round((getAttentionScore(leader) + getBeforeCrowdScore(leader)) / 2));
-    const riskControl = Math.max(30, Math.min(99, 100 - Math.round(Math.abs(leader.change) * 3)));
-    const signalIntegrity = getSignalQuality(leader);
-
-    return [
-      ["Pressure Quality", pressureQuality, pressureQuality >= 84 ? "clean compression" : "still developing"],
-      ["Crowd Timing", crowdTiming, crowdTiming >= 84 ? "early enough to matter" : "crowd still forming"],
-      ["Risk Control", riskControl, riskControl >= 72 ? "manageable" : "chase risk rising"],
-      ["Signal Strength", signalIntegrity, signalIntegrity >= 82 ? "trustworthy read" : "needs confirmation"],
-    ];
-  }, [convictionEngineTarget, stocks, news, traderMode, watchlist, savedSetups]);
-
-  const convictionMemory = useMemo(() => {
-    const leader = convictionEngineTarget;
-    const second = secondaryTarget || htScoreLeaders[1];
-    const heat = attentionLeaders[1] || topMovers[1];
-
-    return [
-      {
-        title: "What HT Chose",
-        value: leader ? `${leader.symbol} as the conviction focus` : "Scanning",
-        detail: leader ? getConvictionVerdict(leader) : "No clean conviction cluster has separated yet.",
-      },
-      {
-        title: "What Changed",
-        value: leader ? `${getAttentionScore(leader)}/99 attention pressure` : "Waiting",
-        detail: leader
-          ? `${leader.symbol} separated because pressure, crowd timing, and signal quality are clustering tighter than the rest of the board.`
-          : "HT is waiting for attention and participation to compress together.",
-      },
-      {
-        title: "What To Avoid",
-        value: heat ? `${heat.symbol} crowd heat` : "Random chase",
-        detail: heat
-          ? `${heat.symbol} may be loud, but HT only promotes it if attention turns into durable participation.`
-          : "Movement without confirmation stays filtered as noise.",
-      },
-      {
-        title: "Backup Read",
-        value: second?.symbol || "No rotation",
-        detail: second
-          ? `${second.symbol} becomes important if the main conviction read fades or pressure rotates.`
-          : "No secondary pressure pocket is strong enough yet.",
-      },
-    ];
-  }, [convictionEngineTarget, secondaryTarget, htScoreLeaders, attentionLeaders, topMovers, stocks, news, traderMode]);
-
-  const beginnerConvictionRead = convictionEngineTarget
-    ? `${convictionEngineTarget.symbol} is HT's current conviction read. Simple version: this is where attention and pressure are lining up best, but HT still wants confirmation so you do not chase noise.`
-    : "HT is scanning for the first clean conviction read. Simple version: no forced trade, no fake urgency.";
-
-
-  const getSignalOutcomeStatus = (stock: Stock) => {
-    const confidence = getHTScore(stock);
-    const beforeCrowd = getBeforeCrowdScore(stock);
-    const breakout = getBreakoutProbability(stock);
-    const move = stock.change;
-
-    if (move >= 10 && confidence >= 84 && beforeCrowd >= 78) return "Validated Pressure";
-    if (breakout >= 84 && confidence >= 84) return "Authority Building";
-    if (move >= 4 && beforeCrowd >= 72) return "Pressure Confirming";
-    if (stock.change < 0) return "Risk Filter Active";
-
-    return "Tracking";
-  };
-
-  const signalAuthorityStats = useMemo(() => {
-    const leader = convictionEngineTarget;
-
-    if (!leader) {
-      return [
-        ["Authority Read", "Scanning", "waiting for signal memory"],
-        ["Confidence Path", "--", "no compression yet"],
-        ["Pressure Result", "--", "no validated outcome"],
-        ["Crowd Evolution", "--", "quiet tape"],
-      ];
-    }
-
-    const earlyConfidence = Math.max(42, getHTScore(leader) - 18);
-    const currentConfidence = getHTScore(leader);
-    const pressureResult = leader.change >= 0 ? `+${leader.change.toFixed(2)}% live move` : `${leader.change.toFixed(2)}% defensive read`;
-
-    return [
-      ["Authority Read", getSignalOutcomeStatus(leader), "tracked signal outcome"],
-      ["Confidence Path", `${earlyConfidence} → ${currentConfidence}%`, "pressure expansion"],
-      ["Pressure Result", pressureResult, leader.change >= 0 ? "move after HT focus" : "risk filter held"],
-      ["Crowd Evolution", `${getCrowdPhase(leader)}`, getSignalEvolutionState(leader)],
-    ];
-  }, [convictionEngineTarget, stocks, news, traderMode, watchlist, savedSetups]);
-
-  const signalOutcomeTimeline = useMemo(() => {
-    const leader = convictionEngineTarget;
-    const second = secondaryTarget || htScoreLeaders[1];
-
-    if (!leader) {
-      return [
-        {
-          phase: "Scanning",
-          value: "No authority read yet",
-          note: "HT is waiting for attention, participation, and conviction to compress before logging a signal outcome.",
-        },
-      ];
-    }
-
-    const earlyConfidence = Math.max(42, getHTScore(leader) - 18);
-    const middleConfidence = Math.max(52, getHTScore(leader) - 8);
-
-    return [
-      {
-        phase: "Early Read",
-        value: `${leader.symbol} pressure found`,
-        note: `HT detected ${getBeforeCrowdScore(leader)}/99 before-crowd pressure before the read became obvious.` ,
-      },
-      {
-        phase: "Confidence Expanded",
-        value: `${earlyConfidence}% → ${middleConfidence}%`,
-        note: "Attention and signal integrity started compressing together instead of moving as random noise.",
-      },
-      {
-        phase: "Crowd Status Shift",
-        value: getCrowdPhase(leader),
-        note: getSignalEvolutionDetail(leader),
-      },
-      {
-        phase: "Outcome Check",
-        value: getSignalOutcomeStatus(leader),
-        note: leader.change >= 0
-          ? `${leader.symbol} is being tracked against the original Top Conviction so users can see whether HT was early.`
-          : `${leader.symbol} remains a risk-filter read until reclaim strength proves pressure is returning.`,
-      },
-      {
-        phase: "Next Authority Watch",
-        value: second?.symbol || "No rotation",
-        note: second
-          ? `${second.symbol} is the next pressure pocket if the current signal loses authority.`
-          : "No secondary read has earned enough conviction yet.",
-      },
-    ];
-  }, [convictionEngineTarget, secondaryTarget, htScoreLeaders, stocks, news, traderMode]);
-
-  const authoritySummary = convictionEngineTarget
-    ? `HT is not just flagging ${convictionEngineTarget.symbol}; it is tracking whether the original pressure read keeps earning authority through confidence expansion, crowd phase progression, and outcome behavior.`
-    : "HT is waiting for a clean signal before assigning authority. No forced conviction, no fake certainty.";
-
-
-
-  const getLiveTerminalState = () => {
-    const leader = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
-
-    if (!leader) return "Scanning For Pressure";
-    if (marketPulse === "Defensive") return "Defensive Tape";
-    if (getSignalEvolutionState(leader) === "Exhaustion Risk") return "Exhaustion Risk Rising";
-    if (getHTScore(leader) >= 90 && getAttentionScore(leader) >= 88) return "Pressure Expanding";
-    if (getConvictionScore(leader) >= 84 && getAttentionScore(leader) < 80) return "Quiet Accumulation";
-    if (hotStocks.length >= 2) return "Risk-On Rotation";
-
-    return "Pressure Building";
-  };
-
-
-  const liveTerminalMetrics = useMemo(() => {
-    const leader = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
-    const pulseBoost = mounted ? terminalPulse % 3 : 0;
-
-    if (!leader) {
-      return [
-        ["Terminal State", "Scanning", "waiting for alignment"],
-        ["Pressure Pulse", "--", "no clean read yet"],
-        ["Crowd Motion", "--", "quiet"],
-        ["HT Read", "--", "standby"],
-      ];
-    }
-
-    const liveConfidence = Math.min(99, Math.max(35, getHTScore(leader) + pulseBoost - 1));
-    const livePressure = Math.min(99, Math.max(35, getBeforeCrowdScore(leader) + (mounted ? (terminalPulse % 4) - 1 : 0)));
-    const liveAttention = Math.min(99, Math.max(35, getAttentionScore(leader) + (mounted ? (terminalPulse % 5) - 2 : 0)));
-
-    return [
-      ["Terminal State", getLiveTerminalState(), "adaptive tape mood"],
-      ["Pressure Pulse", `${livePressure}%`, getSignalEvolutionState(leader)],
-      ["Crowd Motion", `${liveAttention}%`, getCrowdPhase(leader)],
-      ["HT Read", `${liveConfidence}%`, getEdgeStatus(leader)],
-    ];
-  }, [
-    convictionEngineTarget,
-    firstSignal,
-    priorityTarget,
-    topStock,
-    terminalPulse,
-    marketPulse,
-    hotStocks.length,
-    stocks,
-    news,
-    traderMode,
-    watchlist,
-    savedSetups,
-  ]);
-
-  const livePulseFeed = useMemo(() => {
-    const leader = convictionEngineTarget || firstSignal?.stock || priorityTarget || topStock;
-    const rotation = secondaryTarget || htScoreLeaders[1];
-    const heat = attentionLeaders[1] || topMovers[1];
-
-    return [
-      leader
-        ? `${leader.symbol}: ${getLiveTerminalState()} — ${getDeskAlertTone(leader)}`
-        : "HT Desk: scanning for clean pressure alignment.",
-      rotation
-        ? `${rotation.symbol}: rotation memory active if the lead read fades.`
-        : "Rotation memory: no secondary pressure pocket has separated yet.",
-      heat
-        ? `${heat.symbol}: crowd heat is ${getCrowdPhase(heat).toLowerCase()}, but HT still wants participation proof.`
-        : "Crowd heat: scattered and not yet actionable.",
-    ];
-  }, [
-    convictionEngineTarget,
-    firstSignal,
-    priorityTarget,
-    topStock,
-    secondaryTarget,
-    htScoreLeaders,
-    attentionLeaders,
-    topMovers,
-    terminalPulse,
-    stocks,
-    news,
-    traderMode,
-  ]);
-
-
 
 
   const getInteractiveReasoning = (type: string, stock?: Stock | null) => {
@@ -5778,60 +5180,6 @@ function HomeInner() {
       .map((symbol) => stocks.find((stock) => stock.symbol === symbol))
       .filter(Boolean) as Stock[];
   }, [watchlist, stocks]);
-
-  const watchlistPriority = useMemo(() => {
-    if (watchlistStocks.length === 0) return null;
-
-    return [...watchlistStocks].sort(
-      (a, b) => getConvictionScore(b) - getConvictionScore(a),
-    )[0];
-  }, [watchlistStocks, news, savedSetups, traderMode]);
-
-  const savedSetupStocks = useMemo(() => {
-    return savedSetups
-      .map((symbol) => stocks.find((stock) => stock.symbol === symbol))
-      .filter(Boolean) as Stock[];
-  }, [savedSetups, stocks]);
-
-  const recentlyViewedStocks = useMemo(() => {
-    return viewedTickers
-      .map((symbol) => stocks.find((stock) => stock.symbol === symbol))
-      .filter(Boolean)
-      .slice(0, 4) as Stock[];
-  }, [viewedTickers, stocks]);
-
-  const personalWorkspaceStatus = useMemo(() => {
-    if (session && watchlist.length >= 3 && savedSetups.length >= 2) {
-      return "Personal Terminal Active";
-    }
-
-    if (session && watchlist.length > 0) {
-      return "Cloud Workspace Building";
-    }
-
-    if (watchlist.length > 0 || savedSetups.length > 0) {
-      return "Local Workspace Active";
-    }
-
-    return "Guest Workspace";
-  }, [session, watchlist.length, savedSetups.length]);
-
-  const personalInsight = useMemo(() => {
-    if (watchlistPriority) {
-      return `${watchlistPriority.symbol} is the strongest ticker inside your watchlist right now with ${getConvictionScore(watchlistPriority)}/99 conviction.`;
-    }
-
-    if (recentlyViewedStocks[0]) {
-      return `${recentlyViewedStocks[0].symbol} is your most recent focus. Save it or add it to watchlist if it matters.`;
-    }
-
-    if (priorityTarget) {
-      return `${priorityTarget.symbol} is leading the public scanner. Add tickers to personalize your terminal.`;
-    }
-
-    return "Add 3-5 tickers to start building a personalized HT Labs workflow.";
-  }, [watchlistPriority, recentlyViewedStocks, priorityTarget, news, savedSetups, traderMode]);
-
 
   const fetchNews = async (symbol: string) => {
     if (news[symbol] || newsIntel[symbol]) return;
@@ -5933,11 +5281,6 @@ function HomeInner() {
   const liveHeroChangeDisplay = liveHeroTarget
     ? `${liveHeroIsGreen ? "+" : ""}${liveHeroChange.toFixed(2)}%`
     : "--";
-  const liveHeroMomentumBadge = liveHeroTarget
-    ? getSignalEvolutionState(liveHeroTarget)
-    : "Scanning";
-  const liveHeroPricePulse = mounted && terminalPulse % 2 === 0;
-
   const emergingNextSetup = useMemo(() => {
     const leaderSymbol = liveHeroTarget?.symbol;
     const candidates = [...stocks]
@@ -5963,72 +5306,6 @@ function HomeInner() {
 
     return next;
   }, [stocks, liveHeroTarget, news, traderMode, watchlist, savedSetups]);
-
-  const getEmergingRead = (stock: Stock | null) => {
-    if (!stock) {
-      return "No clean secondary setup. HT is not forcing a backup ticker.";
-    }
-
-    if (getHTScore(stock) >= 86 && getAttentionScore(stock) >= 80) {
-      return `${stock.symbol} is the next pressure pocket if the primary read fades or rotation expands.`;
-    }
-
-    if (getAttentionScore(stock) >= 78) {
-      return `${stock.symbol} has attention building, but HT still wants participation proof before upgrading it.`;
-    }
-
-    return `${stock.symbol} is on secondary watch. Not priority yet, but pressure is forming.`;
-  };
-
-  const operatorPriorityStack = [
-    {
-      label: "Primary Focus",
-      symbol: liveHeroTarget?.symbol || "--",
-      state: liveHeroTarget ? getSignalEvolutionState(liveHeroTarget) : "Scanning",
-      note: liveHeroTarget
-        ? `${liveHeroTarget.symbol} still owns the main HT read unless pressure fades.`
-        : "HT is scanning for a clean focus directive.",
-    },
-    {
-      label: "Emerging Next",
-      symbol: emergingNextSetup?.symbol || "No clean setup",
-      state: emergingNextSetup ? getSignalEvolutionState(emergingNextSetup) : "Standby",
-      note: getEmergingRead(emergingNextSetup),
-    },
-    {
-      label: "Avoid / Weak Tape",
-      symbol: dangerTarget?.symbol || "None",
-      state: dangerTarget ? "Risk Filter" : "Clean",
-      note: dangerTarget
-        ? `${dangerTarget.symbol} is weak. HT does not confuse movement with opportunity.`
-        : "No major weak-tape warning is dominating the board.",
-    },
-  ];
-
-  const whyHTLikesThis = liveHeroTarget
-    ? [
-        {
-          label: "Price Action",
-          value: `${liveHeroIsGreen ? "+" : ""}${liveHeroChange.toFixed(2)}% live move`,
-          note: liveHeroChange >= 8 ? "Momentum is active, but chase risk must be respected." : "Move is still developing; HT is watching confirmation quality.",
-        },
-        {
-          label: "Volume Heat",
-          value: `${getRelativeVolume(liveHeroTarget)}x relative flow`,
-          note: getRelativeVolume(liveHeroTarget) >= 3 ? "Participation is expanding beneath the move." : "Volume needs to keep improving before HT treats this as elite.",
-        },
-        {
-          label: "Crowd Behavior",
-          value: getCrowdPhase(liveHeroTarget),
-          note: getAttentionScore(liveHeroTarget) >= 80 ? "Attention is building faster than the rest of the board." : "Crowd participation is still forming.",
-        },
-        {
-          label: "Risk Framing",
-          value: getRiskProfile(liveHeroTarget),
-          note: getSignalEvolutionState(liveHeroTarget) === "Exhaustion Risk" ? "Potential exhaustion forming. Wait for proof instead of chasing." : getDeskAlertTone(liveHeroTarget),
-        },
-      ]
-    : [];
 
   const capitalAvailable = Math.max(0, Number(capitalInput.replace(/[^0-9.]/g, "")) || 0);
   const coreCandidates = stocks.filter((stock) =>
@@ -7114,7 +6391,7 @@ function HomeInner() {
       setAuthMessage(mode === "signin" ? "Signing in..." : "Creating account...");
 
       if (mode === "signin") {
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
@@ -8528,38 +7805,7 @@ function HomeInner() {
                 // If the verified opportunities API returned a pick, the hero story uses that API object.
                 // Local Stock helpers are fallback-only for visual compatibility and must not override the backend score/story.
                 const apiHero = apiMomentum && btcTarget?.symbol === apiMomentum.ticker ? apiMomentum : null;
-                const btcEngine = btcTarget && !apiHero ? getBackgroundOpportunityEngine(btcTarget as Stock) : null;
-                const btcNews = btcTarget ? newsIntel[btcTarget.symbol] : null;
-                const btcRvol = Number(apiHero?.relativeVolume ?? (btcTarget ? getRelativeVolume(btcTarget as Stock) : 0));
-                const btcAttention = Number(apiHero?.attentionScore ?? (btcTarget ? getAttentionScore(btcTarget as Stock) : 0));
                 const btcScore = Number(apiHero?.opportunityScore ?? apiHero?.confidence ?? (btcTarget ? getHTScore(btcTarget as Stock) : 0));
-                const btcTier = apiHero?._convictionTier ?? apiHero?.stage ?? (btcScore >= 80 ? "Top Opportunity" : btcScore >= 65 ? "Developing Opportunity" : "Early Setup");
-                const btcStageScore = Number(apiHero?.attentionScore ?? (btcTarget ? getBackgroundOpportunityEngine(btcTarget as Stock).crowdSaturationScore : 0));
-                const btcStage = apiHero?.freshnessLabel === "Last Verified Signal"
-                  ? "Last Verified Signal"
-                  : btcStageScore <= 35 ? "Early" : btcStageScore <= 60 ? "Developing" : btcStageScore <= 80 ? "Crowded" : "Exhausted";
-                const isApiCatalyst = Boolean(apiHero && (apiHero.catalystScore ?? 0) >= 20);
-                const btcDiscovery = apiHero ? Math.min(99, (apiHero.momentumScore ?? 0) + 20) : btcEngine?.discoveryScore || 0;
-                const btcSaturation = Number(apiHero?.attentionScore ?? btcEngine?.crowdSaturationScore ?? 0);
-                const isBeforeCrowd = Boolean(apiHero?.isBeforeCrowd ?? (btcSaturation < 45 && btcDiscovery >= 60));
-
-                // Build signal evidence bullets
-                const signalEvidence = isApiCatalyst ? [
-                  { icon: "⚡", label: "FDA Catalyst Detected", detail: `${apiMomentum?.stage ?? "Catalyst active"} — binary outcome could drive significant move`, strength: "high" },
-                  (apiMomentum?.relativeVolume ?? 0) >= 2 ? { icon: "📊", label: "Volume Surge Detected", detail: `${(apiMomentum?.relativeVolume ?? 0).toFixed(1)}x above normal — unusual buying activity`, strength: "high" } : null,
-                  { icon: "📰", label: "News Velocity Increasing", detail: `${apiMomentum?.signals?.length ?? 0} signals — Fresh catalyst activity`, strength: "medium" } ,
-                  apiMomentum?.isBeforeCrowd ? { icon: "🌱", label: "Crowd Has Not Reacted Yet", detail: `Early window still open — before crowd saturation`, strength: "high" } : null,
-                  { icon: "👁", label: "Attention Shift Detected", detail: `${apiMomentum?.attentionScore ?? 0}/99 attention score — traders are noticing`, strength: "medium" },
-                ].filter(Boolean).slice(0, 5) as { icon: string; label: string; detail: string; strength: string }[]
-                : [
-                  btcRvol >= 2 ? { icon: "📊", label: "Volume Surge Detected", detail: `${btcRvol.toFixed(1)}x above normal — unusual buying activity`, strength: "high" } : null,
-                  btcNews && btcNews.newsVelocity >= 55 ? { icon: "📰", label: "News Velocity Increasing", detail: `${btcNews.articles?.length || 0} articles — ${btcNews.catalystStrength || "Fresh catalyst activity"}`, strength: "medium" } : null,
-                  btcSaturation < 45 ? { icon: "⚡", label: "Crowd Has Not Reacted Yet", detail: `Saturation at ${btcSaturation}% — early window still open`, strength: "high" } : null,
-                  btcAttention >= 65 ? { icon: "👁", label: "Attention Shift Detected", detail: `${btcAttention}/99 attention score — traders are noticing`, strength: "medium" } : null,
-                  btcEngine?.pattern === "Quiet Accumulation" ? { icon: "🤫", label: "Quiet Accumulation Pattern", detail: "Smart money moving before retail notices", strength: "high" } : null,
-                  btcEngine?.pattern === "Pressure Coil" ? { icon: "🌀", label: "Pressure Coil Forming", detail: "Volume building while price stays compressed", strength: "high" } : null,
-                  btcEngine?.accelerationLabel === "Accelerating Fast" ? { icon: "🚀", label: "Momentum Conviction Rising", detail: "Acceleration above baseline — move is strengthening", strength: "high" } : null,
-                ].filter(Boolean).slice(0, 5) as { icon: string; label: string; detail: string; strength: string }[];
 
                 // What HT Is Watching radar items
                 const radarItems = [
@@ -8956,7 +8202,6 @@ function HomeInner() {
                   {/* 5. HT Decision — the most important card */}
                   {liveHeroTarget && (() => {
                     const stance = getHTStance(liveHeroTarget);
-                    const read = getSimpleConvictionRead(liveHeroTarget);
                     const trapRisk = getTrapRiskScore(liveHeroTarget);
                     const crowdScore = getBackgroundOpportunityEngine(liveHeroTarget).crowdSaturationScore;
                     const reasons = stance.label === "ACCUMULATE" ? [
