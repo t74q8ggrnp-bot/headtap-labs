@@ -160,6 +160,14 @@ function effectiveDownsidePercent(tf: NonNullable<CanonicalOpportunity["tradeFra
 // entryQuality (which already penalizes over-extension) and actively
 // docks points per risk tag, with a hard floor that disqualifies
 // anything below a 1.5 R:R outright rather than just scoring it lower.
+// "Extended — Chasing Risk" is set (see opportunities/route.ts) at the exact
+// same extensionRisk>=75 threshold that already costs a candidate 50 points
+// inside entryQuality itself — docking it again here penalized the same
+// signal twice. Every other tag (Parabolic Move, Extreme Momentum, High
+// Volatility, New Listing) reflects something entryQuality does NOT already
+// account for, so those still count normally.
+const DOUBLE_COUNTED_TAGS_IN_ENTRY_QUALITY = new Set(["Extended — Chasing Risk"]);
+
 function computeBotScore(candidate: CanonicalOpportunity): number | null {
   const tf = candidate.tradeFramework;
   if (!tf || tf.upsideMax === null) return null;
@@ -168,7 +176,7 @@ function computeBotScore(candidate: CanonicalOpportunity): number | null {
   if (rr === null || rr < MIN_RR_RATIO) return null;
   const entryQuality = tf.entryQuality ?? 0;
   const rrBonus = Math.min(30, rr * 10);
-  const riskTagPenalty = candidate.riskTags.length * 10;
+  const riskTagPenalty = candidate.riskTags.filter((tag) => !DOUBLE_COUNTED_TAGS_IN_ENTRY_QUALITY.has(tag)).length * 10;
   return entryQuality + rrBonus - riskTagPenalty;
 }
 
@@ -194,7 +202,14 @@ function computeContinuationScore(candidate: CanonicalOpportunity): number | nul
   const volumeBonus = Math.min(25, (candidate.relativeVolume ?? 0) * 1.5);
   const crowdPenalty = (candidate.crowdScore ?? 0) * 0.25;
   const trapPenalty = (candidate.trapScore ?? 0) * 0.25;
-  const riskTagPenalty = candidate.riskTags.length * 10;
+  // Every candidate in this pool carries "Parabolic Move" or "Extreme
+  // Momentum" by definition — that's the gate that got it here in the first
+  // place (see extremeMomentumEligible) — so docking for it provides zero
+  // differentiation within this pool specifically. Other tags (High
+  // Volatility, Extended — Chasing Risk, New Listing) aren't guaranteed by
+  // membership and still count.
+  const definingTags = new Set(["Parabolic Move", "Extreme Momentum"]);
+  const riskTagPenalty = candidate.riskTags.filter((tag) => !definingTags.has(tag)).length * 10;
   return Math.max(0, Math.round(momentumScore * 0.6 + volumeBonus - crowdPenalty - trapPenalty - riskTagPenalty));
 }
 

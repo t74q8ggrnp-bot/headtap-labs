@@ -139,7 +139,12 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   const extremeMomentumEligible = strategy === "spot_momentum" && isExtremeMomentum && reasons.length === 0;
   const strength = signalStrength(c, strategy);
   const tradeQuality = tf.rrRatio === null ? 0 : Math.max(0, Math.min(100, Math.round(Math.min(1, tf.rrRatio / 3) * 55 + (tf.magnitudeQuality === "meaningful" ? 25 : 0) + Math.max(0, 100 - (tf.extensionRisk ?? 100)) * 0.2)));
-  const qualityScore = Math.round(strength * 0.55 + tradeQuality * 0.3 + (tf.entryQuality ?? 0) * 0.15);
+  // No separate entryQuality term here — tradeQuality above already folds in
+  // the same three inputs entryQuality itself is built from (rr-ratio,
+  // magnitude, extensionRisk), so adding entryQuality on top double-counted
+  // them rather than contributing independent information. Weight
+  // redistributed proportionally between strength and tradeQuality.
+  const qualityScore = Math.round(strength * 0.65 + tradeQuality * 0.35);
   const breakout = getBreakoutPotential({
     change: c.change, relativeVolume: c.relativeVolume, momentumScore: c.momentumScore,
     crowdScore: c.crowdScore, trapScore: c.trapScore, catalystScore: c.catalystScore,
