@@ -64,6 +64,19 @@ const WIDE_TRAIL_PERCENT = 15; // pullback from peak allowed while gain is 8-25%
 const EXTENDED_GAIN_THRESHOLD_PERCENT = 25;
 const TIGHT_TRAIL_PERCENT = 5; // pullback from peak allowed once gain exceeds 25% (user: "4-5%, lock in profits")
 
+// User's explicit, informed call on 2026-07-29 (both positions at a loss:
+// ANY -6.2%, GLOB -1.6%): don't let the hard/trailing stop force a sale on
+// these two specifically while under water — hold and hope for recovery
+// instead. Deliberately scoped to just these trade IDs, not a global change
+// to how the bot manages risk — every other/future trade still uses normal
+// stops. max_hold_until is NOT paused — it's the one exit that was never
+// part of this ask, so it still applies as the last backstop. Remove this
+// once these two are closed or the user asks to resume normal stops.
+const STOP_LOSS_PAUSED_TRADE_IDS = new Set([
+  "a37c914c-4403-4418-8ba2-7584d3fa6eb0", // ANY
+  "3800ea2c-0124-43a6-8f66-d1667f842f44", // GLOB
+]);
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -301,11 +314,12 @@ export async function GET(req: Request) {
           .eq("id", trade.id);
       }
 
+      const stopPaused = STOP_LOSS_PAUSED_TRADE_IDS.has(trade.id);
       const gainFromEntry = entryPrice > 0 ? ((highWaterMark - entryPrice) / entryPrice) * 100 : 0;
-      const hitHardStop = trade.stop_price !== null && currentPrice <= trade.stop_price;
+      const hitHardStop = !stopPaused && trade.stop_price !== null && currentPrice <= trade.stop_price;
 
       let hitTrailingStop = false;
-      if (gainFromEntry >= MIN_PROFIT_TO_TRAIL_PERCENT) {
+      if (!stopPaused && gainFromEntry >= MIN_PROFIT_TO_TRAIL_PERCENT) {
         const trailPercent = gainFromEntry >= EXTENDED_GAIN_THRESHOLD_PERCENT ? TIGHT_TRAIL_PERCENT : WIDE_TRAIL_PERCENT;
         const trailingStopPrice = highWaterMark * (1 - trailPercent / 100);
         if (currentPrice <= trailingStopPrice) hitTrailingStop = true;
