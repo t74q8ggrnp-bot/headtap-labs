@@ -19,6 +19,7 @@ async function readOpportunities(response: Response) {
 // canonical ranking, just not the #1 pick. Nobody should be locked into one
 // ticker with no visibility into what else is close behind.
 const MOMENTUM_CONTENDER_COUNT = 6;
+const BEFORE_CROWD_COUNT = 5;
 
 export function useOpportunityFeed() {
   const [spotMomentum, setSpotMomentum] = useState<Opportunity | null>(null);
@@ -33,39 +34,32 @@ export function useOpportunityFeed() {
 
   const refresh = useCallback(async () => {
     try {
-      const primaryRequest = fetch(`/api/opportunities?type=momentum&limit=${MOMENTUM_CONTENDER_COUNT}`);
-      const secondaryRequest = Promise.all([
-        fetch("/api/opportunities?type=catalyst&limit=3"),
-        fetch("/api/opportunities?type=before_crowd&limit=5"),
-      ]);
-      const fullListRequest = Promise.all([
+      // "momentum", "catalyst", and the default ("all") request types all map
+      // to the identical spot_momentum evaluation server-side (same for
+      // before_crowd regardless of limit) — confirmed live: this used to be
+      // 5 separate requests, 3 of them independently re-running the same
+      // ~1.6-2s-each per-ticker evaluation from scratch just to return a
+      // different slice/filter of data the other calls already computed.
+      // One limit=100 call per strategy carries everything below needs.
+      const [momentumRes, beforeCrowdRes] = await Promise.all([
         fetch("/api/opportunities?limit=100"),
         fetch("/api/opportunities?type=before_crowd&limit=100"),
       ]);
 
-      const primary = await readOpportunities(await primaryRequest);
-      setSpotMomentum(primary[0] ?? null);
-      setSpotMomentumRunnersUp(primary.slice(1));
+      const momentumList = await readOpportunities(momentumRes);
+      setSpotMomentum(momentumList[0] ?? null);
+      setSpotMomentumRunnersUp(momentumList.slice(1, MOMENTUM_CONTENDER_COUNT));
+      // Same rule the server's own type=catalyst path applied (catalystScore
+      // >= 20), against a list already ranked the same way — same result.
+      setCatalyst(momentumList.find((o) => o.catalystScore >= 20) ?? null);
       setLoading(false);
 
-      const [catalystResponse, beforeCrowdResponse] = await secondaryRequest;
-      const [catalysts, beforeCrowdOpportunities] = await Promise.all([
-        readOpportunities(catalystResponse),
-        readOpportunities(beforeCrowdResponse),
-      ]);
-      setCatalyst(catalysts[0] ?? null);
-      setBeforeCrowd(beforeCrowdOpportunities);
+      const beforeCrowdList = await readOpportunities(beforeCrowdRes);
+      setBeforeCrowd(beforeCrowdList.slice(0, BEFORE_CROWD_COUNT));
 
-      const [fullMomentumRes, fullBeforeCrowdRes] = await fullListRequest;
-      const [fullMomentumData, fullBeforeCrowdData]: [OpportunityPayload, OpportunityPayload] = await Promise.all([
-        fullMomentumRes.ok ? fullMomentumRes.json() : { opportunities: [] },
-        fullBeforeCrowdRes.ok ? fullBeforeCrowdRes.json() : { opportunities: [] },
-      ]);
       setFullRankedList(
-        mergeOpportunityLists(
-          fullMomentumData.opportunities ?? [],
-          fullBeforeCrowdData.opportunities ?? [],
-        ).sort((a, b) => b.opportunityScore - a.opportunityScore),
+        mergeOpportunityLists(momentumList, beforeCrowdList)
+          .sort((a, b) => b.opportunityScore - a.opportunityScore),
       );
     } catch (error) {
       // Preserve the last verified response during transient refresh failures.
