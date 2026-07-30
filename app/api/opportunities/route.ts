@@ -19,6 +19,17 @@ const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 // were getting excluded specifically for being "too much of a real move."
 const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 const EXTREME_MOMENTUM_MIN_RVOL = 3;
+// Confirmed live: DCX and STKH both cleared the extreme-momentum bypass with
+// real downsideRisk near 24% (a genuine support level found in the last 20
+// bars, not a fallback estimate) and R:R as low as 0.21 — shown as "Strong
+// Momentum" hero picks. The bypass's whole justification is that the UPSIDE
+// number is an artifact (resistance fell back to a generic ATR-based guess
+// because the stock already blew through every recent high) — it was never
+// meant to also excuse a real, separately-measured, large downside. This
+// caps how much downside the bypass will excuse; beyond it, the hard R:R
+// floor applies even to a confirmed extreme mover, because at that point the
+// risk side of the picture is real, not a measurement gap.
+const EXTREME_MOMENTUM_MAX_BYPASSED_DOWNSIDE_PERCENT = 15;
 // Mirrors SEASONED_BAR_COUNT in canonical-trade-framework.ts — below this,
 // the trade framework still computes (see MIN_BARS_HARD_FLOOR there) but the
 // read is on a recent listing/uplisting, worth naming explicitly.
@@ -90,12 +101,23 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   // in what the model measures, not evidence the move isn't real. Insufficient-
   // data and stale-price hard failures are NOT bypassed here — those are
   // actual data-quality problems, unrelated to how extended the move is.
+  //
+  // Gated on downsideRisk staying under a cap: the upside number can be an
+  // artifact (no resistance found = generic guess), but downsideRisk comes
+  // from a real support level whenever one exists in the data, same as it
+  // does for every other candidate. Confirmed live this bypass was letting
+  // DCX and STKH through with real ~24% downside and R:R as low as 0.21 —
+  // a genuinely bad trade, not a measurement gap, shown as a hero pick.
+  // Past the cap, the hard floor still applies even to a confirmed extreme
+  // mover, because the risk side of the picture is no longer in question.
   const isMagnitudeRelatedHardFailure = (r: string) =>
     r.startsWith("R:R ") || r === "Modeled downside is excessive in absolute and volatility-relative terms.";
-  const reasons = isExtremeMomentum
+  const canBypassMagnitudeGate = isExtremeMomentum
+    && (tf.downsideRisk ?? Infinity) <= EXTREME_MOMENTUM_MAX_BYPASSED_DOWNSIDE_PERCENT;
+  const reasons = canBypassMagnitudeGate
     ? tf.hardFailures.filter((r) => !isMagnitudeRelatedHardFailure(r))
     : [...tf.hardFailures];
-  if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible" && !isExtremeMomentum) {
+  if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible" && !canBypassMagnitudeGate) {
     reasons.push("Reward magnitude is negligible.");
   }
   // Independent of momentumScore (which raw move% already drives) and no
