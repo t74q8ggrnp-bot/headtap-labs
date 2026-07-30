@@ -166,6 +166,7 @@ function computeFramework(
   payload: CachedFeaturePayload,
   dataQualityState: TradeFrameworkResult["dataQualityState"],
   cacheExpiresAt: string | null,
+  isConfirmedContinuationRunner: boolean = false,
 ): TradeFrameworkResult {
   const calculatedAt = new Date().toISOString();
   const sessionState = getMarketSessionState();
@@ -212,11 +213,42 @@ function computeFramework(
   const { support, resistance } = computeNearestSupportResistance(payload.bars, price, payload.atr14);
   const atrPct = (payload.atr14 / price) * 100;
   const extensionRisk = round(Math.min(100, Math.max(0, (Math.abs(changePercent) / atrPct) * 25)), 1);
-  const compression = extensionRisk >= 75 ? 0.5 : extensionRisk >= 50 ? 0.75 : 1;
+  // Confirmed live: this discount, meant to penalize chasing an already-
+  // extended move, was compounding with a SEPARATE problem for genuine
+  // continuation runners — a stock that's blown through all recent
+  // resistance already has upsideReference reduced to a generic ATR-based
+  // guess (see computeNearestSupportResistance's fallback), and this
+  // compression then shrank that already-weak number further, while
+  // downsideRisk (real support, no discount) stayed full-strength. Result:
+  // PN showed +10.92% upside against a real -24.67% downside — upside
+  // LESS than risk for a stock still up 32%+ and actively confirming,
+  // which is incoherent on its face. The "already extended" risk this
+  // discount exists to price in is already handled at the call site by
+  // requiring separate continuation confirmation (real volume, not tagged
+  // "Exhaustion Risk", momentum still strong) before this flag is ever
+  // true — applying the discount on top double-penalizes the same
+  // "extended" fact for exactly the stocks that passed that check.
+  const compression = isConfirmedContinuationRunner
+    ? 1
+    : extensionRisk >= 75 ? 0.5 : extensionRisk >= 50 ? 0.75 : 1;
   const rawUpsidePct = Math.max(0, ((resistance - price) / price) * 100);
   const rawDownsidePct = Math.max(0, ((price - support) / price) * 100);
-  const upsideReference = Math.max(rawUpsidePct, atrPct * 0.5) * compression;
   const downsideRisk = round(Math.max(rawDownsidePct, atrPct * 0.3), 2);
+  // Removing compression alone wasn't enough — confirmed live: PN still came
+  // out to ~14.5% upside against a real 24.67% downside even at compression=1,
+  // because rawUpsidePct is itself capped near ~1 ATR by the fallback (no
+  // real resistance found above price) while downsideRisk can be far larger
+  // whenever a real, distant support level exists. There's no reason those
+  // two should share a scale — one is "how far to the next known ceiling,"
+  // the other is "one normal day's range." For a confirmed continuation
+  // runner specifically, we have no reliable independent ceiling estimate at
+  // all (that's the entire premise of treating it differently) — so it's
+  // more honest to assume unknown upside is AT LEAST in line with the real,
+  // measured downside than to present a number that implies less reward than
+  // risk with no data actually backing that implication.
+  const upsideReference = isConfirmedContinuationRunner
+    ? Math.max(rawUpsidePct, atrPct * 0.5, downsideRisk)
+    : Math.max(rawUpsidePct, atrPct * 0.5) * compression;
   const upsideMin = round(upsideReference * 0.7, 2);
   const upsideMax = round(upsideReference * 1.3, 2);
   let rrRatio = downsideRisk > 0 ? round(upsideReference / downsideRisk, 2) : null;
@@ -283,6 +315,7 @@ export async function getTradeFramework(
   ticker: string,
   price: number,
   changePercent: number,
+  isConfirmedContinuationRunner: boolean = false,
 ): Promise<TradeFrameworkResult> {
   const normalizedTicker = ticker.trim().toUpperCase();
   const now = new Date();
@@ -295,7 +328,7 @@ export async function getTradeFramework(
     .maybeSingle();
   if (cacheReadError) console.error("[trade-framework] cache read failed:", cacheReadError.message);
   if (cached?.calculated_value && new Date(cached.expires_at) > now) {
-    return computeFramework(normalizedTicker, price, changePercent, cached.calculated_value as CachedFeaturePayload, "valid_cached", cached.expires_at);
+    return computeFramework(normalizedTicker, price, changePercent, cached.calculated_value as CachedFeaturePayload, "valid_cached", cached.expires_at, isConfirmedContinuationRunner);
   }
 
   const fresh = await fetchFreshBars(normalizedTicker);
@@ -332,5 +365,5 @@ export async function getTradeFramework(
     expires_at: expiresAt, error_state: null,
   }, { onConflict: "ticker,feature_name,feature_version" });
   if (cacheWriteError) console.error("[trade-framework] cache write failed:", cacheWriteError.message);
-  return computeFramework(normalizedTicker, price, changePercent, payload, quality, expiresAt);
+  return computeFramework(normalizedTicker, price, changePercent, payload, quality, expiresAt, isConfirmedContinuationRunner);
 }

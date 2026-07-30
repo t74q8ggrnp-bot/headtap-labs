@@ -43,6 +43,21 @@ const SEASONED_BAR_COUNT = 21;
 type Strategy = "spot_momentum" | "before_the_crowd";
 type RequestType = "all" | "momentum" | "catalyst" | "before_crowd";
 
+// Shared by evaluateAll (decides whether to ask the trade framework to skip
+// its extension-compression discount, see canonical-trade-framework.ts) and
+// evaluate() (decides eligibility) — same question, computed once so the two
+// can't drift apart. Only depends on fields already on the raw candidate
+// (change/relativeVolume/pattern/momentumScore/signalState), not on tf, so
+// it's available before the framework fetch happens.
+function isConfirmedContinuationRunner(c: Candidate, strategy: Strategy): boolean {
+  const isExtremeMomentum = strategy === "spot_momentum"
+    && c.change >= EXTREME_MOMENTUM_MIN_CHANGE
+    && c.relativeVolume >= EXTREME_MOMENTUM_MIN_RVOL;
+  return isExtremeMomentum
+    && c.pattern !== "Exhaustion Risk"
+    && (c.momentumScore >= CONTINUATION_MIN_MOMENTUM_SCORE || c.signalState === "Strong Momentum");
+}
+
 type Candidate = {
   ticker: string; price: number; change: number; relativeVolume: number; avgVolume: number;
   htScore: number; momentumScore: number; crowdScore: number; trapScore: number; catalystScore: number;
@@ -117,9 +132,7 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   // "still going," not "already happened," half of the check.
   const isMagnitudeRelatedHardFailure = (r: string) =>
     r.startsWith("R:R ") || r === "Modeled downside is excessive in absolute and volatility-relative terms.";
-  const isConfirmedRunner = isExtremeMomentum
-    && c.pattern !== "Exhaustion Risk"
-    && (c.momentumScore >= CONTINUATION_MIN_MOMENTUM_SCORE || c.signalState === "Strong Momentum");
+  const isConfirmedRunner = isConfirmedContinuationRunner(c, strategy);
   const reasons = isConfirmedRunner
     ? tf.hardFailures.filter((r) => !isMagnitudeRelatedHardFailure(r))
     : [...tf.hardFailures];
@@ -242,7 +255,11 @@ async function evaluateAll(supabase: ReturnType<typeof getSupabase>, candidates:
   const output: any[] = [];
   for (let i = 0; i < candidates.length; i += CONCURRENCY) {
     const batch = candidates.slice(i, i + CONCURRENCY);
-    const settled = await Promise.allSettled(batch.map(async (candidate) => evaluate(candidate, await getTradeFramework(supabase, candidate.ticker, candidate.price, candidate.change), strategy)));
+    const settled = await Promise.allSettled(batch.map(async (candidate) => evaluate(
+      candidate,
+      await getTradeFramework(supabase, candidate.ticker, candidate.price, candidate.change, isConfirmedContinuationRunner(candidate, strategy)),
+      strategy,
+    )));
     for (const result of settled) if (result.status === "fulfilled") output.push(result.value); else console.error("[opportunities] evaluation failed:", result.reason);
   }
   return output;
