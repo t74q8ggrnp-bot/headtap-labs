@@ -19,17 +19,23 @@ const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 // were getting excluded specifically for being "too much of a real move."
 const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 const EXTREME_MOMENTUM_MIN_RVOL = 3;
-// Confirmed live: DCX and STKH both cleared the extreme-momentum bypass with
-// real downsideRisk near 24% (a genuine support level found in the last 20
-// bars, not a fallback estimate) and R:R as low as 0.21 — shown as "Strong
-// Momentum" hero picks. The bypass's whole justification is that the UPSIDE
-// number is an artifact (resistance fell back to a generic ATR-based guess
-// because the stock already blew through every recent high) — it was never
-// meant to also excuse a real, separately-measured, large downside. This
-// caps how much downside the bypass will excuse; beyond it, the hard R:R
-// floor applies even to a confirmed extreme mover, because at that point the
-// risk side of the picture is real, not a measurement gap.
-const EXTREME_MOMENTUM_MAX_BYPASSED_DOWNSIDE_PERCENT = 15;
+// R:R/resistance-distance math was built for a stock trading inside a normal
+// range — it was never going to work for one that's already blown through
+// every level above it, no matter how the numbers get capped or tuned.
+// Confirmed live across three different attempts to patch this with R:R-
+// adjacent math (an unconditional bypass, then a downside cap): each one
+// either let through a genuinely bad trade (DCX/STKH: real ~24% downside,
+// R:R as low as 0.21) or still labeled a stalled-out mover "Strong Momentum"
+// off a technically-small-but-real downside (XRX: 6.34% down for only
+// 1.75-3.25% up). The R:R ruler is the wrong tool for this class of stock,
+// not a tuning problem. What actually distinguishes "still exploding" from
+// "already exhausted" is whether the move is still confirming — the same
+// question the trading bot's continuation path already answers (see
+// app/api/trading-bot/route.ts's computeContinuationScore): real volume
+// (guaranteed by the thresholds above) plus not showing this codebase's own
+// existing "Exhaustion Risk" label (big move, no catalyst behind it) plus
+// momentum still reading strong right now, not already cooling off.
+const CONTINUATION_MIN_MOMENTUM_SCORE = 70;
 // Mirrors SEASONED_BAR_COUNT in canonical-trade-framework.ts — below this,
 // the trade framework still computes (see MIN_BARS_HARD_FLOOR there) but the
 // read is on a recent listing/uplisting, worth naming explicitly.
@@ -102,22 +108,22 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   // data and stale-price hard failures are NOT bypassed here — those are
   // actual data-quality problems, unrelated to how extended the move is.
   //
-  // Gated on downsideRisk staying under a cap: the upside number can be an
-  // artifact (no resistance found = generic guess), but downsideRisk comes
-  // from a real support level whenever one exists in the data, same as it
-  // does for every other candidate. Confirmed live this bypass was letting
-  // DCX and STKH through with real ~24% downside and R:R as low as 0.21 —
-  // a genuinely bad trade, not a measurement gap, shown as a hero pick.
-  // Past the cap, the hard floor still applies even to a confirmed extreme
-  // mover, because the risk side of the picture is no longer in question.
+  // Gated on the move still confirming, not on any R:R-adjacent number
+  // (see CONTINUATION_MIN_MOMENTUM_SCORE above for why — R:R math doesn't
+  // apply to this class of stock at all, tuning its cap doesn't fix that).
+  // "Exhaustion Risk" is this codebase's own existing label for a big move
+  // with no catalyst behind it — a real, already-tracked red flag that the
+  // print is stale. Momentum still reading strong right now is the
+  // "still going," not "already happened," half of the check.
   const isMagnitudeRelatedHardFailure = (r: string) =>
     r.startsWith("R:R ") || r === "Modeled downside is excessive in absolute and volatility-relative terms.";
-  const canBypassMagnitudeGate = isExtremeMomentum
-    && (tf.downsideRisk ?? Infinity) <= EXTREME_MOMENTUM_MAX_BYPASSED_DOWNSIDE_PERCENT;
-  const reasons = canBypassMagnitudeGate
+  const isConfirmedRunner = isExtremeMomentum
+    && c.pattern !== "Exhaustion Risk"
+    && (c.momentumScore >= CONTINUATION_MIN_MOMENTUM_SCORE || c.signalState === "Strong Momentum");
+  const reasons = isConfirmedRunner
     ? tf.hardFailures.filter((r) => !isMagnitudeRelatedHardFailure(r))
     : [...tf.hardFailures];
-  if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible" && !canBypassMagnitudeGate) {
+  if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible" && !isConfirmedRunner) {
     reasons.push("Reward magnitude is negligible.");
   }
   if (!isSupportedType(c.securityType)) {
@@ -183,7 +189,7 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   const strategyScore = strategy === "spot_momentum"
     ? Math.round(magnitudeCore * 0.5 + breakout.score * 0.35 + qualityScore * 0.15)
     : Math.round(qualityScore * 0.65 + breakout.score * 0.35);
-  const tier = eligible && strategyScore >= 80 && ((tf.entryQuality ?? 0) >= 70 || isExtremeMomentum) ? "hero"
+  const tier = eligible && strategyScore >= 80 && ((tf.entryQuality ?? 0) >= 70 || isConfirmedRunner) ? "hero"
     : eligible && strategyScore >= 68 ? "feature" : eligible ? "watch" : "scanner";
   const riskTags: string[] = [];
   if (c.change >= 50) riskTags.push("Parabolic Move");
