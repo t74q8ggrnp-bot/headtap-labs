@@ -120,22 +120,6 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   if (strategy === "spot_momentum" && tf.magnitudeQuality === "negligible" && !canBypassMagnitudeGate) {
     reasons.push("Reward magnitude is negligible.");
   }
-  // Independent of momentumScore (which raw move% already drives) and no
-  // longer saturating at a fixed move% for every stock: extensionRisk (from
-  // the trade framework) already measures move relative to THIS stock's own
-  // normal range (move / ATR%), not raw move% — the same 15% move is barely
-  // extended for a normally-20%-ATR stock but wildly extended for a
-  // normally-2%-ATR one. The old trapScore (signal-writer's move*3.5,
-  // clamped) maxed out by ~28% move for every stock alike, meaning a 30%
-  // and a 150% mover scored identically and it was a pure re-derivation of
-  // the same input already driving momentumScore. This reuses an already-
-  // computed, already-relied-on field (extensionRisk backs entryQuality's
-  // own penalty tiers and the "Extended — Chasing Risk" tag) rather than
-  // inventing a new formula from scratch. Computed here, not in
-  // signal-writer, because tf (and therefore extensionRisk) requires a
-  // per-ticker Polygon bars fetch that's only affordable for the smaller
-  // evaluated set here — not signal-writer's whole-market scan.
-  const trapScore = Math.round(Math.min(99, tf.extensionRisk ?? 0) * (c.catalystScore >= 20 ? 0.85 : 1));
   if (!isSupportedType(c.securityType)) {
     reasons.push(c.securityType
       ? `Unsupported security type: ${c.securityType}.`
@@ -156,14 +140,14 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
       if (c.crowdScore >= 65) {
         reasons.push(`Crowd saturation (${Math.round(c.crowdScore)}) is already late for Spot Momentum.`);
       }
-      if (trapScore >= 70) {
-        reasons.push(`Trap risk (${Math.round(trapScore)}) exceeds the Spot Momentum ceiling.`);
+      if (c.trapScore >= 70) {
+        reasons.push(`Trap risk (${Math.round(c.trapScore)}) exceeds the Spot Momentum ceiling.`);
       }
     }
   } else {
     if (!c.retrievedForBtc && !c.retrievedForCatalyst) reasons.push("Did not qualify for Before The Crowd retrieval.");
     if (c.crowdScore >= 60) reasons.push("Crowd saturation is too high for the Before The Crowd thesis.");
-    if (trapScore >= 55) reasons.push("Trap risk exceeds the Before The Crowd ceiling.");
+    if (c.trapScore >= 55) reasons.push("Trap risk exceeds the Before The Crowd ceiling.");
   }
   const eligible = reasons.length === 0;
   // A genuinely clean extreme-momentum candidate — every gate other than the
@@ -185,7 +169,7 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   const qualityScore = Math.round(strength * 0.65 + tradeQuality * 0.35);
   const breakout = getBreakoutPotential({
     change: c.change, relativeVolume: c.relativeVolume, momentumScore: c.momentumScore,
-    crowdScore: c.crowdScore, trapScore, catalystScore: c.catalystScore,
+    crowdScore: c.crowdScore, trapScore: c.trapScore, catalystScore: c.catalystScore,
   }, tf, strategy);
   // Spot Momentum is "catch it while it's happening." qualityScore and even
   // breakout.score still carry enough R:R/crowd/trap residue that a mild,
@@ -210,7 +194,7 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
   const freshnessLabel = !Number.isFinite(ageMs) || ageMs > 8 * 60 * 60 * 1000
     ? "Last Verified Signal"
     : ageMs > 60 * 60 * 1000 ? "Recent Scan" : "Live Scan";
-  const isBeforeCrowd = c.retrievedForBtc && c.crowdScore < 60 && trapScore < 55;
+  const isBeforeCrowd = c.retrievedForBtc && c.crowdScore < 60 && c.trapScore < 55;
   const opportunityType = c.catalystScore >= 20
     ? "catalyst"
     : c.change >= 5 || c.momentumScore >= 60 || c.relativeVolume >= 3
@@ -218,10 +202,6 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
       : "momentum";
   return {
     ...c, strategy, signalStrength: strength, strategyScore, qualityScore,
-    // Overrides the raw c.trapScore carried by the spread above — this
-    // strategy-evaluated value (extensionRisk-based, see above) is the one
-    // actually used for eligibility/display, not signal-writer's stored one.
-    trapScore,
     breakoutPotentialScore: breakout.score,
     breakoutPotentialLabel: breakout.label,
     breakoutPotentialComponents: breakout.components,
@@ -233,7 +213,7 @@ function evaluate(c: Candidate, tf: TradeFrameworkResult, strategy: Strategy) {
     opportunityType,
     riskTags,
     attentionScore: c.crowdScore,
-    riskScore: trapScore,
+    riskScore: c.trapScore,
     confidence: eligible ? Math.min(99, strategyScore) : Math.min(49, Math.round(strength * 0.5)),
     relativeVolume: c.relativeVolume,
     isBeforeCrowd,
