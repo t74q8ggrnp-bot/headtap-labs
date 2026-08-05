@@ -449,12 +449,21 @@ export async function GET() {
       },
     });
 
+    const signalDataIsValid =
+      Number.isFinite(price) &&
+      price > 0 &&
+      Number.isFinite(change) &&
+      Number.isFinite(rvol) &&
+      rvol >= 0 &&
+      Number.isFinite(htScore) &&
+      htScore > 0;
+
     checks.push({
       name: "signal_data_quality",
-      ok: price > 0 && change > 0 && rvol > 0 && htScore > 0,
-      message: price > 0 && change > 0 && rvol > 0 && htScore > 0
-        ? "Latest signal has real positive momentum data."
-        : "Latest signal is missing required price/change/rvol/score data.",
+      ok: signalDataIsValid,
+      message: signalDataIsValid
+        ? "Latest compatibility signal has structurally valid market data."
+        : "Latest compatibility signal contains invalid price/change/rvol/score data.",
       detail: {
         ticker: latestSignal.ticker,
         price,
