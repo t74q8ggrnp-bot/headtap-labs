@@ -51,6 +51,7 @@ export type Opportunity = {
   tier?: OpportunityTier;
   eligibility?: { eligible: boolean; reasons: string[] };
   displayEligibility?: { eligible: boolean; reasons: string[] };
+  momentumRadarEligible?: boolean;
   engineVersion?: string;
   sourceRunId?: string;
   _convictionTier?: string;
@@ -266,6 +267,7 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
     tier,
     eligibility: { eligible, reasons: eligibilityReasons },
     displayEligibility: { eligible, reasons: eligibilityReasons },
+    momentumRadarEligible: Boolean(source.momentumRadarEligible),
     engineVersion: source.engineVersion as string | undefined,
     sourceRunId: source.sourceRunId as string | undefined,
   };

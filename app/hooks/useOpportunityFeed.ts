@@ -7,16 +7,22 @@ import {
   type Opportunity,
 } from "@/lib/opportunity-model";
 
-type OpportunityPayload = { opportunities?: unknown[] };
+type OpportunityPayload = {
+  opportunities?: unknown[];
+  momentumRadar?: unknown[];
+};
 type CachedOpportunityList = {
   savedAt: number;
   opportunities: unknown[];
 };
 
-async function readOpportunities(response: Response) {
+async function readOpportunityPayload(response: Response) {
   if (!response.ok) throw new Error(`Opportunity request failed (${response.status})`);
   const payload = (await response.json()) as OpportunityPayload;
-  return (payload.opportunities ?? []).map(normalizeOpportunity);
+  return {
+    opportunities: (payload.opportunities ?? []).map(normalizeOpportunity),
+    momentumRadar: (payload.momentumRadar ?? []).map(normalizeOpportunity),
+  };
 }
 
 // Fetched alongside the hero so the runner-ups are already on hand — same
@@ -24,8 +30,8 @@ async function readOpportunities(response: Response) {
 // ticker with no visibility into what else is close behind.
 const MOMENTUM_CONTENDER_COUNT = 6;
 const BEFORE_CROWD_COUNT = 5;
-const MOMENTUM_CACHE_KEY = "htlabs:canonical-opportunities:momentum:v2";
-const BEFORE_CROWD_CACHE_KEY = "htlabs:canonical-opportunities:before-crowd:v2";
+const MOMENTUM_CACHE_KEY = "htlabs:canonical-opportunities:momentum:v3";
+const BEFORE_CROWD_CACHE_KEY = "htlabs:canonical-opportunities:before-crowd:v3";
 const MAX_CACHED_FEED_AGE_MS = 10 * 60 * 1000;
 
 function readCachedOpportunities(key: string) {
@@ -85,20 +91,25 @@ export function useOpportunityFeed() {
         "/api/opportunities?type=before_crowd&limit=100",
       );
 
-      const momentumTask = momentumRequest.then(readOpportunities).then((momentumList) => {
+      const momentumTask = momentumRequest.then(readOpportunityPayload).then(({ opportunities: momentumList, momentumRadar }) => {
         setSpotMomentum(momentumList[0] ?? null);
-        setSpotMomentumRunnersUp(momentumList.slice(1, MOMENTUM_CONTENDER_COUNT));
+        setSpotMomentumRunnersUp(
+          mergeOpportunityLists(
+            momentumList.slice(1, 3),
+            momentumRadar.slice(0, 3),
+          ).slice(0, MOMENTUM_CONTENDER_COUNT - 1),
+        );
         // Same rule the server's own type=catalyst path applied (catalystScore
         // >= 20), against a list already ranked the same way — same result.
         setCatalyst(momentumList.find((o) => o.catalystScore >= 20) ?? null);
         setLoading(false);
         writeCachedOpportunities(MOMENTUM_CACHE_KEY, momentumList);
-        return momentumList;
+        return { momentumList, momentumRadar };
       });
 
       // Start both strategies together, but do not hold Spot Momentum hostage
       // to the slower Before-the-Crowd evaluation.
-      const beforeCrowdTask = beforeCrowdRequest.then(readOpportunities).then((beforeCrowdList) => {
+      const beforeCrowdTask = beforeCrowdRequest.then(readOpportunityPayload).then(({ opportunities: beforeCrowdList }) => {
         setBeforeCrowd(beforeCrowdList.slice(0, BEFORE_CROWD_COUNT));
         writeCachedOpportunities(BEFORE_CROWD_CACHE_KEY, beforeCrowdList);
         return beforeCrowdList;
@@ -117,14 +128,18 @@ export function useOpportunityFeed() {
 
       const momentumList =
         momentumResult.status === "fulfilled"
-          ? momentumResult.value
+          ? momentumResult.value.momentumList
           : readCachedOpportunities(MOMENTUM_CACHE_KEY) ?? [];
+      const momentumRadar =
+        momentumResult.status === "fulfilled"
+          ? momentumResult.value.momentumRadar
+          : [];
       const beforeCrowdList =
         beforeCrowdResult.status === "fulfilled"
           ? beforeCrowdResult.value
           : readCachedOpportunities(BEFORE_CROWD_CACHE_KEY) ?? [];
       setFullRankedList(
-        mergeOpportunityLists(momentumList, beforeCrowdList)
+        mergeOpportunityLists(momentumList, momentumRadar, beforeCrowdList)
           .sort((a, b) => b.opportunityScore - a.opportunityScore),
       );
     } finally {

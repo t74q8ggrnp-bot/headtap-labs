@@ -20,11 +20,14 @@ export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v7-fused-session-momentum";
+const ENGINE_VERSION = "signal-writer-v8-live-liquidity";
 
 const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
 const RECLAIM_MIN_RVOL = 2;
 const RECLAIM_MIN_DOLLAR_VOLUME = 500_000;
+const MIN_PRIOR_DAY_VOLUME = 10_000;
+const LIVE_LIQUIDITY_OVERRIDE_VOLUME = 100_000;
+const LIVE_LIQUIDITY_OVERRIDE_DOLLARS = 1_000_000;
 
 type Candidate = {
   ticker: string; price: number; changePercent: number; rvol: number; prevVol: number;
@@ -257,6 +260,7 @@ export async function GET(req: Request) {
     if (!tickers.length) throw new Error("Polygon returned an empty market snapshot.");
 
     const candidates = new Map<string, Candidate>();
+    let liveLiquidityOverrides = 0;
     for (const row of tickers) {
       const ticker = String(row?.ticker ?? "").toUpperCase();
       if (!ticker) continue;
@@ -270,7 +274,18 @@ export async function GET(req: Request) {
         resolveSnapshotPullbackFromSessionHighPercent(row, price);
       const currentVolume = Math.max(Number(row?.day?.v || 0), Number(row?.min?.av || 0));
       const previousVolume = Number(row?.prevDay?.v || 0);
-      if (price <= 0 || previousVolume < 10_000) continue;
+      if (price <= 0) continue;
+      const liveLiquidityOverride =
+        previousVolume < MIN_PRIOR_DAY_VOLUME &&
+        currentVolume >= LIVE_LIQUIDITY_OVERRIDE_VOLUME &&
+        price * currentVolume >= LIVE_LIQUIDITY_OVERRIDE_DOLLARS;
+      if (
+        previousVolume < MIN_PRIOR_DAY_VOLUME &&
+        !liveLiquidityOverride
+      ) {
+        continue;
+      }
+      if (liveLiquidityOverride) liveLiquidityOverrides += 1;
       const rawVolumeRatio = currentVolume > 0 ? currentVolume / previousVolume : 0;
       const rvol = Math.min(25, rawVolumeRatio / marketSession.expectedVolumeFraction);
       const catalyst = catalystMap.get(ticker);
@@ -401,6 +416,7 @@ export async function GET(req: Request) {
         securityMetadataFetchFailures: metadata.fetchFailures,
         unsupportedSecurityTypes,
         unknownSecurityTypes,
+        liveLiquidityOverrides,
       },
     }).eq("id", run.id);
 

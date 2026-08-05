@@ -19,7 +19,7 @@ export default function MomentumContenders({
     <div className="flex h-full min-h-full flex-col bg-white/[0.01] p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700">
-          Other Contenders
+          Contenders + Momentum Radar
         </p>
         {candidates.length > 0 && (
           <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">
@@ -72,6 +72,11 @@ export default function MomentumContenders({
                     <span className="text-[8px] font-bold text-zinc-700">
                       {opportunity.stage}
                     </span>
+                    {opportunity.momentumRadarEligible && (
+                      <span className="w-fit rounded-full border border-amber-400/25 bg-amber-500/[0.07] px-2 py-0.5 text-[8px] font-black text-amber-300">
+                        Radar · entry withheld
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

@@ -125,7 +125,24 @@ export function resolveSnapshotChangePercent(
 ): number {
   const previousClose = positiveNumber(row?.prevDay?.c);
   if (previousClose !== null && price > 0) {
-    return ((price - previousClose) / previousClose) * 100;
+    const derivedChange = ((price - previousClose) / previousClose) * 100;
+    const sessionOpen = resolveSnapshotSessionOpen(row);
+    if (Math.abs(derivedChange) >= 500 && sessionOpen > 0) {
+      const openGap = ((sessionOpen - previousClose) / previousClose) * 100;
+      if (Math.abs(openGap) >= 500) {
+        const reported = Number(row?.todaysChangePerc);
+        if (Number.isFinite(reported) && Math.abs(reported) < 500) {
+          return reported;
+        }
+        // A 500%+ discontinuity already present at today's open is normally a
+        // split/corporate-action reference mismatch, not organic momentum.
+        // Until adjusted reference data confirms otherwise, measure only the
+        // move observed in today's session instead of publishing thousands of
+        // percent of fabricated performance.
+        return ((price - sessionOpen) / sessionOpen) * 100;
+      }
+    }
+    return derivedChange;
   }
   const reported = Number(row?.todaysChangePerc);
   return Number.isFinite(reported) ? reported : 0;

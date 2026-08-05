@@ -377,6 +377,7 @@ function HomeInner() {
             setMobileScannerReads(
               mergeOpportunityLists(
                 momentumData?.opportunities ?? [],
+                momentumData?.momentumRadar ?? [],
                 beforeCrowdData?.opportunities ?? [],
               ).sort((a, b) => b.opportunityScore - a.opportunityScore),
             );
@@ -4784,6 +4785,9 @@ function HomeInner() {
   // Built entirely from real fields the backend already computed
   // (/api/opportunities), never from a client-side guess.
   const getOtherReadState = (o: APIOpportunity): { label: string; tone: string } => {
+    if (o.momentumRadarEligible) {
+      return { label: "Momentum radar · no chase", tone: "text-amber-300" };
+    }
     if (o.freshnessLabel === "Last Verified Signal") {
       return { label: "Quiet market", tone: "text-zinc-500" };
     }

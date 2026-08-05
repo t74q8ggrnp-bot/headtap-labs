@@ -59,9 +59,11 @@ export async function GET() {
       const change = resolveSnapshotChangePercent(t, price);
       const volume = Number(t.day?.v || 0);
       const prevVolume = Number(t.prevDay?.v || 1);
-      if (price < 1 || volume < 10000) continue;
+      if (price <= 0 || volume < 10_000 || price * volume < 100_000) continue;
       movers.push({ symbol: ticker, price, change, volume, prevVolume });
     }
+
+    movers.sort((left, right) => right.change - left.change);
 
     return NextResponse.json({
       movers,

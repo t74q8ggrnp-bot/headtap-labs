@@ -156,9 +156,11 @@ export async function GET() {
     const sessionSchemaReady = candidateCounts.reclaimSchemaReady === true;
     const peakRetentionSchemaReady =
       candidateCounts.peakRetentionSchemaReady === true;
-    const writerIsSessionAware = String(
+    const writerVersionMatch = String(
       promotedRun?.engine_version ?? "",
-    ).match(/^signal-writer-v(?:5|6)-/) !== null;
+    ).match(/^signal-writer-v(\d+)-/);
+    const writerIsSessionAware =
+      Number(writerVersionMatch?.[1] ?? 0) >= 5;
     checks.push({
       name: "session_aware_writer",
       ok: Boolean(promotedRun) && writerIsSessionAware && sessionSchemaReady,

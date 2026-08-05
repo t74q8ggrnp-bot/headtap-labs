@@ -474,6 +474,13 @@ function isMoveExplainedPriceDiscontinuity(
   return Math.abs(deviation - move) <= Math.max(5, move * 0.1);
 }
 
+function isEntryTimingOnlyRejection(reason: string) {
+  return (
+    reason.startsWith("R:R ") ||
+    reason === "Reward magnitude is negligible."
+  );
+}
+
 export function evaluateCanonicalOpportunity(
   candidate: OpportunityCandidate,
   framework: TradeFrameworkResult,
@@ -647,6 +654,21 @@ export function evaluateCanonicalOpportunity(
       ? []
     : [...rejectionReasons];
   const displayEligible = displayRejectionReasons.length === 0;
+  const momentumRadarEligible = Boolean(
+    strategy === "spot_momentum" &&
+      !displayEligible &&
+      candidate.retrievedForSm &&
+      candidate.change >= 10 &&
+      candidate.relativeVolume >= 1.5 &&
+      candidate.momentumScore >= 70 &&
+      pulse?.fresh === true &&
+      !peakFailureConfirmed &&
+      proxMarketConfirmation !== null &&
+      proxMarketConfirmation >= 55 &&
+      (pulse.state === "expanding" || pulse.state === "stable") &&
+      displayRejectionReasons.length > 0 &&
+      displayRejectionReasons.every(isEntryTimingOnlyRejection),
+  );
   const strength = signalStrength(candidate, strategy);
   const breakout = getBreakoutPotential(
     {
@@ -728,7 +750,7 @@ export function evaluateCanonicalOpportunity(
       proxMarketConfirmation !== null &&
       proxMarketConfirmation >= 55 &&
       !peakFailureConfirmed);
-  const tier = sessionReclaimVisibilityOverride || peakFailureConfirmed
+  const tier = momentumRadarEligible || sessionReclaimVisibilityOverride || peakFailureConfirmed
     ? "watch"
     : displayEligible &&
     strategyScore >= 80 &&
@@ -803,6 +825,8 @@ export function evaluateCanonicalOpportunity(
   const whyItMatters =
     peakFailureConfirmed
       ? `${candidate.ticker} remains on the momentum radar, but ProX currently sees a failed continuation rather than a strong chase entry.`
+      : momentumRadarEligible
+      ? `${candidate.ticker} is a verified momentum leader with live ProX confirmation. HT is keeping it visible on the radar while withholding entry qualification at the current price.`
       : sessionReclaim
       ? `${candidate.ticker} has a verified session reclaim. HT combined the current-session move, full-session context, volume, risk${proxIntelligence?.pulse?.fresh ? ", and live ProX pulse" : ""} into this single Spot Momentum decision.`
       : explosionAssessment.state === "price_discovery"
@@ -829,6 +853,8 @@ export function evaluateCanonicalOpportunity(
   const riskNote =
     (peakFailureConfirmed
       ? "Price is below its recent peak and the live tape confirms deterioration through acceleration, VWAP, time, or selling-volume evidence. HT will wait for a real reclaim before restoring conviction."
+      : momentumRadarEligible
+      ? "Momentum and volume are real, but the conventional structure does not provide at least 1:1 modeled risk/reward here. This is a no-chase radar read, not an entry-ready call."
       : sessionReclaimVisibilityOverride
       ? "The rebound is verified, but the conventional trade framework remains weak; HT is showing it as a research watch, not a trade-ready conviction."
       : priceDiscoveryVisibilityOverride
@@ -839,6 +865,8 @@ export function evaluateCanonicalOpportunity(
   const stage =
     peakFailureConfirmed
       ? "Post-Peak Weakness"
+      : momentumRadarEligible
+      ? "Momentum Leader — No Chase"
       : sessionReclaim
       ? candidate.scanSession === "pre_market"
         ? "Pre-Market Reclaim"
@@ -890,6 +918,8 @@ export function evaluateCanonicalOpportunity(
     },
     visibilityState: priceDiscoveryVisibilityOverride
       ? "verified_price_discovery"
+      : momentumRadarEligible
+        ? "momentum_radar"
       : sessionReclaim
         ? "session_reclaim"
       : eligible
@@ -913,6 +943,7 @@ export function evaluateCanonicalOpportunity(
         recentPeakPullback,
     },
     continuationEligible: explosionAssessment.paperEntryEligible,
+    momentumRadarEligible,
     opportunityType,
     riskTags,
     attentionScore: candidate.crowdScore,

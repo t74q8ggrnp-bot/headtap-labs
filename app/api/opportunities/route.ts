@@ -208,6 +208,18 @@ export async function GET(req: Request) {
           (left.explosionAssessment.paperTradeScore ?? 0),
       )
       .slice(0, 10);
+    const momentumRadar =
+      strategy === "spot_momentum"
+        ? evaluated
+            .filter((candidate) => candidate.momentumRadarEligible)
+            .sort(
+              (left, right) =>
+                right.strategyScore - left.strategyScore ||
+                right.relativeVolume - left.relativeVolume ||
+                right.signalStrength - left.signalStrength,
+            )
+            .slice(0, 10)
+        : [];
 
     return NextResponse.json(
       {
@@ -232,7 +244,9 @@ export async function GET(req: Request) {
             (candidate) =>
               candidate.visibilityState === "verified_price_discovery",
           ).length,
+          momentumRadar: momentumRadar.length,
         },
+        momentumRadar,
         ...(debug
           ? {
               rejectedSample: ranked
