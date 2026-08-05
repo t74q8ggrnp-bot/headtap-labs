@@ -4,7 +4,7 @@ import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 import { isSupportedType } from "@/lib/security-type-policy";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v8-peak-retention";
+  "opportunities-v9-fused-session-momentum";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -169,6 +169,18 @@ export function isSessionReclaim(candidate: OpportunityCandidate) {
 }
 
 export function getMomentumReferenceChange(candidate: OpportunityCandidate) {
+  // Public movement and structural levels stay anchored to the previous
+  // close, matching how the market describes today's move. A verified reclaim
+  // is the exception because its thesis is explicitly measured from today's
+  // open. Active-session movement is fused into scoring separately instead of
+  // replacing the full-day move.
+  if (isSessionReclaim(candidate)) {
+    return candidate.changeFromOpenPercent ?? candidate.change;
+  }
+  return candidate.change;
+}
+
+function getActiveSessionChange(candidate: OpportunityCandidate) {
   const hasCurrentSessionReference =
     (candidate.scanSession === "pre_market" ||
       candidate.scanSession === "regular") &&
@@ -176,8 +188,20 @@ export function getMomentumReferenceChange(candidate: OpportunityCandidate) {
     candidate.sessionOpenPrice > 0 &&
     candidate.changeFromOpenPercent !== null;
   return hasCurrentSessionReference
-    ? candidate.changeFromOpenPercent ?? 0
-    : candidate.change;
+    ? candidate.changeFromOpenPercent
+    : null;
+}
+
+function getFusedMomentumMagnitude(candidate: OpportunityCandidate) {
+  const fullDayCore = clamp(Math.max(0, candidate.change) * 3);
+  const activeSessionChange = getActiveSessionChange(candidate);
+  if (activeSessionChange === null) {
+    return fullDayCore;
+  }
+  const activeSessionCore = clamp(Math.max(0, activeSessionChange) * 3);
+  return isSessionReclaim(candidate)
+    ? activeSessionCore
+    : Math.round(fullDayCore * 0.45 + activeSessionCore * 0.55);
 }
 
 export function chooseOpportunityStrategy(
@@ -459,6 +483,8 @@ export function evaluateCanonicalOpportunity(
 ) {
   const sessionReclaim = isSessionReclaim(candidate);
   const momentumReferenceChange = getMomentumReferenceChange(candidate);
+  const activeSessionChange = getActiveSessionChange(candidate);
+  const fusedMomentum = getFusedMomentumMagnitude(candidate);
   const rawConfirmedRunner = isConfirmedContinuationRunner(candidate, strategy);
   const pulse = proxIntelligence?.pulse;
   const sessionPeakPullback = candidate.pullbackFromSessionHighPercent;
@@ -481,6 +507,17 @@ export function evaluateCanonicalOpportunity(
   const observedPeakPullback = Math.max(
     sessionPeakPullback ?? 0,
     recentPeakPullback ?? 0,
+  );
+  const proxMarketConfirmation =
+    pulse?.fresh === true
+      ? proxIntelligence?.scores.marketConfirmation ?? null
+      : null;
+  const proxSupportsContinuation = Boolean(
+    pulse?.fresh === true &&
+      !peakFailureConfirmed &&
+      proxMarketConfirmation !== null &&
+      proxMarketConfirmation >= 55 &&
+      (pulse.state === "expanding" || pulse.state === "stable"),
   );
   const confirmedRunner = rawConfirmedRunner && !peakFailureConfirmed;
   const extremeMomentum = isExtremeMomentum(candidate, strategy);
@@ -529,20 +566,23 @@ export function evaluateCanonicalOpportunity(
       rejectionReasons.push(
         "Session Reclaim requires at least a 5% verified move from the current-day open.",
       );
-    } else if (momentumReferenceChange <= 0) {
+    } else if (
+      momentumReferenceChange <= 0 &&
+      (activeSessionChange ?? 0) <= 0
+    ) {
       rejectionReasons.push(
-        "Spot Momentum requires positive movement in the active session.",
+        "Spot Momentum requires positive full-day or active-session movement.",
       );
     }
     if (!extremeMomentum && !sessionReclaim) {
-      if (candidate.crowdScore >= 65) {
+      if (candidate.crowdScore >= 65 && !proxSupportsContinuation) {
         rejectionReasons.push(
-          `Crowd saturation (${Math.round(candidate.crowdScore)}) is already late for Spot Momentum.`,
+          `Crowd saturation (${Math.round(candidate.crowdScore)}) lacks fresh ProX continuation confirmation.`,
         );
       }
-      if (candidate.trapScore >= 70) {
+      if (candidate.trapScore >= 70 && !proxSupportsContinuation) {
         rejectionReasons.push(
-          `Trap risk (${Math.round(candidate.trapScore)}) exceeds the Spot Momentum ceiling.`,
+          `Trap risk (${Math.round(candidate.trapScore)}) lacks fresh ProX continuation confirmation.`,
         );
       }
     }
@@ -642,7 +682,7 @@ export function evaluateCanonicalOpportunity(
           ),
         );
   const qualityScore = Math.round(strength * 0.65 + tradeQuality * 0.35);
-  const magnitudeCore = clamp(momentumReferenceChange * 3);
+  const magnitudeCore = fusedMomentum;
   const baseStrategyScore =
     strategy === "spot_momentum"
       ? Math.round(
@@ -652,19 +692,17 @@ export function evaluateCanonicalOpportunity(
         )
       : Math.round(qualityScore * 0.65 + breakout.score * 0.35);
   const sessionAlignmentAdjustment =
-    candidate.changeFromOpenPercent === null
+    activeSessionChange === null
       ? 0
-      : candidate.change > 0 && candidate.changeFromOpenPercent > 0
-        ? 3
-        : candidate.change > 0 && candidate.changeFromOpenPercent < 0
-          ? -5
-          : candidate.change <= 0 && candidate.changeFromOpenPercent > 0
+      : candidate.change > 0 && activeSessionChange > 0
+        ? 4
+        : candidate.change > 0 && activeSessionChange < 0
+          ? proxSupportsContinuation
+            ? -2
+            : -8
+          : candidate.change <= 0 && activeSessionChange > 0
             ? -3
             : 0;
-  const proxMarketConfirmation =
-    proxIntelligence?.pulse?.fresh === true
-      ? proxIntelligence.scores.marketConfirmation
-      : null;
   const proxMarketAdjustment =
     peakFailureConfirmed
       ? -Math.min(30, 15 + Math.round(observedPeakPullback))
@@ -772,7 +810,7 @@ export function evaluateCanonicalOpportunity(
         ? `${candidate.ticker} is in confirmed price discovery with ${explosionAssessment.score}/100 observed explosion potential; live price, volume, and momentum confirm the move, while conventional upside and downside levels remain unavailable.`
         : `${candidate.ticker} is in confirmed price discovery with ${explosionAssessment.score}/100 observed explosion potential; scenario capacity is anchored to ATR, live impulse, volume, and momentum.`
       : eligible
-        ? `${candidate.ticker} currently qualifies for ${strategy === "spot_momentum" ? "Spot Momentum" : "Before The Crowd"} evaluation with a ${tier} tier.`
+        ? `${candidate.ticker} currently qualifies for ${strategy === "spot_momentum" ? "Spot Momentum" : "Before The Crowd"} evaluation with a ${tier} tier after HT fused the full-day move, active session, volume, structure, and ProX tape.`
         : `${candidate.ticker} has an active signal, but it does not currently pass the full opportunity gate.`;
   const whatChanged =
     peakFailureConfirmed
@@ -781,6 +819,8 @@ export function evaluateCanonicalOpportunity(
       ? `Price recovered from the current-day open with ${candidate.relativeVolume.toFixed(1)}x relative volume.`
       : candidate.catalystScore >= 20 && candidate.state
       ? `${candidate.state} is active in the signal stack.`
+      : activeSessionChange !== null && activeSessionChange > 0
+        ? "Full-day momentum is holding with positive live-session participation."
       : candidate.relativeVolume >= 3
         ? `Volume expanded to ${candidate.relativeVolume.toFixed(1)}x normal.`
         : momentumReferenceChange > 0
@@ -864,6 +904,8 @@ export function evaluateCanonicalOpportunity(
     scoreContext: {
       sessionAlignmentAdjustment,
       proxMarketAdjustment,
+      proxSupportsContinuation,
+      momentumFusion: "full_day_active_session_v1",
       peakFailureConfirmed,
       sessionPeakPullbackPercent:
         sessionPeakPullback,
