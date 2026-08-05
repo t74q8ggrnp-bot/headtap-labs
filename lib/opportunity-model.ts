@@ -74,7 +74,8 @@ export function resolveOpportunityDisplayQuote(
     Number.isFinite(liveQuote.change)
   ) {
     const change =
-      opportunity.setupType === "session_reclaim" &&
+      (opportunity.scanSession === "pre_market" ||
+        opportunity.scanSession === "regular") &&
       opportunity.sessionOpenPrice &&
       opportunity.sessionOpenPrice > 0
         ? ((liveQuote.price - opportunity.sessionOpenPrice) /

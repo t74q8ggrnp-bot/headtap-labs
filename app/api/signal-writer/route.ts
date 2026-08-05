@@ -18,7 +18,7 @@ export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v4-intraday-reclaim";
+const ENGINE_VERSION = "signal-writer-v5-active-session-momentum";
 
 const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
 const RECLAIM_MIN_RVOL = 2;
@@ -75,10 +75,13 @@ function computeSignal(
   pool: "spot_momentum" | "before_the_crowd",
   includeReclaimColumns: boolean,
 ) {
+  const hasCurrentSessionReference =
+    (candidate.scanSession === "pre_market" ||
+      candidate.scanSession === "regular") &&
+    candidate.changeFromOpenPercent !== null;
   const move = Math.max(
     0,
-    candidate.changePercent <= 0 &&
-      (candidate.changeFromOpenPercent ?? 0) > 0
+    hasCurrentSessionReference
       ? candidate.changeFromOpenPercent ?? 0
       : candidate.changePercent,
   );

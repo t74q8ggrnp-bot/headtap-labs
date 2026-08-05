@@ -156,7 +156,7 @@ export async function GET() {
     const sessionSchemaReady = candidateCounts.reclaimSchemaReady === true;
     const writerIsSessionAware = String(
       promotedRun?.engine_version ?? "",
-    ).startsWith("signal-writer-v4-");
+    ).startsWith("signal-writer-v5-");
     checks.push({
       name: "session_aware_writer",
       ok: Boolean(promotedRun) && writerIsSessionAware && sessionSchemaReady,

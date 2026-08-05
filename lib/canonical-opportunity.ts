@@ -4,7 +4,7 @@ import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 import { isSupportedType } from "@/lib/security-type-policy";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v6-session-aware-prox";
+  "opportunities-v7-active-momentum";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -156,13 +156,15 @@ export function isSessionReclaim(candidate: OpportunityCandidate) {
 }
 
 export function getMomentumReferenceChange(candidate: OpportunityCandidate) {
-  const sessionRecovery =
-    candidate.change <= 0 &&
+  const hasCurrentSessionReference =
+    (candidate.scanSession === "pre_market" ||
+      candidate.scanSession === "regular") &&
     candidate.sessionOpenPrice !== null &&
     candidate.sessionOpenPrice > 0 &&
-    candidate.changeFromOpenPercent !== null &&
-    candidate.changeFromOpenPercent > 0;
-  return sessionRecovery ? candidate.changeFromOpenPercent ?? 0 : candidate.change;
+    candidate.changeFromOpenPercent !== null;
+  return hasCurrentSessionReference
+    ? candidate.changeFromOpenPercent ?? 0
+    : candidate.change;
 }
 
 export function chooseOpportunityStrategy(
@@ -488,8 +490,10 @@ export function evaluateCanonicalOpportunity(
       rejectionReasons.push(
         "Session Reclaim requires at least a 5% verified move from the current-day open.",
       );
-    } else if (!sessionReclaim && candidate.change <= 0) {
-      rejectionReasons.push("Spot Momentum requires positive price movement.");
+    } else if (momentumReferenceChange <= 0) {
+      rejectionReasons.push(
+        "Spot Momentum requires positive movement in the active session.",
+      );
     }
     if (!extremeMomentum && !sessionReclaim) {
       if (candidate.crowdScore >= 65) {
@@ -507,6 +511,11 @@ export function evaluateCanonicalOpportunity(
     if (!candidate.retrievedForBtc && !candidate.retrievedForCatalyst) {
       rejectionReasons.push(
         "Ticker did not qualify for Before The Crowd retrieval.",
+      );
+    }
+    if (momentumReferenceChange <= 0) {
+      rejectionReasons.push(
+        "Before The Crowd requires positive active-session participation.",
       );
     }
     if (candidate.crowdScore >= 60) {
@@ -618,20 +627,32 @@ export function evaluateCanonicalOpportunity(
       : null;
   const proxMarketAdjustment =
     proxMarketConfirmation === null
-      ? 0
-      : proxMarketConfirmation >= 65
-        ? Math.min(5, Math.round((proxMarketConfirmation - 60) / 8))
-        : proxMarketConfirmation < 40
-          ? -Math.min(5, Math.round((40 - proxMarketConfirmation) / 8))
+      ? isActiveMarketSession()
+        ? -8
+        : 0
+      : proxMarketConfirmation >= 75
+        ? Math.min(12, 7 + Math.round((proxMarketConfirmation - 75) / 5))
+        : proxMarketConfirmation >= 65
+          ? 5
+          : proxMarketConfirmation < 35
+            ? -12
+            : proxMarketConfirmation < 45
+              ? -6
           : 0;
   const strategyScore = Math.round(
     clamp(baseStrategyScore + sessionAlignmentAdjustment + proxMarketAdjustment),
   );
+  const heroPulseConfirmed =
+    !isActiveMarketSession() ||
+    (proxIntelligence?.pulse?.fresh === true &&
+      proxMarketConfirmation !== null &&
+      proxMarketConfirmation >= 55);
   const tier = sessionReclaimVisibilityOverride
     ? "watch"
     : displayEligible &&
     strategyScore >= 80 &&
-    ((framework.entryQuality ?? 0) >= 70 || confirmedRunner)
+    ((framework.entryQuality ?? 0) >= 70 || confirmedRunner) &&
+    heroPulseConfirmed
       ? "hero"
       : displayEligible && strategyScore >= 68
         ? "feature"
