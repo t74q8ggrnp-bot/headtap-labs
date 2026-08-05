@@ -21,11 +21,14 @@ const RUN_ROW_PAGE_SIZE = 1_000;
 const PROX_LOOKUP_BATCH_SIZE = 100;
 type RequestType = "all" | "momentum" | "catalyst" | "before_crowd";
 const OPPORTUNITY_CACHE_HEADERS = {
-  // The authoritative writer promotes a new run every five minutes. Keep the
-  // browser revalidating, but let Vercel serve the last verified decision
-  // immediately while one edge request refreshes the expensive evaluation.
-  "Cache-Control": "public, max-age=0, must-revalidate",
-  "CDN-Cache-Control": "public, max-age=45, stale-while-revalidate=300",
+  // Spot Momentum and Before The Crowd must resolve the same latest promoted
+  // run. A stale-while-revalidate window allowed the two query variants to
+  // temporarily serve different run IDs after promotion, so canonical reads
+  // now bypass edge storage. Expensive historical features remain cached in
+  // Supabase by the trade-framework layer.
+  "Cache-Control": "private, no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
   "Vercel-Cache-Tag": "canonical-opportunities",
 };
 
