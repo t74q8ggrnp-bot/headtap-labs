@@ -1,10 +1,9 @@
 // app/api/prox-market-sensor/route.ts
 //
 // Pro X Phase 3 (partial) — market-feature snapshots for tickers with a
-// recent Pro X event. This is the "event appeared -> monitor affected
-// ticker" direction only; the reverse ("price moved -> investigate
-// cause") needs scanning the broad market, not just event-linked
-// tickers, and isn't attempted this pass.
+// recent Pro X event or the latest promoted canonical opportunity run.
+// This covers both directions: event -> monitor price and price move ->
+// investigate the pulse, without granting execution authority.
 //
 // REST-polled 1-minute bars via Polygon's aggs endpoint — verified live
 // against the current plan (minute/second aggs return 200; last-trade and
@@ -28,6 +27,8 @@ const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const LOOKBACK_HOURS = 48; // how far back a Pro X event still counts as "recent"
 const BAR_WINDOW_MINUTES = 30; // how many 1-min bars to pull per ticker
 const CONCURRENCY = 5;
+const CANONICAL_SENSOR_LIMIT = 60;
+const MAX_SENSOR_TICKERS = 100;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -73,6 +74,35 @@ async function fetchRecentEventTickers(supabase: ReturnType<typeof getSupabase>)
     }
   }
   return [...tickers];
+}
+
+async function fetchCanonicalOpportunityTickers(
+  supabase: ReturnType<typeof getSupabase>,
+): Promise<string[]> {
+  const { data: run, error: runError } = await supabase
+    .from("ht_scan_runs")
+    .select("id")
+    .eq("run_type", "signal_writer_v3")
+    .eq("status", "success")
+    .eq("promoted", true)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (runError || !run?.id) return [];
+
+  const { data, error } = await supabase
+    .from("ht_signal_run_rows")
+    .select("ticker")
+    .eq("scan_run_id", run.id)
+    .or(
+      "retrieved_for_sm.eq.true,retrieved_for_btc.eq.true,retrieved_for_catalyst.eq.true",
+    )
+    .order("ht_score", { ascending: false })
+    .limit(CANONICAL_SENSOR_LIMIT);
+  if (error) return [];
+  return (data ?? [])
+    .map((row) => String(row.ticker ?? "").toUpperCase().trim())
+    .filter(Boolean);
 }
 
 type Bar = { o: number; h: number; l: number; c: number; v: number; vw: number; t: number };
@@ -140,6 +170,8 @@ export async function GET(req: Request) {
 
   const diagnostics = {
     tickersConsidered: 0,
+    eventTickers: 0,
+    canonicalTickers: 0,
     computed: 0,
     historyPersisted: 0,
     historyUnavailable: null as string | null,
@@ -149,7 +181,15 @@ export async function GET(req: Request) {
 
   try {
     const supabase = getSupabase();
-    const tickers = await fetchRecentEventTickers(supabase);
+    const [eventTickers, canonicalTickers] = await Promise.all([
+      fetchRecentEventTickers(supabase),
+      fetchCanonicalOpportunityTickers(supabase),
+    ]);
+    diagnostics.eventTickers = eventTickers.length;
+    diagnostics.canonicalTickers = canonicalTickers.length;
+    const tickers = [
+      ...new Set([...canonicalTickers, ...eventTickers]),
+    ].slice(0, MAX_SENSOR_TICKERS);
     diagnostics.tickersConsidered = tickers.length;
 
     for (let i = 0; i < tickers.length; i += CONCURRENCY) {

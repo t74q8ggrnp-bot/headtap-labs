@@ -3,8 +3,10 @@
 
 import { NextResponse } from "next/server";
 import {
+  resolveSnapshotChangeFromOpenPercent,
   resolveSnapshotChangePercent,
   resolveSnapshotPrice,
+  resolveSnapshotSessionOpen,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
 import { getErrorMessage } from "@/lib/error-message";
@@ -16,11 +18,18 @@ export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v3-run-scoped";
+const ENGINE_VERSION = "signal-writer-v4-intraday-reclaim";
+
+const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
+const RECLAIM_MIN_RVOL = 2;
+const RECLAIM_MIN_DOLLAR_VOLUME = 500_000;
 
 type Candidate = {
   ticker: string; price: number; changePercent: number; rvol: number; prevVol: number;
+  sessionOpenPrice: number | null; changeFromOpenPercent: number | null;
+  scanSession: string;
   securityType: string | null; retrievedForSm: boolean; retrievedForBtc: boolean;
+  retrievedForReclaim: boolean;
   retrievedForCatalyst: boolean; catalystScore: number; catalystState: string;
 };
 
@@ -61,8 +70,18 @@ function getEasternSession() {
   return { name: "closed", expectedVolumeFraction: 1 };
 }
 
-function computeSignal(candidate: Candidate, pool: "spot_momentum" | "before_the_crowd") {
-  const move = Math.max(0, candidate.changePercent);
+function computeSignal(
+  candidate: Candidate,
+  pool: "spot_momentum" | "before_the_crowd",
+  includeReclaimColumns: boolean,
+) {
+  const move = Math.max(
+    0,
+    candidate.changePercent <= 0 &&
+      (candidate.changeFromOpenPercent ?? 0) > 0
+      ? candidate.changeFromOpenPercent ?? 0
+      : candidate.changePercent,
+  );
   const volumeScore = candidate.rvol > 0 ? clamp(candidate.rvol * 10) : 0;
   const momentumScore = clamp(move * 4 + (move > 0 ? 10 : 0) + Math.min(25, candidate.rvol * 6));
   const crowdScore = clamp(Math.min(40, candidate.rvol * 8) + Math.min(30, move * 2) + (move > 5 ? 10 : 0));
@@ -72,7 +91,13 @@ function computeSignal(candidate: Candidate, pool: "spot_momentum" | "before_the
   const htScore = clamp(momentumScore * 0.4 + volumeScore * 0.3 + (99 - crowdScore) * 0.15 + (99 - trapScore) * 0.15 + catalystBonus);
 
   let pattern = "Standard";
-  if (candidate.rvol >= 5 && move < 3) pattern = "Quiet Accumulation";
+  if (candidate.retrievedForReclaim) {
+    pattern =
+      candidate.scanSession === "pre_market"
+        ? "Pre-Market Reclaim"
+        : "Intraday Reclaim";
+  }
+  else if (candidate.rvol >= 5 && move < 3) pattern = "Quiet Accumulation";
   else if (candidate.rvol >= 3 && move >= 5) pattern = "Crowd Ignition";
   else if (move >= 15 && candidate.catalystScore < 20) pattern = "Exhaustion Risk";
   else if (candidate.catalystScore >= 60 && move >= 5) pattern = "Catalyst Momentum";
@@ -117,8 +142,35 @@ function computeSignal(candidate: Candidate, pool: "spot_momentum" | "before_the
     retrieved_for_sm: candidate.retrievedForSm,
     retrieved_for_btc: candidate.retrievedForBtc,
     retrieved_for_catalyst: candidate.retrievedForCatalyst,
+    ...(includeReclaimColumns
+      ? {
+          session_open_price: candidate.sessionOpenPrice,
+          change_from_open_percent: candidate.changeFromOpenPercent,
+          scan_session: candidate.scanSession,
+          retrieved_for_reclaim: candidate.retrievedForReclaim,
+        }
+      : {}),
     scanned_at: new Date().toISOString(), _oppScore: oppScore, _pool: pool,
   };
+}
+
+async function supportsIntradayReclaimColumns(
+  supabase: ReturnType<typeof getSupabase>,
+) {
+  const { error } = await supabase
+    .from("ht_signal_run_rows")
+    .select(
+      "session_open_price,change_from_open_percent,scan_session,retrieved_for_reclaim",
+    )
+    .limit(1);
+  if (error) {
+    console.warn(
+      "[signal-writer] intraday-reclaim migration is not active; preserving the existing scan lane:",
+      error.message,
+    );
+    return false;
+  }
+  return true;
 }
 
 async function readActiveCatalysts(supabase: ReturnType<typeof getSupabase>) {
@@ -152,6 +204,7 @@ export async function GET(req: Request) {
 
   try {
     const catalystMap = await readActiveCatalysts(supabase);
+    const reclaimSchemaReady = await supportsIntradayReclaimColumns(supabase);
     const marketSession = getEasternSession();
     const response = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`Polygon snapshot failed: ${response.status}`);
@@ -165,19 +218,49 @@ export async function GET(req: Request) {
       if (!ticker) continue;
       const price = resolveSnapshotPrice(row);
       const changePercent = resolveSnapshotChangePercent(row, price);
+      const sessionOpenPrice = resolveSnapshotSessionOpen(row);
+      const changeFromOpenPercent =
+        resolveSnapshotChangeFromOpenPercent(row, price);
       const currentVolume = Math.max(Number(row?.day?.v || 0), Number(row?.min?.av || 0));
       const previousVolume = Number(row?.prevDay?.v || 0);
       if (price <= 0 || previousVolume < 10_000) continue;
       const rawVolumeRatio = currentVolume > 0 ? currentVolume / previousVolume : 0;
       const rvol = Math.min(25, rawVolumeRatio / marketSession.expectedVolumeFraction);
       const catalyst = catalystMap.get(ticker);
-      const retrievedForSm = changePercent > 0 && rvol >= 1.5 && changePercent >= 0.5;
-      const retrievedForBtc = changePercent > 0 && rvol >= 1.2 && changePercent >= 0.2;
+      const retrievedForReclaim = Boolean(
+        reclaimSchemaReady &&
+          (marketSession.name === "pre_market" ||
+            marketSession.name === "regular") &&
+          changePercent <= 0 &&
+          changeFromOpenPercent !== null &&
+          changeFromOpenPercent >= RECLAIM_MIN_CHANGE_FROM_OPEN &&
+          rvol >= RECLAIM_MIN_RVOL &&
+          price * currentVolume >= RECLAIM_MIN_DOLLAR_VOLUME,
+      );
+      const retrievedForSm =
+        (changePercent > 0 && rvol >= 1.5 && changePercent >= 0.5) ||
+        retrievedForReclaim;
+      const retrievedForBtc =
+        (changePercent > 0 && rvol >= 1.2 && changePercent >= 0.2) ||
+        Boolean(
+          reclaimSchemaReady &&
+            (marketSession.name === "pre_market" ||
+              marketSession.name === "regular") &&
+            changePercent > -3 &&
+            changePercent <= 0 &&
+            changeFromOpenPercent !== null &&
+            changeFromOpenPercent >= 0.5 &&
+            rvol >= 1.2,
+        );
       const retrievedForCatalyst = Boolean(catalyst && catalyst.score >= 20);
       if (!retrievedForSm && !retrievedForBtc && !retrievedForCatalyst) continue;
       candidates.set(ticker, {
-        ticker, price, changePercent, rvol, prevVol: previousVolume, securityType: null,
-        retrievedForSm, retrievedForBtc, retrievedForCatalyst,
+        ticker, price, changePercent, rvol, prevVol: previousVolume,
+        sessionOpenPrice: sessionOpenPrice > 0 ? sessionOpenPrice : null,
+        changeFromOpenPercent, scanSession: marketSession.name,
+        securityType: null,
+        retrievedForSm, retrievedForBtc, retrievedForReclaim,
+        retrievedForCatalyst,
         catalystScore: catalyst?.score ?? 0, catalystState: catalyst?.state ?? "",
       });
     }
@@ -204,7 +287,11 @@ export async function GET(req: Request) {
     }
 
     const rows = [...candidates.values()].map((candidate) => ({
-      ...computeSignal(candidate, candidate.retrievedForSm ? "spot_momentum" : "before_the_crowd"),
+      ...computeSignal(
+        candidate,
+        candidate.retrievedForSm ? "spot_momentum" : "before_the_crowd",
+        reclaimSchemaReady,
+      ),
       scan_run_id: run.id,
     }));
     if (rows.length < 3) {
@@ -228,12 +315,16 @@ export async function GET(req: Request) {
     }
 
     const compatibility = [...rows].sort((a, b) => b._oppScore - a._oppScore).slice(0, 100)
-      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, _oppScore, _pool, ...row }) => {
+      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, session_open_price, change_from_open_percent, scan_session, retrieved_for_reclaim, _oppScore, _pool, ...row }) => {
         void scan_run_id;
         void security_type;
         void retrieved_for_sm;
         void retrieved_for_btc;
         void retrieved_for_catalyst;
+        void session_open_price;
+        void change_from_open_percent;
+        void scan_session;
+        void retrieved_for_reclaim;
         void _oppScore;
         void _pool;
         return row;
@@ -249,7 +340,9 @@ export async function GET(req: Request) {
         totalSnapshotTickers: tickers.length, runRows: rows.length, marketSession: marketSession.name,
         retrievedForSm: rows.filter((r) => r.retrieved_for_sm).length,
         retrievedForBtc: rows.filter((r) => r.retrieved_for_btc).length,
+        retrievedForReclaim: rows.filter((r) => r.retrieved_for_reclaim).length,
         retrievedForCatalyst: rows.filter((r) => r.retrieved_for_catalyst).length,
+        reclaimSchemaReady,
         securityMetadataCacheHits: metadata.cacheHits,
         securityMetadataFetched: metadata.fetched,
         securityMetadataFetchFailures: metadata.fetchFailures,

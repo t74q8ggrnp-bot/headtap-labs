@@ -33,6 +33,7 @@ export type ProxPacketStatus =
   | "active"
   | "evidence_only"
   | "stale_pulse"
+  | "market_only"
   | "no_recent_event"
   | "unavailable";
 
@@ -314,10 +315,10 @@ function buildPacket(args: {
     if (verificationState === "verified") supportFlags.push("verified_event");
     if (sourceCredibility >= 90) supportFlags.push("primary_source");
     if (matchConfidence >= 95) supportFlags.push("deterministic_ticker_match");
-    if ((volumeAcceleration ?? 0) >= 2) supportFlags.push("volume_accelerating");
-    if ((priceVsVwap ?? 0) > 0) supportFlags.push("price_above_vwap");
-    if ((acceleration5m ?? 0) >= 2) supportFlags.push("positive_5m_acceleration");
   }
+  if ((volumeAcceleration ?? 0) >= 2) supportFlags.push("volume_accelerating");
+  if ((priceVsVwap ?? 0) > 0) supportFlags.push("price_above_vwap");
+  if ((acceleration5m ?? 0) >= 2) supportFlags.push("positive_5m_acceleration");
 
   if (verificationState === "contradicted" || contradictions > 0) {
     riskFlags.push("contradictory_evidence");
@@ -369,7 +370,11 @@ function buildPacket(args: {
           ? "weakening"
           : "stable";
   const status: ProxPacketStatus = !recentEvent
-    ? "no_recent_event"
+    ? market
+      ? pulseStale
+        ? "stale_pulse"
+        : "market_only"
+      : "no_recent_event"
     : !market
       ? "evidence_only"
       : pulseStale
@@ -449,7 +454,7 @@ function buildPacket(args: {
             : marketConfirmation < 40 && recentEvent
               ? "defensive"
               : "neutral",
-        reason: "One-minute velocity, five-minute acceleration, volume acceleration, and VWAP relationship.",
+        reason: "One-minute velocity, five-minute acceleration, volume acceleration, and VWAP relationship across the active session.",
       },
       {
         factor: "contradiction_risk",

@@ -4,6 +4,7 @@ import { getTradeFramework } from "@/lib/canonical-trade-framework";
 import {
   CANONICAL_OPPORTUNITY_VERSION,
   evaluateCanonicalOpportunity,
+  getMomentumReferenceChange,
   isConfirmedContinuationRunner,
   mapSignalRow,
   type OpportunityCandidate,
@@ -101,7 +102,7 @@ async function evaluateAll(
             supabase,
             candidate.ticker,
             candidate.price,
-            candidate.change,
+            getMomentumReferenceChange(candidate),
             isConfirmedContinuationRunner(candidate, strategy),
           ),
           strategy,

@@ -5,6 +5,7 @@ import {
   CANONICAL_OPPORTUNITY_VERSION,
   chooseOpportunityStrategy,
   evaluateCanonicalOpportunity,
+  getMomentumReferenceChange,
   isConfirmedContinuationRunner,
   mapSignalRow,
   type SignalRow,
@@ -119,7 +120,7 @@ export async function GET(req: Request) {
       supabase,
       ticker,
       candidate.price,
-      candidate.change,
+      getMomentumReferenceChange(candidate),
       isConfirmedContinuationRunner(candidate, strategy),
     );
     const proxPackets = await loadProxIntelligencePackets(supabase, [ticker]);

@@ -192,6 +192,7 @@ type CanonicalOpportunity = {
   strategyScore: number;
   opportunityScore: number;
   proxIntelligence: ProxIntelligencePacket | null;
+  setupType?: "standard" | "session_reclaim";
 };
 
 async function recordProxShadowObservations(
@@ -318,7 +319,7 @@ async function fetchTopCandidates(): Promise<{
   sourceRunId: string;
 }> {
   const res = await fetch(
-    `${SITE_ORIGIN}/api/opportunities?type=momentum&limit=10&includeContinuation=1`,
+    `${SITE_ORIGIN}/api/opportunities?type=momentum&limit=100&includeContinuation=1`,
     { cache: "no-store" },
   );
   if (!res.ok) throw new Error(`Failed to fetch canonical opportunities: ${res.status}`);
@@ -360,6 +361,7 @@ async function fetchTopCandidates(): Promise<{
         decision.strategy === "spot_momentum" &&
         decision.engineVersion === CANONICAL_OPPORTUNITY_VERSION &&
         decision.sourceRunId === sourceRunId &&
+        decision.setupType !== "session_reclaim" &&
         Array.isArray(decision.riskTags) &&
         decision.tradeFramework,
     );

@@ -5,12 +5,25 @@ const positiveNumber = (value: unknown) => {
 
 export type PolygonSnapshotRow = {
   ticker?: unknown;
-  day?: { c?: unknown; v?: unknown };
+  day?: { o?: unknown; c?: unknown; v?: unknown };
   min?: { av?: unknown; c?: unknown; t?: unknown };
   prevDay?: { c?: unknown; v?: unknown };
   lastTrade?: { p?: unknown; t?: unknown };
   todaysChangePerc?: unknown;
 };
+
+export function resolveSnapshotSessionOpen(row: PolygonSnapshotRow): number {
+  return positiveNumber(row?.day?.o) ?? 0;
+}
+
+export function resolveSnapshotChangeFromOpenPercent(
+  row: PolygonSnapshotRow,
+  price: number,
+): number | null {
+  const sessionOpen = resolveSnapshotSessionOpen(row);
+  if (sessionOpen <= 0 || price <= 0) return null;
+  return ((price - sessionOpen) / sessionOpen) * 100;
+}
 
 const timestampMs = (value: unknown) => {
   const parsed = Number(value);

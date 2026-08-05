@@ -9,7 +9,6 @@ function label(value: string) {
 }
 
 export default function ProxPulse({ packet }: ProxPulseProps) {
-  const hasEvent = packet.event !== null;
   const pulse = packet.pulse;
   const visibleFlags = [...packet.supportFlags, ...packet.riskFlags].slice(0, 4);
 
@@ -26,7 +25,7 @@ export default function ProxPulse({ packet }: ProxPulseProps) {
         </div>
         <span
           className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase ${
-            packet.status === "active"
+            packet.status === "active" || packet.status === "market_only"
               ? "border-green-400/20 text-green-400"
               : packet.status === "stale_pulse"
                 ? "border-amber-400/20 text-amber-300"
@@ -37,52 +36,30 @@ export default function ProxPulse({ packet }: ProxPulseProps) {
         </span>
       </div>
 
-      {hasEvent ? (
+      {packet.event && (
+        <p className="mt-3 text-[11px] font-semibold leading-5 text-zinc-400">
+          {packet.event.headline ?? label(packet.event.catalystCategory)}
+        </p>
+      )}
+
+      {pulse ? (
         <>
-          <p className="mt-3 text-[11px] font-semibold leading-5 text-zinc-400">
-            {packet.event?.headline ?? label(packet.event?.catalystCategory ?? "unclassified")}
-          </p>
-          <div className="mt-3 grid grid-cols-3 divide-x divide-white/[0.06] rounded-lg border border-white/[0.06] bg-black/20 py-2.5">
-            <div className="px-3">
-              <p className="font-mono text-base font-black text-cyan-300">
-                {packet.scores.evidenceConfidence.toFixed(0)}
-              </p>
-              <p className="text-[8px] font-black uppercase tracking-wider text-zinc-600">
-                Evidence
-              </p>
-            </div>
-            <div className="px-3">
-              <p className="font-mono text-base font-black text-violet-300">
-                {packet.scores.marketConfirmation.toFixed(0)}
-              </p>
-              <p className="text-[8px] font-black uppercase tracking-wider text-zinc-600">
-                Market
-              </p>
-            </div>
-            <div className="px-3">
-              <p className="font-mono text-base font-black text-white">
-                {packet.scores.composite.toFixed(0)}
-              </p>
-              <p className="text-[8px] font-black uppercase tracking-wider text-zinc-600">
-                Composite
-              </p>
-            </div>
-          </div>
-          {pulse && (
-            <p className="mt-2 text-[9px] font-semibold leading-4 text-zinc-600">
-              {pulse.velocity1m === null ? "—" : `${pulse.velocity1m >= 0 ? "+" : ""}${pulse.velocity1m.toFixed(2)}%`} 1m
-              {" · "}
-              {pulse.acceleration5m === null ? "—" : `${pulse.acceleration5m >= 0 ? "+" : ""}${pulse.acceleration5m.toFixed(2)}%`} 5m
-              {" · "}
-              {pulse.volumeAcceleration === null ? "—" : `${pulse.volumeAcceleration.toFixed(1)}×`} volume
-              {" · "}
-              {pulse.priceVsVwap === null ? "—" : `${pulse.priceVsVwap >= 0 ? "+" : ""}${pulse.priceVsVwap.toFixed(2)}%`} vs VWAP
+          <div className="mt-3 flex items-center justify-between rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2.5">
+            <p className="text-[8px] font-black uppercase tracking-wider text-zinc-600">
+              Live read
             </p>
-          )}
+            <p className={`text-[10px] font-black uppercase ${pulse.state === "expanding" ? "text-green-400" : pulse.state === "weakening" ? "text-red-300" : pulse.state === "stale" ? "text-amber-300" : "text-cyan-300"}`}>
+              {label(pulse.state)}
+            </p>
+          </div>
+          <p className="mt-2 text-[9px] font-semibold leading-4 text-zinc-600">
+            ProX correlated short-term velocity, acceleration, volume behavior,
+            and VWAP position into the single HT opportunity decision above.
+          </p>
         </>
       ) : (
         <p className="mt-3 text-[10px] font-semibold leading-4 text-zinc-500">
-          No recent ProX evidence is attached. Absence of evidence does not
+          No fresh ProX market pulse is attached. Missing pulse data does not
           penalize the canonical opportunity.
         </p>
       )}
@@ -106,4 +83,3 @@ export default function ProxPulse({ packet }: ProxPulseProps) {
     </div>
   );
 }
-

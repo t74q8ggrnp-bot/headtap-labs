@@ -4,7 +4,7 @@ import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 import { isSupportedType } from "@/lib/security-type-policy";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v5-verified-price-discovery";
+  "opportunities-v6-session-aware-prox";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -35,6 +35,10 @@ export type SignalRow = {
   retrieved_for_sm?: boolean | null;
   retrieved_for_btc?: boolean | null;
   retrieved_for_catalyst?: boolean | null;
+  session_open_price?: number | string | null;
+  change_from_open_percent?: number | string | null;
+  scan_session?: string | null;
+  retrieved_for_reclaim?: boolean | null;
   security_type?: string | null;
   scan_run_id?: string | null;
 };
@@ -43,6 +47,9 @@ export type OpportunityCandidate = {
   ticker: string;
   price: number;
   change: number;
+  sessionOpenPrice: number | null;
+  changeFromOpenPercent: number | null;
+  scanSession: string;
   relativeVolume: number;
   avgVolume: number;
   htScore: number;
@@ -57,6 +64,7 @@ export type OpportunityCandidate = {
   retrievedForSm: boolean;
   retrievedForBtc: boolean;
   retrievedForCatalyst: boolean;
+  retrievedForReclaim: boolean;
   securityType: string | null;
 };
 
@@ -108,6 +116,16 @@ export function mapSignalRow(row: SignalRow | Record<string, unknown>): Opportun
     ticker: String(row.ticker ?? "").toUpperCase(),
     price: num(row.price),
     change: num(row.change_percent),
+    sessionOpenPrice:
+      row.session_open_price === null || row.session_open_price === undefined
+        ? null
+        : num(row.session_open_price),
+    changeFromOpenPercent:
+      row.change_from_open_percent === null ||
+      row.change_from_open_percent === undefined
+        ? null
+        : num(row.change_from_open_percent),
+    scanSession: String(row.scan_session ?? "unknown"),
     relativeVolume: num(row.relative_volume, 1),
     avgVolume: num(row.avg_volume),
     htScore: num(row.ht_score),
@@ -122,8 +140,29 @@ export function mapSignalRow(row: SignalRow | Record<string, unknown>): Opportun
     retrievedForSm: Boolean(row.retrieved_for_sm),
     retrievedForBtc: Boolean(row.retrieved_for_btc),
     retrievedForCatalyst: Boolean(row.retrieved_for_catalyst),
+    retrievedForReclaim: Boolean(row.retrieved_for_reclaim),
     securityType: row.security_type ? String(row.security_type) : null,
   };
+}
+
+export function isSessionReclaim(candidate: OpportunityCandidate) {
+  return (
+    candidate.retrievedForReclaim &&
+    candidate.sessionOpenPrice !== null &&
+    candidate.sessionOpenPrice > 0 &&
+    candidate.changeFromOpenPercent !== null &&
+    candidate.changeFromOpenPercent > 0
+  );
+}
+
+export function getMomentumReferenceChange(candidate: OpportunityCandidate) {
+  const sessionRecovery =
+    candidate.change <= 0 &&
+    candidate.sessionOpenPrice !== null &&
+    candidate.sessionOpenPrice > 0 &&
+    candidate.changeFromOpenPercent !== null &&
+    candidate.changeFromOpenPercent > 0;
+  return sessionRecovery ? candidate.changeFromOpenPercent ?? 0 : candidate.change;
 }
 
 export function chooseOpportunityStrategy(
@@ -170,7 +209,7 @@ export function isExtremeMomentum(
 ) {
   return (
     strategy === "spot_momentum" &&
-    candidate.change >= EXTREME_MOMENTUM_MIN_CHANGE &&
+    getMomentumReferenceChange(candidate) >= EXTREME_MOMENTUM_MIN_CHANGE &&
     candidate.relativeVolume >= EXTREME_MOMENTUM_MIN_RVOL
   );
 }
@@ -219,6 +258,7 @@ function buildExplosionAssessment(
   strategy: OpportunityStrategy,
   forcePriceDiscovery = false,
 ): ExplosionAssessment {
+  const momentumReferenceChange = getMomentumReferenceChange(candidate);
   const confirmed = isConfirmedContinuationRunner(candidate, strategy);
   const extreme = isExtremeMomentum(candidate, strategy);
   const state: ExplosionAssessment["state"] =
@@ -291,7 +331,10 @@ function buildExplosionAssessment(
                 100,
             ),
           );
-          const impulse = Math.max(0, Math.min(150, candidate.change));
+          const impulse = Math.max(
+            0,
+            Math.min(150, momentumReferenceChange),
+          );
           const baseMin = atrPercent * 0.75;
           const baseMax = atrPercent * (1 + fuelFactor);
           const expansionMin = Math.max(baseMax, impulse * 0.35 * fuelFactor);
@@ -326,7 +369,7 @@ function buildExplosionAssessment(
               ) / 10,
             inputs: {
               atrPercent: rounded(atrPercent),
-              currentMovePercent: rounded(candidate.change),
+              currentMovePercent: rounded(momentumReferenceChange),
               relativeVolume: rounded(candidate.relativeVolume),
               momentumScore: Math.round(candidate.momentumScore),
               explosionScore: breakoutScore,
@@ -396,6 +439,8 @@ export function evaluateCanonicalOpportunity(
   sourceRunId: string | null = null,
   proxIntelligence: ProxIntelligencePacket | null = null,
 ) {
+  const sessionReclaim = isSessionReclaim(candidate);
+  const momentumReferenceChange = getMomentumReferenceChange(candidate);
   const confirmedRunner = isConfirmedContinuationRunner(candidate, strategy);
   const extremeMomentum = isExtremeMomentum(candidate, strategy);
   // Price discovery already avoids creating an R:R hard failure when upside
@@ -439,10 +484,14 @@ export function evaluateCanonicalOpportunity(
         "Ticker did not qualify for Spot Momentum retrieval.",
       );
     }
-    if (candidate.change <= 0) {
+    if (sessionReclaim && momentumReferenceChange < 5) {
+      rejectionReasons.push(
+        "Session Reclaim requires at least a 5% verified move from the current-day open.",
+      );
+    } else if (!sessionReclaim && candidate.change <= 0) {
       rejectionReasons.push("Spot Momentum requires positive price movement.");
     }
-    if (!extremeMomentum) {
+    if (!extremeMomentum && !sessionReclaim) {
       if (candidate.crowdScore >= 65) {
         rejectionReasons.push(
           `Crowd saturation (${Math.round(candidate.crowdScore)}) is already late for Spot Momentum.`,
@@ -487,19 +536,33 @@ export function evaluateCanonicalOpportunity(
     framework.hardFailures.length === 1 &&
     isMoveExplainedPriceDiscontinuity(
       framework.hardFailures[0],
-      candidate.change,
+      momentumReferenceChange,
+    );
+  const sessionReclaimVisibilityOverride =
+    strategy === "spot_momentum" &&
+    sessionReclaim &&
+    rejectionReasons.length > 0 &&
+    rejectionReasons.every(
+      (reason) =>
+        reason === "Reward magnitude is negligible." ||
+        reason.startsWith("R:R "),
     );
   const displayRejectionReasons = priceDiscoveryVisibilityOverride
     ? rejectionReasons.filter(
         (reason) =>
-          !isMoveExplainedPriceDiscontinuity(reason, candidate.change),
+          !isMoveExplainedPriceDiscontinuity(
+            reason,
+            momentumReferenceChange,
+          ),
       )
+    : sessionReclaimVisibilityOverride
+      ? []
     : [...rejectionReasons];
   const displayEligible = displayRejectionReasons.length === 0;
   const strength = signalStrength(candidate, strategy);
   const breakout = getBreakoutPotential(
     {
-      change: candidate.change,
+      change: momentumReferenceChange,
       relativeVolume: candidate.relativeVolume,
       momentumScore: candidate.momentumScore,
       crowdScore: candidate.crowdScore,
@@ -530,8 +593,8 @@ export function evaluateCanonicalOpportunity(
           ),
         );
   const qualityScore = Math.round(strength * 0.65 + tradeQuality * 0.35);
-  const magnitudeCore = clamp(candidate.change * 3);
-  const strategyScore =
+  const magnitudeCore = clamp(momentumReferenceChange * 3);
+  const baseStrategyScore =
     strategy === "spot_momentum"
       ? Math.round(
           magnitudeCore * 0.5 +
@@ -539,8 +602,34 @@ export function evaluateCanonicalOpportunity(
             qualityScore * 0.15,
         )
       : Math.round(qualityScore * 0.65 + breakout.score * 0.35);
-  const tier =
-    displayEligible &&
+  const sessionAlignmentAdjustment =
+    candidate.changeFromOpenPercent === null
+      ? 0
+      : candidate.change > 0 && candidate.changeFromOpenPercent > 0
+        ? 3
+        : candidate.change > 0 && candidate.changeFromOpenPercent < 0
+          ? -5
+          : candidate.change <= 0 && candidate.changeFromOpenPercent > 0
+            ? -3
+            : 0;
+  const proxMarketConfirmation =
+    proxIntelligence?.pulse?.fresh === true
+      ? proxIntelligence.scores.marketConfirmation
+      : null;
+  const proxMarketAdjustment =
+    proxMarketConfirmation === null
+      ? 0
+      : proxMarketConfirmation >= 65
+        ? Math.min(5, Math.round((proxMarketConfirmation - 60) / 8))
+        : proxMarketConfirmation < 40
+          ? -Math.min(5, Math.round((40 - proxMarketConfirmation) / 8))
+          : 0;
+  const strategyScore = Math.round(
+    clamp(baseStrategyScore + sessionAlignmentAdjustment + proxMarketAdjustment),
+  );
+  const tier = sessionReclaimVisibilityOverride
+    ? "watch"
+    : displayEligible &&
     strategyScore >= 80 &&
     ((framework.entryQuality ?? 0) >= 70 || confirmedRunner)
       ? "hero"
@@ -550,8 +639,9 @@ export function evaluateCanonicalOpportunity(
           ? "watch"
           : "scanner";
   const riskTags: string[] = [];
-  if (candidate.change >= 50) riskTags.push("Parabolic Move");
+  if (momentumReferenceChange >= 50) riskTags.push("Parabolic Move");
   else if (extremeMomentum) riskTags.push("Extreme Momentum");
+  if (sessionReclaim) riskTags.push("Reclaiming Prior Close");
   if ((framework.extensionRisk ?? 0) >= 75) {
     riskTags.push("Extended — Chasing Risk");
   }
@@ -581,18 +671,18 @@ export function evaluateCanonicalOpportunity(
   const opportunityType =
     candidate.catalystScore >= 20
       ? "catalyst"
-      : candidate.change >= 5 ||
+      : momentumReferenceChange >= 5 ||
           candidate.momentumScore >= 60 ||
           candidate.relativeVolume >= 3
         ? "breakout"
-        : candidate.change > 0
+        : momentumReferenceChange > 0
           ? "momentum"
           : "watch";
   const displayedConfidence = displayEligible
     ? Math.min(99, strategyScore)
     : Math.min(49, Math.round(strength * 0.5));
   const signals = [
-    `Up ${candidate.change.toFixed(1)}%`,
+    `Momentum move ${momentumReferenceChange >= 0 ? "+" : ""}${momentumReferenceChange.toFixed(1)}%`,
     `${candidate.relativeVolume.toFixed(1)}x relative volume`,
     `Explosion potential ${explosionAssessment.score}/100`,
     ...(framework.rrRatio !== null
@@ -605,7 +695,9 @@ export function evaluateCanonicalOpportunity(
     ...(isBeforeCrowd ? ["Before crowd saturation"] : []),
   ];
   const whyItMatters =
-    explosionAssessment.state === "price_discovery"
+    sessionReclaim
+      ? `${candidate.ticker} has a verified session reclaim. HT combined the current-session move, full-session context, volume, risk${proxIntelligence?.pulse?.fresh ? ", and live ProX pulse" : ""} into this single Spot Momentum decision.`
+      : explosionAssessment.state === "price_discovery"
       ? priceDiscoveryVisibilityOverride
         ? `${candidate.ticker} is in confirmed price discovery with ${explosionAssessment.score}/100 observed explosion potential; live price, volume, and momentum confirm the move, while conventional upside and downside levels remain unavailable.`
         : `${candidate.ticker} is in confirmed price discovery with ${explosionAssessment.score}/100 observed explosion potential; scenario capacity is anchored to ATR, live impulse, volume, and momentum.`
@@ -613,21 +705,29 @@ export function evaluateCanonicalOpportunity(
         ? `${candidate.ticker} currently qualifies for ${strategy === "spot_momentum" ? "Spot Momentum" : "Before The Crowd"} evaluation with a ${tier} tier.`
         : `${candidate.ticker} has an active signal, but it does not currently pass the full opportunity gate.`;
   const whatChanged =
-    candidate.catalystScore >= 20 && candidate.state
+    sessionReclaim
+      ? `Price recovered from the current-day open with ${candidate.relativeVolume.toFixed(1)}x relative volume.`
+      : candidate.catalystScore >= 20 && candidate.state
       ? `${candidate.state} is active in the signal stack.`
       : candidate.relativeVolume >= 3
         ? `Volume expanded to ${candidate.relativeVolume.toFixed(1)}x normal.`
-        : candidate.change > 0
-          ? `Price is up ${candidate.change.toFixed(1)}% with positive participation.`
+        : momentumReferenceChange > 0
+          ? `Price momentum is up ${momentumReferenceChange.toFixed(1)}% with positive participation.`
           : "No verified positive momentum change is currently available.";
   const riskNote =
-    (priceDiscoveryVisibilityOverride
+    (sessionReclaimVisibilityOverride
+      ? "The rebound is verified, but the conventional trade framework remains weak; HT is showing it as a research watch, not a trade-ready conviction."
+      : priceDiscoveryVisibilityOverride
       ? "Live momentum is confirmed, but the completed daily history cannot provide a reliable upside, downside, or resistance framework for this move."
       : displayRejectionReasons[0]) ||
     framework.warnings[0] ||
     "Momentum and volume must continue to hold. Entry timing still matters.";
   const stage =
-    explosionAssessment.state === "price_discovery"
+    sessionReclaim
+      ? candidate.scanSession === "pre_market"
+        ? "Pre-Market Reclaim"
+        : "Intraday Reclaim"
+      : explosionAssessment.state === "price_discovery"
       ? "Price Discovery"
       : explosionAssessment.state === "confirmed_expansion"
         ? "Confirmed Expansion"
@@ -674,6 +774,8 @@ export function evaluateCanonicalOpportunity(
     },
     visibilityState: priceDiscoveryVisibilityOverride
       ? "verified_price_discovery"
+      : sessionReclaim
+        ? "session_reclaim"
       : eligible
         ? "canonical"
         : "rejected",
@@ -681,6 +783,12 @@ export function evaluateCanonicalOpportunity(
     engineVersion: CANONICAL_OPPORTUNITY_VERSION,
     sourceRunId,
     proxIntelligence,
+    setupType: sessionReclaim ? "session_reclaim" : "standard",
+    displayChange: momentumReferenceChange,
+    scoreContext: {
+      sessionAlignmentAdjustment,
+      proxMarketAdjustment,
+    },
     continuationEligible: explosionAssessment.paperEntryEligible,
     opportunityType,
     riskTags,

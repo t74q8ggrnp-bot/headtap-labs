@@ -10,6 +10,11 @@ export type Opportunity = {
   ticker: string;
   price: number;
   change: number;
+  previousCloseChange?: number;
+  sessionOpenPrice?: number | null;
+  changeFromOpenPercent?: number | null;
+  scanSession?: string;
+  setupType?: "standard" | "session_reclaim";
   opportunityType: string;
   opportunityScore: number;
   qualityScore: number;
@@ -68,7 +73,15 @@ export function resolveOpportunityDisplayQuote(
     liveQuote.price > 0 &&
     Number.isFinite(liveQuote.change)
   ) {
-    return { ...liveQuote, isLive: true };
+    const change =
+      opportunity.setupType === "session_reclaim" &&
+      opportunity.sessionOpenPrice &&
+      opportunity.sessionOpenPrice > 0
+        ? ((liveQuote.price - opportunity.sessionOpenPrice) /
+            opportunity.sessionOpenPrice) *
+          100
+        : liveQuote.change;
+    return { price: liveQuote.price, change, isLive: true };
   }
   return {
     price: opportunity.price,
@@ -110,7 +123,36 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
   return {
     ticker,
     price: numberValue(source.price),
-    change: numberValue(source.change ?? source.change_percent),
+    change: numberValue(
+      source.displayChange ?? source.change ?? source.change_percent,
+    ),
+    previousCloseChange: numberValue(
+      source.change ?? source.change_percent,
+    ),
+    sessionOpenPrice:
+      source.sessionOpenPrice === null ||
+      source.session_open_price === null ||
+      (source.sessionOpenPrice === undefined &&
+        source.session_open_price === undefined)
+        ? null
+        : numberValue(
+            source.sessionOpenPrice ?? source.session_open_price,
+          ),
+    changeFromOpenPercent:
+      source.changeFromOpenPercent === null ||
+      source.change_from_open_percent === null ||
+      (source.changeFromOpenPercent === undefined &&
+        source.change_from_open_percent === undefined)
+        ? null
+        : numberValue(
+            source.changeFromOpenPercent ??
+              source.change_from_open_percent,
+          ),
+    scanSession: String(source.scanSession ?? source.scan_session ?? "unknown"),
+    setupType:
+      source.setupType === "session_reclaim"
+        ? "session_reclaim"
+        : "standard",
     opportunityType: String(
       source.opportunityType ??
         (numberValue(source.catalystScore ?? source.catalyst_score) >= 20
@@ -277,7 +319,13 @@ export function getOpportunityPresentation(opportunity: Opportunity) {
     crowdLabel: saturation < 35 ? "Early" : saturation < 65 ? "Building" : "Crowded",
     momentumLabel: score >= 75 ? "Strengthening" : score >= 60 ? "Stable" : "Fading",
     priceActionLabel:
-      opportunity.change > 0 ? "Positive" : opportunity.change < 0 ? "Negative" : "Flat",
+      opportunity.change > 0
+        ? opportunity.setupType === "session_reclaim"
+          ? "Reclaiming"
+          : "Positive"
+        : opportunity.change < 0
+          ? "Negative"
+          : "Flat",
   };
 }
 
