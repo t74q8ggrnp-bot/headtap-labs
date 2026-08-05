@@ -13,8 +13,9 @@
 // the complete spec describes — that still needs the plan upgrade plus
 // an always-on worker, neither of which exist yet.
 //
-// Discovery only. Does not read from or write to any ht_* table, and does
-// not feed the canonical HT Labs engine.
+// Does not read from or write to any ht_* table. Its output can be attached
+// to canonical opportunities as versioned Pro X shadow context, but cannot
+// change canonical eligibility, scoring, or execution.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -38,8 +39,7 @@ function getSupabase() {
 function isAuthorized(req: Request) {
   if (!CRON_SECRET) return false;
   const authHeader = req.headers.get("authorization");
-  const querySecret = new URL(req.url).searchParams.get("secret");
-  return authHeader === `Bearer ${CRON_SECRET}` || querySecret === CRON_SECRET || querySecret === "htlabs-internal";
+  return authHeader === `Bearer ${CRON_SECRET}`;
 }
 
 function easternDateString(date = new Date()): string {
@@ -65,8 +65,10 @@ async function fetchRecentEventTickers(supabase: ReturnType<typeof getSupabase>)
     .limit(300);
   if (error) throw error;
   const tickers = new Set<string>();
-  for (const row of data ?? []) {
-    for (const t of (row as any).prox_event_tickers ?? []) {
+  for (const row of (data ?? []) as Array<{
+    prox_event_tickers?: Array<{ ticker?: string | null }> | null;
+  }>) {
+    for (const t of row.prox_event_tickers ?? []) {
       if (t?.ticker) tickers.add(t.ticker);
     }
   }
@@ -74,15 +76,28 @@ async function fetchRecentEventTickers(supabase: ReturnType<typeof getSupabase>)
 }
 
 type Bar = { o: number; h: number; l: number; c: number; v: number; vw: number; t: number };
+type PolygonAggregate = {
+  o?: unknown;
+  h?: unknown;
+  l?: unknown;
+  c?: unknown;
+  v?: unknown;
+  vw?: unknown;
+  t?: unknown;
+};
 
 async function fetchMinuteBars(ticker: string): Promise<Bar[]> {
   const today = easternDateString();
   const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/1/minute/${today}/${today}?adjusted=true&sort=desc&limit=${BAR_WINDOW_MINUTES}&apiKey=${POLYGON_KEY}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return [];
-  const data = await res.json();
-  const bars: Bar[] = (data?.results ?? [])
-    .map((r: any) => ({ o: Number(r.o), h: Number(r.h), l: Number(r.l), c: Number(r.c), v: Number(r.v), vw: Number(r.vw ?? r.c), t: Number(r.t) }))
+  const data: unknown = await res.json();
+  const results =
+    data && typeof data === "object" && Array.isArray((data as { results?: unknown }).results)
+      ? ((data as { results: PolygonAggregate[] }).results)
+      : [];
+  const bars: Bar[] = results
+    .map((r) => ({ o: Number(r.o), h: Number(r.h), l: Number(r.l), c: Number(r.c), v: Number(r.v), vw: Number(r.vw ?? r.c), t: Number(r.t) }))
     .filter((b: Bar) => Number.isFinite(b.c) && b.c > 0);
   // Polygon returned newest-first (sort=desc) — flip to chronological order.
   return bars.reverse();
@@ -123,7 +138,14 @@ export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!POLYGON_KEY) return NextResponse.json({ error: "Missing POLYGON_API_KEY" }, { status: 500 });
 
-  const diagnostics = { tickersConsidered: 0, computed: 0, skippedNoBars: 0, errors: 0 };
+  const diagnostics = {
+    tickersConsidered: 0,
+    computed: 0,
+    historyPersisted: 0,
+    historyUnavailable: null as string | null,
+    skippedNoBars: 0,
+    errors: 0,
+  };
 
   try {
     const supabase = getSupabase();
@@ -151,13 +173,34 @@ export async function GET(req: Request) {
           continue;
         }
         const { error } = await supabase.from("prox_market_features").upsert(features, { onConflict: "ticker" });
-        if (error) diagnostics.errors++;
-        else diagnostics.computed++;
+        if (error) {
+          diagnostics.errors++;
+          continue;
+        }
+        diagnostics.computed++;
+
+        // The latest-snapshot table powers fast reads. The append-only
+        // history powers Pro X memory and later calibration. Until migration
+        // 0005 is applied, history failure is reported but never allowed to
+        // disrupt the existing live pulse.
+        if (!diagnostics.historyUnavailable) {
+          const { error: historyError } = await supabase
+            .from("prox_market_feature_history")
+            .upsert(features, {
+              onConflict: "ticker,computed_at",
+              ignoreDuplicates: true,
+            });
+          if (historyError) {
+            diagnostics.historyUnavailable = historyError.message;
+          } else {
+            diagnostics.historyPersisted++;
+          }
+        }
       }
     }
 
     return NextResponse.json({ success: true, diagnostics, timestamp: new Date().toISOString() });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message ?? "Pro X market sensor failed", diagnostics }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Pro X market sensor failed", diagnostics }, { status: 500 });
   }
 }

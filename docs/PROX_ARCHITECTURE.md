@@ -91,14 +91,35 @@ no extra cost.
   names don't change, no reason to refetch). Makes "corporate name changes
   don't break event history" real instead of a schema placeholder.
 
-## The full roadmap (for later, not built yet)
+## Update — shadow intelligence bridge
+
+Pro X now produces `prox-intelligence-v1-shadow` packets that combine the
+latest verified event, source credibility, deterministic ticker match,
+evidence depth, freshness, contradictions, and the live market pulse. Each
+packet includes a factor trace and a hypothetical bot policy (`wouldVeto`,
+`wouldReduceSize`, and `rankAdjustment`).
+
+The packet is attached to canonical opportunity records for transport and UI
+explanation only. It does not change canonical eligibility, scoring, tier,
+position sizing, exits, or orders. The paper bot records the attached opinion
+with `executed_influence = false`.
+
+Migration `0005_prox_intelligence_bridge.sql` adds append-only market-feature
+history, immutable versioned intelligence packets, and paper-bot shadow
+observations for later outcome calibration. The public single-ticker
+inspection route is `/api/prox-intelligence?ticker=`.
+
+Cron materialization and the existing Pro X collectors accept only Vercel's
+real `CRON_SECRET` authorization; the former hardcoded query fallback was
+removed.
+
+## The remaining roadmap
 
 The rest of Phase 3 (true WebSocket streaming, the reverse "price moved"
 direction, halt status, float turnover) and all of Phases 4's remaining
 scope (subsidiaries, executives, drug names, AI-assisted disambiguation for
-ambiguous cases), 5 (contradiction/rumor/recycled-news scoring), 6 (the
-canonical decision bridge — still nothing connects Pro X to HT Labs), 7
-(Supabase Realtime UI, opportunity-card integration), 8 (outcome memory/
+ambiguous cases), 5 (richer contradiction/rumor/recycled-news scoring), 6
+(measured promotion beyond the current shadow-only bridge), 7 (Supabase
+Realtime beyond the current opportunity-card pulse), 8 (outcome
 calibration), and 9 (heartbeats, dead-letter queues, kill switch, cost
-limits) — none of that exists yet. That's the next deliberate decision
-point, not an assumption baked into this pass.
+limits) remain deliberate future phases. No Pro X execution authority exists.

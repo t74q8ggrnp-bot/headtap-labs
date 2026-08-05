@@ -1,0 +1,703 @@
+import type { TradeFrameworkResult } from "@/lib/canonical-trade-framework";
+import { getBreakoutPotential } from "@/lib/breakout-potential";
+import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
+import { isSupportedType } from "@/lib/security-type-policy";
+
+export const CANONICAL_OPPORTUNITY_VERSION =
+  "opportunities-v5-verified-price-discovery";
+export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
+export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
+export const EXTREME_MOMENTUM_MIN_RVOL = 3;
+export const CONTINUATION_MIN_MOMENTUM_SCORE = 70;
+const SEASONED_BAR_COUNT = 21;
+const MAX_PAPER_CONTINUATION_DOWNSIDE_PERCENT = 30;
+const MIN_PAPER_CONTINUATION_ENTRY_QUALITY = 20;
+const PRICE_HISTORY_DISCONTINUITY_PREFIX =
+  "Live price is inconsistent with recent adjusted history";
+
+export type OpportunityStrategy = "spot_momentum" | "before_the_crowd";
+
+export type SignalRow = {
+  ticker: string;
+  price: number | string | null;
+  change_percent: number | string | null;
+  relative_volume: number | string | null;
+  avg_volume: number | string | null;
+  ht_score: number | string | null;
+  momentum_score: number | string | null;
+  crowd_score: number | string | null;
+  trap_score: number | string | null;
+  catalyst_score: number | string | null;
+  pattern: string | null;
+  state: string | null;
+  signal_state: string | null;
+  scanned_at: string | null;
+  retrieved_for_sm?: boolean | null;
+  retrieved_for_btc?: boolean | null;
+  retrieved_for_catalyst?: boolean | null;
+  security_type?: string | null;
+  scan_run_id?: string | null;
+};
+
+export type OpportunityCandidate = {
+  ticker: string;
+  price: number;
+  change: number;
+  relativeVolume: number;
+  avgVolume: number;
+  htScore: number;
+  momentumScore: number;
+  crowdScore: number;
+  trapScore: number;
+  catalystScore: number;
+  pattern: string;
+  state: string;
+  signalState: string;
+  scannedAt: string;
+  retrievedForSm: boolean;
+  retrievedForBtc: boolean;
+  retrievedForCatalyst: boolean;
+  securityType: string | null;
+};
+
+export type ExplosionAssessment = {
+  state:
+    | "price_discovery"
+    | "confirmed_expansion"
+    | "expansion_setup"
+    | "exhaustion_risk"
+    | "developing";
+  label: string;
+  score: number;
+  continuationConfirmed: boolean;
+  upsideModel: TradeFrameworkResult["upsideModel"];
+  upsideIsIndependentlyModeled: boolean;
+  structuralDownsidePercent: number | null;
+  entryQuality: number | null;
+  summary: string;
+  baseCase: string;
+  expansionCase: string;
+  tailCase: string;
+  invalidation: string;
+  scenarioBands: {
+    methodologyVersion: "price-discovery-scenarios-v1";
+    unit: "additional_from_current_price";
+    base: { min: number; max: number };
+    expansion: { min: number; max: number };
+    tail: { min: number; max: number };
+    structuralRisk: number;
+    expansionRr: number;
+    inputs: {
+      atrPercent: number;
+      currentMovePercent: number;
+      relativeVolume: number;
+      momentumScore: number;
+      explosionScore: number;
+    };
+  } | null;
+  paperEntryEligible: boolean;
+  paperTradeScore: number | null;
+};
+
+const clamp = (value: number) => Math.max(0, Math.min(100, value));
+const num = (value: unknown, fallback = 0) =>
+  Number.isFinite(Number(value)) ? Number(value) : fallback;
+
+export function mapSignalRow(row: SignalRow | Record<string, unknown>): OpportunityCandidate {
+  return {
+    ticker: String(row.ticker ?? "").toUpperCase(),
+    price: num(row.price),
+    change: num(row.change_percent),
+    relativeVolume: num(row.relative_volume, 1),
+    avgVolume: num(row.avg_volume),
+    htScore: num(row.ht_score),
+    momentumScore: num(row.momentum_score),
+    crowdScore: num(row.crowd_score, 50),
+    trapScore: num(row.trap_score, 50),
+    catalystScore: num(row.catalyst_score),
+    pattern: String(row.pattern ?? "Standard"),
+    state: String(row.state ?? ""),
+    signalState: String(row.signal_state ?? ""),
+    scannedAt: String(row.scanned_at ?? ""),
+    retrievedForSm: Boolean(row.retrieved_for_sm),
+    retrievedForBtc: Boolean(row.retrieved_for_btc),
+    retrievedForCatalyst: Boolean(row.retrieved_for_catalyst),
+    securityType: row.security_type ? String(row.security_type) : null,
+  };
+}
+
+export function chooseOpportunityStrategy(
+  candidate: OpportunityCandidate,
+  requested: string | null,
+): OpportunityStrategy {
+  if (requested === "before_crowd" || requested === "before_the_crowd") {
+    return "before_the_crowd";
+  }
+  if (requested === "momentum" || requested === "spot_momentum") {
+    return "spot_momentum";
+  }
+  if (candidate.retrievedForSm) return "spot_momentum";
+  if (candidate.retrievedForBtc) return "before_the_crowd";
+  return "spot_momentum";
+}
+
+export function isActiveMarketSession(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? NaN);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? NaN);
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    weekday === "Sat" ||
+    weekday === "Sun"
+  ) {
+    return false;
+  }
+  const minutes = hour * 60 + minute;
+  return minutes >= 240 && minutes < 1200;
+}
+
+export function isExtremeMomentum(
+  candidate: OpportunityCandidate,
+  strategy: OpportunityStrategy,
+) {
+  return (
+    strategy === "spot_momentum" &&
+    candidate.change >= EXTREME_MOMENTUM_MIN_CHANGE &&
+    candidate.relativeVolume >= EXTREME_MOMENTUM_MIN_RVOL
+  );
+}
+
+export function isConfirmedContinuationRunner(
+  candidate: OpportunityCandidate,
+  strategy: OpportunityStrategy,
+) {
+  return (
+    isExtremeMomentum(candidate, strategy) &&
+    candidate.pattern !== "Exhaustion Risk" &&
+    (candidate.momentumScore >= CONTINUATION_MIN_MOMENTUM_SCORE ||
+      candidate.signalState === "Strong Momentum")
+  );
+}
+
+function signalStrength(
+  candidate: OpportunityCandidate,
+  strategy: OpportunityStrategy,
+) {
+  if (strategy === "spot_momentum") {
+    return clamp(
+      Math.round(
+        candidate.htScore * 0.55 +
+          candidate.momentumScore * 0.25 +
+          Math.min(100, candidate.relativeVolume * 12) * 0.2,
+      ),
+    );
+  }
+  const earliness = Math.max(0, 100 - candidate.crowdScore);
+  return clamp(
+    Math.round(
+      candidate.htScore * 0.45 +
+        earliness * 0.3 +
+        Math.min(100, candidate.relativeVolume * 10) * 0.15 +
+        candidate.catalystScore * 0.1,
+    ),
+  );
+}
+
+function buildExplosionAssessment(
+  candidate: OpportunityCandidate,
+  framework: TradeFrameworkResult,
+  breakoutScore: number,
+  eligible: boolean,
+  strategy: OpportunityStrategy,
+  forcePriceDiscovery = false,
+): ExplosionAssessment {
+  const confirmed = isConfirmedContinuationRunner(candidate, strategy);
+  const extreme = isExtremeMomentum(candidate, strategy);
+  const state: ExplosionAssessment["state"] =
+    confirmed &&
+    (framework.upsideModel === "price_discovery_unmodeled" ||
+      forcePriceDiscovery)
+      ? "price_discovery"
+      : confirmed
+        ? "confirmed_expansion"
+        : extreme
+          ? "exhaustion_risk"
+          : breakoutScore >= 68
+            ? "expansion_setup"
+            : "developing";
+  const label =
+    state === "price_discovery"
+      ? "Price Discovery"
+      : state === "confirmed_expansion"
+        ? "Confirmed Expansion"
+        : state === "expansion_setup"
+          ? "Expansion Setup"
+          : state === "exhaustion_risk"
+            ? "Explosion Unconfirmed"
+            : "Developing";
+  const paperEntryEligible =
+    eligible &&
+    confirmed &&
+    framework.downsideRisk !== null &&
+    framework.downsideRisk > 0 &&
+    framework.downsideRisk <= MAX_PAPER_CONTINUATION_DOWNSIDE_PERCENT &&
+    framework.entryQuality !== null &&
+    framework.entryQuality >= MIN_PAPER_CONTINUATION_ENTRY_QUALITY;
+  const downsideDiscipline =
+    framework.downsideRisk === null
+      ? 0
+      : 100 - Math.min(100, framework.downsideRisk * 3);
+  const paperTradeScore = paperEntryEligible
+    ? Math.round(
+        clamp(
+          breakoutScore * 0.7 +
+            (framework.entryQuality ?? 0) * 0.2 +
+            downsideDiscipline * 0.1,
+        ),
+      )
+    : null;
+  const atrPercent =
+    framework.atr14 !== null && candidate.price > 0
+      ? (framework.atr14 / candidate.price) * 100
+      : null;
+  const scenarioBands =
+    state === "price_discovery" &&
+    atrPercent !== null &&
+    atrPercent > 0 &&
+    framework.downsideRisk !== null &&
+    framework.downsideRisk > 0
+      ? (() => {
+          // These are conditional expansion scenarios, not price targets.
+          // Base is anchored to the stock's own ATR. Expansion and tail are
+          // anchored to the live impulse, scaled only by observed RVOL,
+          // momentum, and the already-published explosion score. Downside is
+          // never used to manufacture upside.
+          const volumeFuel = clamp(candidate.relativeVolume * 7.5);
+          const fuelFactor = Math.max(
+            0.6,
+            Math.min(
+              1.2,
+              (volumeFuel * 0.35 +
+                clamp(candidate.momentumScore) * 0.4 +
+                breakoutScore * 0.25) /
+                100,
+            ),
+          );
+          const impulse = Math.max(0, Math.min(150, candidate.change));
+          const baseMin = atrPercent * 0.75;
+          const baseMax = atrPercent * (1 + fuelFactor);
+          const expansionMin = Math.max(baseMax, impulse * 0.35 * fuelFactor);
+          const expansionMax = Math.max(
+            expansionMin,
+            impulse * 0.75 * fuelFactor,
+          );
+          const tailMin = Math.max(
+            expansionMax,
+            impulse * 0.9 * fuelFactor,
+          );
+          const tailMax = Math.max(
+            tailMin,
+            impulse * 1.5 * fuelFactor,
+          );
+          const expansionMidpoint = (expansionMin + expansionMax) / 2;
+          const rounded = (value: number) =>
+            Math.round(Math.min(200, value) * 10) / 10;
+          return {
+            methodologyVersion: "price-discovery-scenarios-v1" as const,
+            unit: "additional_from_current_price" as const,
+            base: { min: rounded(baseMin), max: rounded(baseMax) },
+            expansion: {
+              min: rounded(expansionMin),
+              max: rounded(expansionMax),
+            },
+            tail: { min: rounded(tailMin), max: rounded(tailMax) },
+            structuralRisk: rounded(framework.downsideRisk),
+            expansionRr:
+              Math.round(
+                (expansionMidpoint / framework.downsideRisk) * 10,
+              ) / 10,
+            inputs: {
+              atrPercent: rounded(atrPercent),
+              currentMovePercent: rounded(candidate.change),
+              relativeVolume: rounded(candidate.relativeVolume),
+              momentumScore: Math.round(candidate.momentumScore),
+              explosionScore: breakoutScore,
+            },
+          };
+        })()
+      : null;
+
+  return {
+    state,
+    label,
+    score: breakoutScore,
+    continuationConfirmed: confirmed,
+    upsideModel: forcePriceDiscovery
+      ? "price_discovery_unmodeled"
+      : framework.upsideModel,
+    upsideIsIndependentlyModeled:
+      framework.upsideModel === "resistance_based" &&
+      framework.upsideMax !== null,
+    structuralDownsidePercent: framework.downsideRisk,
+    entryQuality: framework.entryQuality,
+    summary:
+      state === "price_discovery"
+        ? "Observed price, volume, and momentum confirm a live expansion, but no reliable upside ceiling exists above the breakout."
+        : state === "confirmed_expansion"
+          ? "Observed price, volume, and momentum confirm expansion toward a real resistance reference."
+          : state === "exhaustion_risk"
+            ? "The move is large, but current momentum evidence does not confirm that the expansion is still alive."
+            : "Explosion potential measures observed expansion fuel; it is not a return forecast.",
+    baseCase: confirmed
+      ? "Momentum remains active while volume and signal strength hold."
+      : "The setup remains a watch until continuation confirms.",
+    expansionCase:
+      state === "price_discovery"
+        ? "Further expansion is plausible while confirmation holds; no percentage target is asserted."
+        : framework.upsideMax !== null
+          ? `Known resistance supports a modeled upper band near ${framework.upsideMax.toFixed(1)}%.`
+          : "Further expansion requires stronger confirmation.",
+    tailCase:
+      "A 50–100%+ total-day move is a possible tail outcome for this class of runner, not a forecast or promised target.",
+    invalidation:
+      framework.downsideRisk !== null
+        ? `The structural downside reference is ${framework.downsideRisk.toFixed(1)}%; momentum failure can occur sooner.`
+        : "Exit the thesis when momentum confirmation or data quality fails.",
+    scenarioBands,
+    paperEntryEligible,
+    paperTradeScore,
+  };
+}
+
+function isMoveExplainedPriceDiscontinuity(
+  reason: string,
+  candidateChange: number,
+) {
+  if (!reason.startsWith(PRICE_HISTORY_DISCONTINUITY_PREFIX)) return false;
+  const match = reason.match(/\(([\d.]+)% deviation\)/);
+  const deviation = Number(match?.[1]);
+  const move = Math.abs(candidateChange);
+  if (!Number.isFinite(deviation) || move <= 0) return false;
+  return Math.abs(deviation - move) <= Math.max(5, move * 0.1);
+}
+
+export function evaluateCanonicalOpportunity(
+  candidate: OpportunityCandidate,
+  framework: TradeFrameworkResult,
+  strategy: OpportunityStrategy,
+  sourceRunId: string | null = null,
+  proxIntelligence: ProxIntelligencePacket | null = null,
+) {
+  const confirmedRunner = isConfirmedContinuationRunner(candidate, strategy);
+  const extremeMomentum = isExtremeMomentum(candidate, strategy);
+  // Price discovery already avoids creating an R:R hard failure when upside
+  // is genuinely unmodeled. Any hard failure that does exist is therefore
+  // real and must remain blocking. The prior continuation bypass removed
+  // legitimate R:R failures for runners with a known resistance ceiling,
+  // which allowed contradictions such as 0.37% upside / 153.84% risk / 0:1
+  // R:R to receive hero status.
+  const rejectionReasons = [...framework.hardFailures];
+
+  if (
+    strategy === "spot_momentum" &&
+    framework.magnitudeQuality === "negligible" &&
+    !confirmedRunner
+  ) {
+    rejectionReasons.push("Reward magnitude is negligible.");
+  }
+  if (!isSupportedType(candidate.securityType)) {
+    rejectionReasons.push(
+      candidate.securityType
+        ? `Unsupported security type: ${candidate.securityType}.`
+        : "Security type is unverified; production eligibility fails closed.",
+    );
+  }
+  const scannedAtMs = new Date(candidate.scannedAt).getTime();
+  const signalAgeMs = Date.now() - scannedAtMs;
+  if (
+    isActiveMarketSession() &&
+    (!Number.isFinite(scannedAtMs) ||
+      signalAgeMs < 0 ||
+      signalAgeMs > ACTIVE_SESSION_MAX_SIGNAL_AGE_MS)
+  ) {
+    rejectionReasons.push(
+      "Signal is too old to qualify during an active market session.",
+    );
+  }
+
+  if (strategy === "spot_momentum") {
+    if (!candidate.retrievedForSm && !candidate.retrievedForCatalyst) {
+      rejectionReasons.push(
+        "Ticker did not qualify for Spot Momentum retrieval.",
+      );
+    }
+    if (candidate.change <= 0) {
+      rejectionReasons.push("Spot Momentum requires positive price movement.");
+    }
+    if (!extremeMomentum) {
+      if (candidate.crowdScore >= 65) {
+        rejectionReasons.push(
+          `Crowd saturation (${Math.round(candidate.crowdScore)}) is already late for Spot Momentum.`,
+        );
+      }
+      if (candidate.trapScore >= 70) {
+        rejectionReasons.push(
+          `Trap risk (${Math.round(candidate.trapScore)}) exceeds the Spot Momentum ceiling.`,
+        );
+      }
+    }
+  } else {
+    if (!candidate.retrievedForBtc && !candidate.retrievedForCatalyst) {
+      rejectionReasons.push(
+        "Ticker did not qualify for Before The Crowd retrieval.",
+      );
+    }
+    if (candidate.crowdScore >= 60) {
+      rejectionReasons.push(
+        "Crowd saturation is too high for the Before The Crowd thesis.",
+      );
+    }
+    if (candidate.trapScore >= 55) {
+      rejectionReasons.push(
+        "Trap risk exceeds the Before The Crowd ceiling.",
+      );
+    }
+  }
+
+  const eligible = rejectionReasons.length === 0;
+  // Visibility and conventional framework availability answer different
+  // questions. During a genuine opening drive, Polygon's newest completed
+  // daily bar is normally yesterday's close, so a real +100% move also looks
+  // like a +100% historical-price discontinuity. When the live move itself
+  // explains that discontinuity and momentum/volume independently confirm it,
+  // keep the ticker visible as high-risk price discovery. All other hard
+  // failures (staleness, unsupported type, insufficient history, etc.) remain
+  // blocking, and the strict canonical eligibility above remains unchanged.
+  const priceDiscoveryVisibilityOverride =
+    strategy === "spot_momentum" &&
+    confirmedRunner &&
+    framework.hardFailures.length === 1 &&
+    isMoveExplainedPriceDiscontinuity(
+      framework.hardFailures[0],
+      candidate.change,
+    );
+  const displayRejectionReasons = priceDiscoveryVisibilityOverride
+    ? rejectionReasons.filter(
+        (reason) =>
+          !isMoveExplainedPriceDiscontinuity(reason, candidate.change),
+      )
+    : [...rejectionReasons];
+  const displayEligible = displayRejectionReasons.length === 0;
+  const strength = signalStrength(candidate, strategy);
+  const breakout = getBreakoutPotential(
+    {
+      change: candidate.change,
+      relativeVolume: candidate.relativeVolume,
+      momentumScore: candidate.momentumScore,
+      crowdScore: candidate.crowdScore,
+      trapScore: candidate.trapScore,
+      catalystScore: candidate.catalystScore,
+    },
+    framework,
+    strategy,
+  );
+  const explosionAssessment = buildExplosionAssessment(
+    candidate,
+    framework,
+    breakout.score,
+    eligible,
+    strategy,
+    priceDiscoveryVisibilityOverride,
+  );
+  const tradeQuality =
+    framework.rrRatio === null
+      ? confirmedRunner
+        ? explosionAssessment.score
+        : 0
+      : clamp(
+          Math.round(
+            Math.min(1, framework.rrRatio / 3) * 55 +
+              (framework.magnitudeQuality === "meaningful" ? 25 : 0) +
+              Math.max(0, 100 - (framework.extensionRisk ?? 100)) * 0.2,
+          ),
+        );
+  const qualityScore = Math.round(strength * 0.65 + tradeQuality * 0.35);
+  const magnitudeCore = clamp(candidate.change * 3);
+  const strategyScore =
+    strategy === "spot_momentum"
+      ? Math.round(
+          magnitudeCore * 0.5 +
+            breakout.score * 0.35 +
+            qualityScore * 0.15,
+        )
+      : Math.round(qualityScore * 0.65 + breakout.score * 0.35);
+  const tier =
+    displayEligible &&
+    strategyScore >= 80 &&
+    ((framework.entryQuality ?? 0) >= 70 || confirmedRunner)
+      ? "hero"
+      : displayEligible && strategyScore >= 68
+        ? "feature"
+        : displayEligible
+          ? "watch"
+          : "scanner";
+  const riskTags: string[] = [];
+  if (candidate.change >= 50) riskTags.push("Parabolic Move");
+  else if (extremeMomentum) riskTags.push("Extreme Momentum");
+  if ((framework.extensionRisk ?? 0) >= 75) {
+    riskTags.push("Extended — Chasing Risk");
+  }
+  if (priceDiscoveryVisibilityOverride) {
+    if (!riskTags.includes("Extended — Chasing Risk")) {
+      riskTags.push("Extended — Chasing Risk");
+    }
+    riskTags.push("Historical Structure Unavailable");
+  }
+  if ((framework.volatility20d ?? 0) >= 8) riskTags.push("High Volatility");
+  if (
+    framework.barCount !== null &&
+    framework.barCount < SEASONED_BAR_COUNT
+  ) {
+    riskTags.push("New Listing / Limited History");
+  }
+  const freshnessLabel =
+    !Number.isFinite(signalAgeMs) || signalAgeMs > 8 * 60 * 60 * 1000
+      ? "Last Verified Signal"
+      : signalAgeMs > 60 * 60 * 1000
+        ? "Recent Scan"
+        : "Live Scan";
+  const isBeforeCrowd =
+    candidate.retrievedForBtc &&
+    candidate.crowdScore < 60 &&
+    candidate.trapScore < 55;
+  const opportunityType =
+    candidate.catalystScore >= 20
+      ? "catalyst"
+      : candidate.change >= 5 ||
+          candidate.momentumScore >= 60 ||
+          candidate.relativeVolume >= 3
+        ? "breakout"
+        : candidate.change > 0
+          ? "momentum"
+          : "watch";
+  const displayedConfidence = displayEligible
+    ? Math.min(99, strategyScore)
+    : Math.min(49, Math.round(strength * 0.5));
+  const signals = [
+    `Up ${candidate.change.toFixed(1)}%`,
+    `${candidate.relativeVolume.toFixed(1)}x relative volume`,
+    `Explosion potential ${explosionAssessment.score}/100`,
+    ...(framework.rrRatio !== null
+      ? [`${framework.rrRatio.toFixed(2)}:1 risk/reward`]
+      : explosionAssessment.scenarioBands
+        ? [
+            `Expansion +${explosionAssessment.scenarioBands.expansion.min.toFixed(1)}% to +${explosionAssessment.scenarioBands.expansion.max.toFixed(1)}%; tail +${explosionAssessment.scenarioBands.tail.min.toFixed(1)}% to +${explosionAssessment.scenarioBands.tail.max.toFixed(1)}%`,
+          ]
+        : []),
+    ...(isBeforeCrowd ? ["Before crowd saturation"] : []),
+  ];
+  const whyItMatters =
+    explosionAssessment.state === "price_discovery"
+      ? priceDiscoveryVisibilityOverride
+        ? `${candidate.ticker} is in confirmed price discovery with ${explosionAssessment.score}/100 observed explosion potential; live price, volume, and momentum confirm the move, while conventional upside and downside levels remain unavailable.`
+        : `${candidate.ticker} is in confirmed price discovery with ${explosionAssessment.score}/100 observed explosion potential; scenario capacity is anchored to ATR, live impulse, volume, and momentum.`
+      : eligible
+        ? `${candidate.ticker} currently qualifies for ${strategy === "spot_momentum" ? "Spot Momentum" : "Before The Crowd"} evaluation with a ${tier} tier.`
+        : `${candidate.ticker} has an active signal, but it does not currently pass the full opportunity gate.`;
+  const whatChanged =
+    candidate.catalystScore >= 20 && candidate.state
+      ? `${candidate.state} is active in the signal stack.`
+      : candidate.relativeVolume >= 3
+        ? `Volume expanded to ${candidate.relativeVolume.toFixed(1)}x normal.`
+        : candidate.change > 0
+          ? `Price is up ${candidate.change.toFixed(1)}% with positive participation.`
+          : "No verified positive momentum change is currently available.";
+  const riskNote =
+    (priceDiscoveryVisibilityOverride
+      ? "Live momentum is confirmed, but the completed daily history cannot provide a reliable upside, downside, or resistance framework for this move."
+      : displayRejectionReasons[0]) ||
+    framework.warnings[0] ||
+    "Momentum and volume must continue to hold. Entry timing still matters.";
+  const stage =
+    explosionAssessment.state === "price_discovery"
+      ? "Price Discovery"
+      : explosionAssessment.state === "confirmed_expansion"
+        ? "Confirmed Expansion"
+        : tier === "hero"
+          ? "High-Quality Opportunity"
+          : tier === "feature"
+            ? "Qualified Opportunity"
+            : tier === "watch"
+              ? "Watch"
+              : "Scanner Only";
+  const stageEmoji =
+    explosionAssessment.continuationConfirmed
+      ? "🔥"
+      : tier === "hero"
+        ? "🔥"
+        : tier === "feature"
+          ? "⚡"
+          : tier === "watch"
+            ? "👀"
+            : "🔎";
+
+  return {
+    ...candidate,
+    strategy,
+    signalStrength: strength,
+    strategyScore,
+    opportunityScore: strategyScore,
+    qualityScore,
+    tradeQuality,
+    breakoutPotentialScore: breakout.score,
+    breakoutPotentialLabel: breakout.label,
+    breakoutPotentialComponents: breakout.components,
+    floatDataStatus: breakout.floatDataStatus,
+    explosionAssessment,
+    displayedConfidence,
+    confidence: displayedConfidence,
+    tier,
+    eligible,
+    rejectionReasons,
+    eligibility: { eligible, reasons: rejectionReasons },
+    displayEligibility: {
+      eligible: displayEligible,
+      reasons: displayRejectionReasons,
+    },
+    visibilityState: priceDiscoveryVisibilityOverride
+      ? "verified_price_discovery"
+      : eligible
+        ? "canonical"
+        : "rejected",
+    tradeFramework: framework,
+    engineVersion: CANONICAL_OPPORTUNITY_VERSION,
+    sourceRunId,
+    proxIntelligence,
+    continuationEligible: explosionAssessment.paperEntryEligible,
+    opportunityType,
+    riskTags,
+    attentionScore: candidate.crowdScore,
+    riskScore: candidate.trapScore,
+    relativeVolume: candidate.relativeVolume,
+    isBeforeCrowd,
+    catalystTags:
+      candidate.catalystScore >= 20
+        ? [candidate.state || "Verified Catalyst"]
+        : [],
+    stage,
+    stageEmoji,
+    whyItMatters,
+    whatChanged,
+    riskNote,
+    signals,
+    freshnessLabel,
+  };
+}

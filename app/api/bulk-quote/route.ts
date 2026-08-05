@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
-  resolveSnapshotPrice,
+  resolveSnapshotDisplayPrice,
 } from "@/lib/polygon-snapshot";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
@@ -62,7 +62,7 @@ async function fetchPolygonSnapshot(symbols: string[]): Promise<Record<string, Q
   const data = await res.json();
   const result: Record<string, Quote> = {};
   for (const t of data?.tickers ?? []) {
-    const price = resolveSnapshotPrice(t);
+    const price = resolveSnapshotDisplayPrice(t);
     const prevClose = Number(t?.prevDay?.c || 0);
     const change = resolveSnapshotChangePercent(t, price);
 
@@ -204,7 +204,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ quotes: merged });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Failed", quotes: {} }, { status: 500 });
   }
 }

@@ -33,12 +33,16 @@
       "schedule": "0 0 * * 2-6"
     },
     {
-      "path": "/api/prox-sec-connector?secret=htlabs-internal",
+      "path": "/api/prox-sec-connector",
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/api/prox-market-sensor?secret=htlabs-internal",
+      "path": "/api/prox-market-sensor",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/prox-intelligence",
+      "schedule": "1-59/2 * * * *"
     },
     {
       "path": "/api/trading-bot?secret=htlabs-internal",

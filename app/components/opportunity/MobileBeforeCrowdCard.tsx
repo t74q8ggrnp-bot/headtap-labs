@@ -1,8 +1,14 @@
 import type { DecisionTraceDisplay, TradeFrameworkDisplay } from "@/lib/contracts/market";
-import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-model";
+import {
+  getOpportunityPresentation,
+  resolveOpportunityDisplayQuote,
+  type LiveOpportunityQuotes,
+  type Opportunity,
+} from "@/lib/opportunity-model";
 import DecisionTrace from "./DecisionTrace";
 import OpportunityMetrics from "./OpportunityMetrics";
 import OpportunityWindow from "./OpportunityWindow";
+import ProxPulse from "./ProxPulse";
 
 type MobileBeforeCrowdCardProps = {
   opportunity: Opportunity;
@@ -12,6 +18,7 @@ type MobileBeforeCrowdCardProps = {
   watched: boolean;
   onOpen: () => void;
   onWatch: () => void;
+  liveQuotes?: LiveOpportunityQuotes;
 };
 
 export default function MobileBeforeCrowdCard({
@@ -22,8 +29,10 @@ export default function MobileBeforeCrowdCard({
   watched,
   onOpen,
   onWatch,
+  liveQuotes,
 }: MobileBeforeCrowdCardProps) {
   const view = getOpportunityPresentation(opportunity);
+  const displayQuote = resolveOpportunityDisplayQuote(opportunity, liveQuotes);
   const catalyst = opportunity.catalystTags[0] ?? null;
 
   return (
@@ -40,10 +49,15 @@ export default function MobileBeforeCrowdCard({
         <div className="flex items-end gap-3">
           <p className="font-mono text-[3.2rem] font-black leading-none tracking-[-0.06em] text-white">{opportunity.ticker}</p>
           <div className="pb-1.5">
-            <span className="font-mono text-base font-black text-white">${opportunity.price.toFixed(2)}</span>
-            <span className={`ml-2 font-mono text-xs font-black ${opportunity.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-              {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(2)}%
+            <span className="font-mono text-base font-black text-white">${displayQuote.price.toFixed(2)}</span>
+            <span className={`ml-2 font-mono text-xs font-black ${displayQuote.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(2)}%
             </span>
+            {displayQuote.isLive && (
+              <span className="ml-2 text-[7px] font-black uppercase tracking-[0.14em] text-green-400">
+                Live
+              </span>
+            )}
           </div>
         </div>
         <p className="mt-3 text-2xl font-black leading-tight text-orange-300">{opportunity.stage}</p>
@@ -75,6 +89,13 @@ export default function MobileBeforeCrowdCard({
         </div>
         <OpportunityMetrics opportunity={opportunity} />
       </div>
+
+      {opportunity.proxIntelligence &&
+        opportunity.proxIntelligence.status !== "unavailable" && (
+          <div className="border-b border-white/8 px-5 py-4">
+            <ProxPulse packet={opportunity.proxIntelligence} />
+          </div>
+        )}
 
       {opportunity.signals.length > 0 && (
         <div className="border-b border-white/8 px-5 py-4">

@@ -3,8 +3,9 @@
 // Pro X Phase 1 — the universal event contract. Every connector (SEC now,
 // FDA/IR/halts later) normalizes into this shape before it touches the
 // database. This is a discovery-side contract only: nothing here feeds
-// the canonical HT Labs engine yet (that's the Phase 6 decision bridge,
-// not built in this pass). Pro X observes; it does not decide.
+// the canonical HT Labs engine's scoring. Versioned Pro X intelligence
+// packets can now travel with canonical records in shadow mode, but Pro X
+// observes and advises; it does not decide eligibility or execute orders.
 
 export type ProxCatalystCategory =
   | "merger_acquisition"

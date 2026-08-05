@@ -12,6 +12,8 @@ import type {
 } from "@/lib/contracts/market";
 import {
   getOpportunityPresentation,
+  resolveOpportunityDisplayQuote,
+  type LiveOpportunityQuotes,
   type Opportunity as APIOpportunity,
 } from "@/lib/opportunity-model";
 import OpportunityStateCard from "@/app/components/OpportunityStateCard";
@@ -21,6 +23,8 @@ import MobileCardDetail from "@/app/components/opportunity/MobileCardDetail";
 import MobileSpotMomentumCard from "@/app/components/opportunity/MobileSpotMomentumCard";
 import MobileConvictionsList from "@/app/components/opportunity/MobileConvictionsList";
 import MobileWatchlist from "@/app/components/opportunity/MobileWatchlist";
+import MomentumContenders from "@/app/components/opportunity/MomentumContenders";
+import ProxPulse from "@/app/components/opportunity/ProxPulse";
 
 type MobileTab = "home" | "convictions" | "scanner" | "watchlist" | "profile";
 
@@ -32,6 +36,8 @@ export type MobileExperienceProps = {
   setMobileTab: (tab: MobileTab) => void;
   lastUpdated: Date | null;
   canonicalMobileOpportunities: APIOpportunity[];
+  momentumRunnersUp: APIOpportunity[];
+  liveQuotes: LiveOpportunityQuotes;
   mobileCardIndex: number;
   setMobileCardIndex: (value: number | ((index: number) => number)) => void;
   mobileTouchStart: number | null;
@@ -76,7 +82,7 @@ export type MobileExperienceProps = {
 
 export default function MobileExperience({
   ticker, setTicker, handleTickerSearch, mobileTab, setMobileTab, lastUpdated,
-  canonicalMobileOpportunities, mobileCardIndex, setMobileCardIndex, mobileTouchStart,
+  canonicalMobileOpportunities, momentumRunnersUp, liveQuotes, mobileCardIndex, setMobileCardIndex, mobileTouchStart,
   setMobileTouchStart, apiOpportunitiesLoading, apiMomentum, smFramework, smTrace,
   bullBearData, isDualEngineConfirmation, watchlist, setSelectedStock, toggleWatchlist,
   opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace, mobileScannerReads,
@@ -200,10 +206,21 @@ export default function MobileExperience({
                     watched={watchlist.includes(apiMomentum.ticker)}
                     onOpen={() => setSelectedStock(opportunityToStock(apiMomentum))}
                     onWatch={() => toggleWatchlist(apiMomentum.ticker)}
+                    liveQuotes={liveQuotes}
                   />
                 ) : (
                   <OpportunityStateCard loading={false} compact />
                 )}
+
+                <div className="mx-4 mb-3 flex-shrink-0 overflow-hidden rounded-2xl border border-violet-400/15 bg-black">
+                  <MomentumContenders
+                    candidates={momentumRunnersUp}
+                    onSelect={(opportunity) =>
+                      setSelectedStock(opportunityToStock(opportunity))
+                    }
+                    liveQuotes={liveQuotes}
+                  />
+                </div>
 
                 {/* Mobile Before The Crowd reads the same canonical opportunity as desktop. */}
                 {apiBeforeCrowdPick && (
@@ -215,6 +232,7 @@ export default function MobileExperience({
                     watched={watchlist.includes(apiBeforeCrowdPick.ticker)}
                     onOpen={() => setSelectedStock(opportunityToStock(apiBeforeCrowdPick))}
                     onWatch={() => toggleWatchlist(apiBeforeCrowdPick.ticker)}
+                    liveQuotes={liveQuotes}
                   />
                 )}
 
@@ -225,6 +243,7 @@ export default function MobileExperience({
                   setCurrentIndex={setMobileCardIndex}
                   onOpen={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
                   onWatch={toggleWatchlist}
+                  liveQuotes={liveQuotes}
                 />
               </div>
             );
@@ -234,6 +253,7 @@ export default function MobileExperience({
           {mobileTab === "convictions" && (
             <MobileConvictionsList
               opportunities={canonicalMobileOpportunities}
+              liveQuotes={liveQuotes}
               onOpen={(opportunity) => {
                 setSelectedStock(opportunityToStock(opportunity));
                 setMobileTab("home");
@@ -268,6 +288,10 @@ export default function MobileExperience({
                 <div className="space-y-2">
                   {mobileScannerReads.map((o) => {
                     const { label, tone } = getOtherReadState(o);
+                    const displayQuote = resolveOpportunityDisplayQuote(
+                      o,
+                      liveQuotes,
+                    );
                     const emoji =
                       (o.catalystScore ?? 0) >= 20 ? "⚡" :
                       o.isBeforeCrowd ? "👀" :
@@ -289,8 +313,8 @@ export default function MobileExperience({
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className={`font-mono text-sm font-black ${o.change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                            {o.change >= 0 ? "+" : ""}{o.change.toFixed(2)}%
+                          <p className={`font-mono text-sm font-black ${displayQuote.change >= 0 ? "text-green-300" : "text-red-300"}`}>
+                            {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(2)}%
                           </p>
                           <p className="text-[10px] font-black text-orange-300">{o.opportunityScore}</p>
                         </div>
@@ -401,9 +425,9 @@ export default function MobileExperience({
                 <div>
                   <p className="font-mono text-3xl font-black text-white">{selectedStock.symbol}</p>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="font-mono text-base font-black text-white">${Number(selectedOpportunity?.price ?? selectedStock.price).toFixed(2)}</span>
-                    <span className={`font-mono text-sm font-black ${(selectedOpportunity?.change ?? selectedStock.change) >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {(selectedOpportunity?.change ?? selectedStock.change) >= 0 ? "+" : ""}{Number(selectedOpportunity?.change ?? selectedStock.change).toFixed(2)}%
+                    <span className="font-mono text-base font-black text-white">${Number(liveQuotes[selectedStock.symbol]?.price ?? selectedOpportunity?.price ?? selectedStock.price).toFixed(2)}</span>
+                    <span className={`font-mono text-sm font-black ${(liveQuotes[selectedStock.symbol]?.change ?? selectedOpportunity?.change ?? selectedStock.change) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {(liveQuotes[selectedStock.symbol]?.change ?? selectedOpportunity?.change ?? selectedStock.change) >= 0 ? "+" : ""}{Number(liveQuotes[selectedStock.symbol]?.change ?? selectedOpportunity?.change ?? selectedStock.change).toFixed(2)}%
                     </span>
                   </div>
                 </div>
@@ -457,6 +481,13 @@ export default function MobileExperience({
                   ) : null}
                 </div>
               )}
+
+              {selectedOpportunity?.proxIntelligence &&
+                selectedOpportunity.proxIntelligence.status !== "unavailable" && (
+                  <div className="px-5 py-4 border-b border-white/10">
+                    <ProxPulse packet={selectedOpportunity.proxIntelligence} />
+                  </div>
+                )}
 
               {selectedOpportunityFramework && (
                 <OpportunityWindow framework={selectedOpportunityFramework} compact />

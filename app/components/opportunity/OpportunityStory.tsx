@@ -1,5 +1,11 @@
 import OpportunityWindow from "./OpportunityWindow";
-import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-model";
+import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
+import {
+  getOpportunityPresentation,
+  resolveOpportunityDisplayQuote,
+  type LiveOpportunityQuotes,
+  type Opportunity,
+} from "@/lib/opportunity-model";
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
 
 type OpportunityStoryProps = {
@@ -9,6 +15,7 @@ type OpportunityStoryProps = {
   watched: boolean;
   onOpen: () => void;
   onWatch: () => void;
+  liveQuotes?: LiveOpportunityQuotes;
 };
 
 export default function OpportunityStory({
@@ -18,8 +25,11 @@ export default function OpportunityStory({
   watched,
   onOpen,
   onWatch,
+  liveQuotes,
 }: OpportunityStoryProps) {
   const view = getOpportunityPresentation(opportunity);
+  const displayQuote = resolveOpportunityDisplayQuote(opportunity, liveQuotes);
+  const explosion = opportunity.explosionAssessment;
   const catalyst = opportunity.catalystTags[0] ?? null;
   const catalystPlay = opportunity.catalystScore >= 20 || Boolean(catalyst);
   const selectionLabel =
@@ -47,10 +57,15 @@ export default function OpportunityStory({
             {opportunity.ticker}
           </p>
           <div className="flex items-center gap-2 pb-1">
-            <span className="font-mono text-xl font-black text-white">${opportunity.price.toFixed(2)}</span>
-            <span className={`font-mono text-sm font-black ${opportunity.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-              {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(2)}%
+            <span className="font-mono text-xl font-black text-white">${displayQuote.price.toFixed(2)}</span>
+            <span className={`font-mono text-sm font-black ${displayQuote.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(2)}%
             </span>
+            {displayQuote.isLive && (
+              <span className="text-[7px] font-black uppercase tracking-[0.14em] text-green-400">
+                Live
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -83,7 +98,33 @@ export default function OpportunityStory({
       </div>
 
       <p className="text-sm font-semibold text-zinc-400 leading-5">{opportunity.whyItMatters}</p>
-      {framework && <OpportunityWindow framework={framework} />}
+      {explosion && (
+        <div className="rounded-xl border border-orange-400/20 bg-orange-500/[0.05] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-orange-300">
+              {explosion.label}
+            </p>
+            <p className="font-mono text-sm font-black text-orange-200">
+              {explosion.score}/100
+            </p>
+          </div>
+          <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-400">
+            {explosion.summary}
+          </p>
+          {explosion.state === "price_discovery" && (
+            <p className="mt-2 text-[10px] font-bold leading-4 text-zinc-500">
+              Scenario ranges below are recalculated from observed conditions,
+              not presented as promised targets.
+            </p>
+          )}
+        </div>
+      )}
+      {framework && opportunity.eligibility?.eligible && (
+        <OpportunityWindow framework={framework} />
+      )}
+      {explosion?.state === "price_discovery" && (
+        <PriceDiscoveryWindow assessment={explosion} />
+      )}
 
       {opportunity.signals.length > 0 && (
         <div className="flex flex-col gap-1.5">

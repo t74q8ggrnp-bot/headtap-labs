@@ -2,7 +2,9 @@
 
 export const dynamic = "force-dynamic";
 
-declare global { interface Window { _htScannerLastFetch?: number; _htOpportunitiesLastFetch?: number } }
+const RENDER_RETIRED_COMMAND_DECK = false;
+
+declare global { interface Window { _htScannerLastFetch?: number } }
 
 import { motion } from "framer-motion";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -32,8 +34,10 @@ import {
   mergeOpportunityLists,
   normalizeOpportunity,
   opportunityToStock,
+  resolveOpportunityDisplayQuote,
   selectDistinctBeforeCrowd,
   tradeFrameworkToDisplay,
+  type LiveOpportunityQuotes,
   type Opportunity as APIOpportunity,
 } from "@/lib/opportunity-model";
 import {
@@ -200,6 +204,8 @@ function HomeInner() {
   const initialStocks: Stock[] = [];
 
   const [stocks, setStocks] = useState<Stock[]>(initialStocks);
+  const [liveOpportunityQuotes, setLiveOpportunityQuotes] =
+    useState<LiveOpportunityQuotes>({});
   const [ticker, setTicker] = useState("");
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
@@ -450,7 +456,6 @@ function HomeInner() {
     beforeCrowd: apiBeforeCrowdList,
     fullRankedList: apiFullRankedList,
     loading: apiOpportunitiesLoading,
-    refresh: fetchAPIOpportunities,
   } = useOpportunityFeed();
 
   // Bull/Bear case state — generated when top conviction ticker changes
@@ -4579,10 +4584,18 @@ function HomeInner() {
   const canonicalMobileOpportunities = useMemo(
     () => mergeOpportunityLists(
       apiMomentum ? [apiMomentum] : [],
+      apiMomentumRunnersUp,
       apiBeforeCrowdList,
       apiCatalyst ? [apiCatalyst] : [],
+      apiFullRankedList,
     ).slice(0, 15),
-    [apiMomentum, apiBeforeCrowdList, apiCatalyst],
+    [
+      apiMomentum,
+      apiMomentumRunnersUp,
+      apiBeforeCrowdList,
+      apiCatalyst,
+      apiFullRankedList,
+    ],
   );
 
   // Alerts are notification policy applied to canonical backend decisions.
@@ -5694,6 +5707,22 @@ function HomeInner() {
         quotes = data.quotes ?? {};
       } catch { /* silent */ }
     }
+    const nextLiveQuotes: LiveOpportunityQuotes = {};
+    for (const [symbol, quote] of Object.entries(quotes)) {
+      if (
+        Number.isFinite(quote.price) &&
+        quote.price > 0 &&
+        Number.isFinite(quote.change)
+      ) {
+        nextLiveQuotes[symbol] = {
+          price: quote.price,
+          change: quote.change,
+        };
+      }
+    }
+    if (Object.keys(nextLiveQuotes).length > 0) {
+      setLiveOpportunityQuotes(nextLiveQuotes);
+    }
 
     // Step 3: Parse ht_signals if they arrived — optional enrichment
     let signalsMap: Record<string, {
@@ -5803,6 +5832,7 @@ function HomeInner() {
         ...marketUniverse,
         ...moverSymbols,
         ...signalSymbols,
+        ...apiFullRankedList.map((opportunity) => opportunity.ticker),
         ...watchlist,
       ])];
 
@@ -6055,32 +6085,15 @@ function HomeInner() {
 
 
   useEffect(() => {
-    // fetchAPIOpportunities hits /api/opportunities 5x, each evaluating up to
-    // 100 tickers against live Polygon/Supabase data — expensive. This effect
-    // re-runs on every `stocks` update, which happens at minimum every 30s
-    // (the fetchStocks interval below) and more often during initial load as
-    // several data sources resolve — but the underlying opportunities data
-    // only actually changes every 5 minutes (the signal-writer cron cadence).
-    // Confirmed live: this was firing the same 5-request + 12-news-request
-    // burst far more often than that, the dominant cost behind slow/flaky
-    // mobile loads. Same throttle idiom as scanner_expansion right below,
-    // just applied here too — 60s keeps it feeling live without redoing work
-    // the backend hasn't refreshed yet.
-    if (!window._htOpportunitiesLastFetch || Date.now() - window._htOpportunitiesLastFetch > 60 * 1000) {
-      window._htOpportunitiesLastFetch = Date.now();
-
-      // Fetch news for top stocks so hero card always has context
-      const topStocksForFetch = stocks.slice(0, 12);
-      if (liveHeroTarget && !topStocksForFetch.find(s => s.symbol === liveHeroTarget.symbol)) {
-        topStocksForFetch.push(liveHeroTarget);
-      }
-      topStocksForFetch.forEach((stock) => {
-        fetchNews(stock.symbol);
-      });
-
-      // Fetch API opportunities on every scan
-      fetchAPIOpportunities();
+    // Fetch news for top stocks so hero card always has context. The canonical
+    // opportunity hook owns its own immediate load/refresh lifecycle.
+    const topStocksForFetch = stocks.slice(0, 12);
+    if (liveHeroTarget && !topStocksForFetch.find(s => s.symbol === liveHeroTarget.symbol)) {
+      topStocksForFetch.push(liveHeroTarget);
     }
+    topStocksForFetch.forEach((stock) => {
+      fetchNews(stock.symbol);
+    });
 
     // Fetch expanded scanner universe every 5 minutes
     if (!window._htScannerLastFetch || Date.now() - window._htScannerLastFetch > 5 * 60 * 1000) {
@@ -7536,9 +7549,7 @@ function HomeInner() {
 
         <section id="conviction-engine" className="mx-auto max-w-[1488px] px-3 pt-3 pb-3 md:px-6 md:pt-4 md:pb-4">
           <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45 }}
+            initial={false}
             className="relative overflow-hidden rounded-[1.65rem] border border-white/10 bg-[#04080b] p-3 shadow-[0_28px_90px_rgba(0,0,0,0.52)] md:p-4"
           >
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(255,106,0,0.11),transparent_28%),radial-gradient(circle_at_76%_28%,rgba(34,211,238,0.055),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.018),transparent_42%)]" />
@@ -7669,129 +7680,11 @@ function HomeInner() {
               </div>
 
               {/* ═══════════════════════════════════════════════════
-                  INITIAL LOAD SKELETON
-                  Shows only on first load before real Polygon data
-                  arrives. lastUpdated is null until fetchStocks
-                  completes. After that, skeletons never show again.
-                  ═══════════════════════════════════════════════════ */}
-              {!lastUpdated && (
-                <div className="space-y-4">
-                  {/* Spot Momentum skeleton */}
-                  <div className="rounded-[1.65rem] border border-white/8 bg-black/40 overflow-hidden animate-pulse">
-                    <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.65fr]">
-                      <div className="p-5 space-y-4">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-1.5 rounded-full bg-violet-400/40" />
-                          <div className="h-2.5 w-28 rounded-full bg-white/8" />
-                        </div>
-                        <div className="h-14 w-48 rounded-xl bg-white/6" />
-                        <div className="flex gap-2">
-                          <div className="h-6 w-24 rounded-full bg-white/6" />
-                          <div className="h-6 w-32 rounded-full bg-white/6" />
-                        </div>
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
-                          <div className="h-2 w-36 rounded-full bg-white/8" />
-                          <div className="h-3 w-full rounded-full bg-white/6" />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="h-2.5 w-3/4 rounded-full bg-white/6" />
-                          <div className="h-2.5 w-2/3 rounded-full bg-white/6" />
-                          <div className="h-2.5 w-4/5 rounded-full bg-white/6" />
-                        </div>
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-3 space-y-2">
-                          <div className="h-2 w-32 rounded-full bg-white/8" />
-                          <div className="flex gap-6">
-                            <div className="h-6 w-16 rounded-full bg-white/6" />
-                            <div className="h-6 w-16 rounded-full bg-white/6" />
-                            <div className="h-6 w-16 rounded-full bg-white/6" />
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="h-8 w-40 rounded-xl bg-white/6" />
-                          <div className="h-8 w-20 rounded-xl bg-white/6" />
-                        </div>
-                      </div>
-                      <div className="p-5 bg-white/[0.01] border-l border-white/6 space-y-3">
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
-                          <div className="h-2 w-28 rounded-full bg-white/8" />
-                          <div className="h-8 w-20 rounded-full bg-white/6" />
-                          <div className="h-2 w-full rounded-full bg-white/6" />
-                        </div>
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-3 space-y-2">
-                          <div className="h-2 w-16 rounded-full bg-white/8" />
-                          <div className="h-8 w-14 rounded-full bg-white/6" />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="h-12 rounded-xl bg-white/6" />
-                          <div className="h-12 rounded-xl bg-white/6" />
-                        </div>
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
-                          <div className="h-2 w-24 rounded-full bg-white/8" />
-                          <div className="h-3 w-full rounded-full bg-white/6" />
-                          <div className="h-3 w-5/6 rounded-full bg-white/6" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Before The Crowd skeleton */}
-                  <div className="rounded-[1.65rem] border border-white/8 bg-black/40 overflow-hidden animate-pulse">
-                    <div className="grid grid-cols-1 lg:grid-cols-[1.35fr_0.65fr]">
-                      <div className="p-5 space-y-4">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-1.5 rounded-full bg-orange-400/40" />
-                          <div className="h-2.5 w-32 rounded-full bg-white/8" />
-                        </div>
-                        <div className="h-14 w-36 rounded-xl bg-white/6" />
-                        <div className="flex gap-2">
-                          <div className="h-6 w-28 rounded-full bg-white/6" />
-                          <div className="h-6 w-20 rounded-full bg-white/6" />
-                        </div>
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-2">
-                          <div className="h-2 w-40 rounded-full bg-white/8" />
-                          <div className="space-y-1.5">
-                            <div className="h-2.5 w-full rounded-full bg-white/6" />
-                            <div className="h-2.5 w-4/5 rounded-full bg-white/6" />
-                            <div className="h-2.5 w-3/4 rounded-full bg-white/6" />
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-3 space-y-2">
-                          <div className="h-2 w-32 rounded-full bg-white/8" />
-                          <div className="flex gap-6">
-                            <div className="h-6 w-16 rounded-full bg-white/6" />
-                            <div className="h-6 w-16 rounded-full bg-white/6" />
-                            <div className="h-6 w-16 rounded-full bg-white/6" />
-                          </div>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="h-8 w-44 rounded-xl bg-white/6" />
-                          <div className="h-8 w-20 rounded-xl bg-white/6" />
-                        </div>
-                      </div>
-                      <div className="p-5 bg-white/[0.01] border-l border-white/6 space-y-3">
-                        <div className="rounded-2xl border border-white/6 bg-white/[0.02] p-4 space-y-3">
-                          <div className="h-2 w-24 rounded-full bg-white/8" />
-                          <div className="h-8 w-16 rounded-full bg-white/6" />
-                          <div className="h-2 w-full rounded-full bg-white/6" />
-                          <div className="h-[3px] w-full rounded-full bg-white/6" />
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="h-10 rounded-xl bg-white/6" />
-                          <div className="h-10 rounded-xl bg-white/6" />
-                          <div className="h-10 rounded-xl bg-white/6" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ═══════════════════════════════════════════════════
                   SPOT MOMENTUM — Primary Hero Experience
-                  Powered by: opportunities API, social intel, news intel,
-                  conviction engine, pressure stack
+                  The canonical feed owns first paint and live state so the
+                  page never swaps between unrelated loading experiences.
                   ═══════════════════════════════════════════════════ */}
-              {lastUpdated && (() => {
+              {(() => {
                 // ── Candidate resolution now happens once at component level
                 // (resolvedSpotMomentumTarget) so the bull/bear fetch and the
                 // displayed ticker can never drift apart. Don't recompute here. ──
@@ -7806,6 +7699,13 @@ function HomeInner() {
                 // Local Stock helpers are fallback-only for visual compatibility and must not override the backend score/story.
                 const apiHero = apiMomentum && btcTarget?.symbol === apiMomentum.ticker ? apiMomentum : null;
                 const btcScore = Number(apiHero?.opportunityScore ?? apiHero?.confidence ?? (btcTarget ? getHTScore(btcTarget as Stock) : 0));
+
+                // One stable first paint: the canonical opportunity feed owns
+                // the loading state. Do not render quote-board stats or any
+                // lower command modules underneath a still-loading decision.
+                if (!btcTarget && apiOpportunitiesLoading) {
+                  return <OpportunityStateCard loading />;
+                }
 
                 // What HT Is Watching radar items
                 const radarItems = [
@@ -7829,10 +7729,6 @@ function HomeInner() {
                     {/* ── BEFORE THE CROWD — 3 Column Intelligence Layout ── */}
                     {(() => {
                       // ── No qualifying setup — stay minimal, do not force a hero ──
-                      if (!btcTarget && apiOpportunitiesLoading) {
-                        return <OpportunityStateCard loading />;
-                      }
-
                       if (!btcTarget) {
                         return <OpportunityStateCard loading={false} />;
                       }
@@ -7857,7 +7753,7 @@ function HomeInner() {
                           <div className="grid grid-cols-1 xl:grid-cols-[1.7fr_1fr] divide-y xl:divide-y-0 xl:divide-x divide-white/[0.06]">
 
                             {/* ══ MAJOR LEFT — Story + Advanced Data, one unified panel ══ */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2">
+                            <div className="grid grid-cols-1 divide-y divide-white/[0.06] lg:grid-cols-2 lg:divide-x lg:divide-y-0">
                               {apiHero && (
                                 <OpportunityStory
                                   opportunity={apiHero}
@@ -7866,6 +7762,7 @@ function HomeInner() {
                                   watched={watchlist.includes(apiHero.ticker)}
                                   onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
                                   onWatch={() => toggleWatchlist(apiHero.ticker)}
+                                  liveQuotes={liveOpportunityQuotes}
                                 />
                               )}
                               {apiHero && (
@@ -7882,6 +7779,7 @@ function HomeInner() {
                             <MomentumContenders
                               candidates={apiMomentumRunnersUp}
                               onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
+                              liveQuotes={liveOpportunityQuotes}
                             />
                           </div>
                           {/* ── Bottom strip — 4 quick stats ── */}
@@ -7922,6 +7820,7 @@ function HomeInner() {
                         updatedLabel={mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}
                         onOpen={() => setSelectedStock(opportunityToStock(apiBeforeCrowdPick))}
                         onWatch={() => toggleWatchlist(apiBeforeCrowdPick.ticker)}
+                        liveQuotes={liveOpportunityQuotes}
                       />
                     )}
 
@@ -7995,6 +7894,12 @@ function HomeInner() {
                 );
               })()}
 
+              {/* Retired command-deck modules are intentionally excluded from
+                  layout and accessibility. They duplicated the canonical hero
+                  and caused Firefox scroll restoration to expose stale cards
+                  during the first paint. */}
+              {RENDER_RETIRED_COMMAND_DECK && (
+              <div hidden aria-hidden="true">
               {/* Dual Opportunity Engine — powered by /api/opportunities */}
               {/* Catalyst Signal Card — shows OTLK type tickers before the crowd */}
               {apiCatalyst && (
@@ -8081,12 +7986,17 @@ function HomeInner() {
                 </p>
                 {canonicalMobileOpportunities.length > 0 ? (
                   <div className="space-y-2">
-                    {canonicalMobileOpportunities.slice(0, 5).map((opportunity) => (
-                      <button
-                        key={`canonical-rank-${opportunity.strategy ?? "opportunity"}-${opportunity.ticker}`}
-                        onClick={() => openReadTicker(opportunity.ticker)}
-                        className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-left transition hover:border-orange-400/30"
-                      >
+                    {canonicalMobileOpportunities.slice(0, 5).map((opportunity) => {
+                      const displayQuote = resolveOpportunityDisplayQuote(
+                        opportunity,
+                        liveOpportunityQuotes,
+                      );
+                      return (
+                        <button
+                          key={`canonical-rank-${opportunity.strategy ?? "opportunity"}-${opportunity.ticker}`}
+                          onClick={() => openReadTicker(opportunity.ticker)}
+                          className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-left transition hover:border-orange-400/30"
+                        >
                         <div className="min-w-0">
                           <div className="flex items-center gap-3">
                             <p className="shrink-0 font-mono text-lg font-black text-white">{opportunity.ticker}</p>
@@ -8095,15 +8005,16 @@ function HomeInner() {
                           <p className="mt-1 truncate text-[10px] font-semibold text-zinc-600">{opportunity.riskNote}</p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          <span className={opportunity.change >= 0 ? "font-mono text-sm font-black text-green-300" : "font-mono text-sm font-black text-red-300"}>
-                            {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(1)}%
+                          <span className={displayQuote.change >= 0 ? "font-mono text-sm font-black text-green-300" : "font-mono text-sm font-black text-red-300"}>
+                            {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(1)}%
                           </span>
                           <span className="rounded-full bg-orange-500/10 px-2 py-1 text-[9px] font-black text-orange-300">
                             {Math.round(opportunity.opportunityScore)} · {opportunity.tier ?? "scanner"}
                           </span>
                         </div>
-                      </button>
-                    ))}
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-xs font-semibold text-zinc-500">No eligible opportunity currently clears the backend gates.</p>
@@ -8745,10 +8656,12 @@ function HomeInner() {
                   })}
                 </div>
               </div>
+              </div>
+              )}
             </div>
 
             {/* Market Intelligence Section */}
-            <div className="mx-auto max-w-[1488px] px-3 pb-4 md:px-6">
+            <div className={`${apiOpportunitiesLoading ? "hidden" : ""} mx-auto max-w-[1488px] px-3 pb-4 md:px-6`}>
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div>
@@ -11310,6 +11223,8 @@ function HomeInner() {
         setMobileTab={setMobileTab}
         lastUpdated={lastUpdated}
         canonicalMobileOpportunities={canonicalMobileOpportunities}
+        momentumRunnersUp={apiMomentumRunnersUp}
+        liveQuotes={liveOpportunityQuotes}
         mobileCardIndex={mobileCardIndex}
         setMobileCardIndex={setMobileCardIndex}
         mobileTouchStart={mobileTouchStart}

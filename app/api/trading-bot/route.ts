@@ -1,9 +1,11 @@
 // app/api/trading-bot/route.ts
 //
-// A separate system from Pro X and from the canonical HT Labs engine.
+// A separate execution system from Pro X and from the canonical HT Labs engine.
 // Reads HT Labs' canonical Spot Momentum candidates as a read-only input
 // (via /api/opportunities — no direct table access, no re-deriving
-// eligibility). Has its own independent ranking logic optimized for
+// eligibility). Records attached Pro X intelligence in shadow mode, but
+// Pro X cannot change ranking, sizing, exits, or orders. The bot has its
+// own independent ranking logic optimized for
 // "safest probable trade," not "biggest headline mover" — those are
 // deliberately different questions. Paper trading only, via Alpaca.
 //
@@ -28,6 +30,11 @@ import {
   placeSellQty,
   type AlpacaPosition,
 } from "@/lib/trading-bot/alpaca";
+import {
+  CANONICAL_OPPORTUNITY_VERSION,
+  type ExplosionAssessment,
+} from "@/lib/canonical-opportunity";
+import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -37,7 +44,10 @@ const CRON_SECRET = process.env.CRON_SECRET;
 // amount — stays proportional as the paper account grows/shrinks from
 // testing, rather than becoming meaningless at a fixed number.
 const POSITION_SIZE_PERCENT = 0.05;
-const MAX_CONCURRENT_POSITIONS = 3;
+// Six normal-size positions cap paper exposure at roughly 30% of account
+// equity (continuation entries remain half-size). This is capacity only:
+// every candidate still has to clear the existing canonical entry gates.
+const MAX_CONCURRENT_POSITIONS = 6;
 const MIN_RR_RATIO = 1.5;
 const MAX_HOLD_DAYS = 3;
 // Hard floor under the canonical framework's own downsideRisk. That number
@@ -95,6 +105,29 @@ function isAuthorized(req: Request) {
   return authHeader === `Bearer ${CRON_SECRET}`;
 }
 
+function isRegularMarketSession(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? NaN);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? NaN);
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    weekday === "Sat" ||
+    weekday === "Sun"
+  ) {
+    return false;
+  }
+  const minutes = hour * 60 + minute;
+  return minutes >= 570 && minutes < 960;
+}
+
 // Market orders on Alpaca's paper API usually fill within a second when
 // placed during regular market hours — but a "day" order placed outside
 // regular hours (no extended_hours flag is set anywhere in this file) simply
@@ -129,11 +162,18 @@ async function pollForFill(orderId: string): Promise<{ filled: true; price: numb
 // whole-share order preserves the actual pick instead of skipping it over a
 // pure execution-mechanics technicality that has nothing to do with trade
 // quality.
-async function placeBuyOrder(ticker: string, notional: number, price: number): Promise<{ order: any; qty: number | null }> {
+type PlacedOrder = { id?: string };
+
+async function placeBuyOrder(
+  ticker: string,
+  notional: number,
+  price: number,
+): Promise<{ order: PlacedOrder; qty: number | null }> {
   try {
     return { order: await placeBuyNotional(ticker, notional), qty: null };
-  } catch (err: any) {
-    if (!String(err?.message ?? "").includes("not fractionable")) throw err;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("not fractionable")) throw err;
     const qty = Math.max(1, Math.floor(notional / price));
     return { order: await placeBuyQty(ticker, qty), qty };
   }
@@ -144,13 +184,71 @@ type CanonicalOpportunity = {
   price: number;
   riskTags: string[];
   tradeFramework: { rrRatio: number | null; entryQuality: number | null; upsideMax: number | null; downsideRisk: number | null } | null;
-  pattern?: string;
-  momentumScore?: number;
-  crowdScore?: number;
-  trapScore?: number;
-  relativeVolume?: number;
-  signalState?: string;
+  strategy: "spot_momentum" | "before_the_crowd";
+  eligibility: { eligible: boolean; reasons: string[] };
+  engineVersion: string;
+  sourceRunId: string | null;
+  explosionAssessment: ExplosionAssessment;
+  strategyScore: number;
+  opportunityScore: number;
+  proxIntelligence: ProxIntelligencePacket | null;
 };
+
+async function recordProxShadowObservations(
+  supabase: ReturnType<typeof getSupabase>,
+  candidates: CanonicalOpportunity[],
+  sourceRunId: string,
+) {
+  const unique = new Map<string, CanonicalOpportunity>();
+  for (const candidate of candidates) {
+    if (!unique.has(candidate.ticker)) unique.set(candidate.ticker, candidate);
+  }
+  const rows = [...unique.values()]
+    .filter((candidate) => candidate.proxIntelligence)
+    .map((candidate) => {
+      const prox = candidate.proxIntelligence as ProxIntelligencePacket;
+      return {
+        source_run_id: sourceRunId,
+        canonical_engine_version: CANONICAL_OPPORTUNITY_VERSION,
+        ticker: candidate.ticker,
+        packet_snapshot_key: prox.snapshotKey,
+        packet_version: prox.packetVersion,
+        canonical_eligible: candidate.eligibility.eligible,
+        canonical_strategy_score: candidate.strategyScore,
+        canonical_opportunity_score: candidate.opportunityScore,
+        prox_status: prox.status,
+        prox_composite_score: prox.scores.composite,
+        prox_would_veto: prox.botPolicy.wouldVeto,
+        prox_would_reduce_size: prox.botPolicy.wouldReduceSize,
+        prox_rank_adjustment: prox.botPolicy.rankAdjustment,
+        // This remains false until a separately reviewed paper-only
+        // promotion explicitly allows Pro X to influence execution.
+        executed_influence: false,
+        reasons: prox.botPolicy.reasons,
+        observed_at: new Date().toISOString(),
+      };
+    });
+  if (rows.length === 0) {
+    return {
+      observed: 0,
+      wouldVeto: 0,
+      wouldReduceSize: 0,
+      unavailableReason: null as string | null,
+    };
+  }
+  const { error } = await supabase
+    .from("prox_bot_shadow_observations")
+    .upsert(rows, {
+      onConflict: "source_run_id,ticker,packet_snapshot_key",
+      ignoreDuplicates: true,
+    });
+  return {
+    observed: rows.length,
+    wouldVeto: rows.filter((row) => row.prox_would_veto).length,
+    wouldReduceSize: rows.filter((row) => row.prox_would_reduce_size).length,
+    unavailableReason: error?.message ?? null,
+  };
+}
 
 // Effective downside is never tighter than MIN_STOP_LOSS_PERCENT, regardless
 // of what the framework's own downsideRisk says — this is the actual distance
@@ -193,37 +291,17 @@ function computeBotScore(candidate: CanonicalOpportunity): number | null {
   return entryQuality + rrBonus - riskTagPenalty;
 }
 
-// Continuation candidates (see /api/opportunities' extremeMomentumEligible)
-// already guarantee real current volume by construction — everything in that
-// pool is >=25% change AND >=3x relative volume, that's what got it excluded
-// from the modeled-R:R path in the first place rather than just scored low.
-// What this adds is the "isn't stalling" half of that gate. There's no real
-// intrabar deceleration signal available to this bot today (that's what
-// hooking up Pro X's velocity/acceleration data would give — not done, a
-// known gap, not this fix's job to solve) — so this uses the closest proxy
-// the base signal actually has: "Exhaustion Risk" is this codebase's own
-// existing label for "big move, no catalyst backing it, red flag it's
-// running out of steam" (see signal-writer's computeSignal), and momentum
-// still reading strong right now rather than having already cooled off.
-const CONTINUATION_MIN_MOMENTUM_SCORE = 70;
-
 function computeContinuationScore(candidate: CanonicalOpportunity): number | null {
-  if (candidate.pattern === "Exhaustion Risk") return null;
-  const momentumScore = candidate.momentumScore ?? 0;
-  const stillStrong = momentumScore >= CONTINUATION_MIN_MOMENTUM_SCORE || candidate.signalState === "Strong Momentum";
-  if (!stillStrong) return null;
-  const volumeBonus = Math.min(25, (candidate.relativeVolume ?? 0) * 1.5);
-  const crowdPenalty = (candidate.crowdScore ?? 0) * 0.25;
-  const trapPenalty = (candidate.trapScore ?? 0) * 0.25;
-  // Every candidate in this pool carries "Parabolic Move" or "Extreme
-  // Momentum" by definition — that's the gate that got it here in the first
-  // place (see extremeMomentumEligible) — so docking for it provides zero
-  // differentiation within this pool specifically. Other tags (High
-  // Volatility, Extended — Chasing Risk, New Listing) aren't guaranteed by
-  // membership and still count.
-  const definingTags = new Set(["Parabolic Move", "Extreme Momentum"]);
-  const riskTagPenalty = candidate.riskTags.filter((tag) => !definingTags.has(tag)).length * 10;
-  return Math.max(0, Math.round(momentumScore * 0.6 + volumeBonus - crowdPenalty - trapPenalty - riskTagPenalty));
+  const assessment = candidate.explosionAssessment;
+  if (
+    !candidate.tradeFramework ||
+    !candidate.eligibility.eligible ||
+    !assessment?.continuationConfirmed ||
+    !assessment.paperEntryEligible
+  ) {
+    return null;
+  }
+  return assessment.paperTradeScore;
 }
 
 // Deliberately NOT derived from req.url's origin. Vercel Cron invokes this
@@ -234,13 +312,73 @@ function computeContinuationScore(candidate: CanonicalOpportunity): number | nul
 // The custom domain isn't behind that wall, so it's hardcoded here instead.
 const SITE_ORIGIN = "https://gethtlabs.com";
 
-async function fetchTopCandidates(): Promise<{ standard: CanonicalOpportunity[]; continuation: CanonicalOpportunity[] }> {
-  const res = await fetch(`${SITE_ORIGIN}/api/opportunities?type=momentum&limit=10&includeExtreme=1`, { cache: "no-store" });
+async function fetchTopCandidates(): Promise<{
+  standard: CanonicalOpportunity[];
+  continuation: CanonicalOpportunity[];
+  sourceRunId: string;
+}> {
+  const res = await fetch(
+    `${SITE_ORIGIN}/api/opportunities?type=momentum&limit=10&includeContinuation=1`,
+    { cache: "no-store" },
+  );
   if (!res.ok) throw new Error(`Failed to fetch canonical opportunities: ${res.status}`);
-  const data = await res.json();
+  const data: unknown = await res.json();
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Canonical opportunity feed returned an invalid payload.");
+  }
+  const payload = data as Record<string, unknown>;
+  if (payload.engineVersion !== CANONICAL_OPPORTUNITY_VERSION) {
+    throw new Error(
+      `Canonical opportunity version mismatch (${String(payload.engineVersion ?? "missing")}).`,
+    );
+  }
+  const sourceRun =
+    payload.sourceRun &&
+    typeof payload.sourceRun === "object" &&
+    !Array.isArray(payload.sourceRun)
+      ? (payload.sourceRun as Record<string, unknown>)
+      : null;
+  const sourceRunId = String(sourceRun?.id ?? "");
+  if (!sourceRunId) {
+    throw new Error("Canonical opportunity feed did not identify its source run.");
+  }
+  const isCanonicalDecision = (
+    candidate: unknown,
+  ): candidate is CanonicalOpportunity => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return false;
+    }
+    const decision = candidate as Record<string, unknown>;
+    const eligibility =
+      decision.eligibility &&
+      typeof decision.eligibility === "object" &&
+      !Array.isArray(decision.eligibility)
+        ? (decision.eligibility as Record<string, unknown>)
+        : null;
+    return Boolean(
+      eligibility?.eligible === true &&
+        decision.strategy === "spot_momentum" &&
+        decision.engineVersion === CANONICAL_OPPORTUNITY_VERSION &&
+        decision.sourceRunId === sourceRunId &&
+        Array.isArray(decision.riskTags) &&
+        decision.tradeFramework,
+    );
+  };
+  const opportunities = Array.isArray(payload.opportunities)
+    ? payload.opportunities
+    : [];
+  const continuationCandidates = Array.isArray(payload.continuationCandidates)
+    ? payload.continuationCandidates
+    : [];
   return {
-    standard: (data.opportunities ?? []) as CanonicalOpportunity[],
-    continuation: (data.extremeCandidates ?? []) as CanonicalOpportunity[],
+    standard: opportunities.filter(isCanonicalDecision),
+    continuation: continuationCandidates
+      .filter(isCanonicalDecision)
+      .filter(
+        (candidate) =>
+          candidate.explosionAssessment?.paperEntryEligible === true,
+      ),
+    sourceRunId,
   };
 }
 
@@ -251,12 +389,22 @@ export async function GET(req: Request) {
   const diagnostics = {
     enabled,
     alpacaConfigured: alpacaConfigured(),
+    paperOnly: true,
+    canonicalFeedVersion: CANONICAL_OPPORTUNITY_VERSION,
+    sourceRunId: null as string | null,
+    entryWindowOpen: isRegularMarketSession(),
+    entriesDeferredOutsideRegularSession: 0,
     positionsChecked: 0,
     closed: 0,
     candidatesConsidered: 0,
     opened: 0,
     unfilled: 0,
     errors: 0,
+    proxShadowPacketsObserved: 0,
+    proxShadowWouldVeto: 0,
+    proxShadowWouldReduceSize: 0,
+    proxShadowWriteUnavailable: null as string | null,
+    proxExecutionAuthority: false,
   };
 
   if (!enabled || !alpacaConfigured()) {
@@ -376,14 +524,35 @@ export async function GET(req: Request) {
       .select("id", { count: "exact", head: true })
       .eq("status", "open");
 
-    if ((openCount ?? 0) < MAX_CONCURRENT_POSITIONS) {
-      const { standard, continuation } = await fetchTopCandidates();
+    if (
+      (openCount ?? 0) < MAX_CONCURRENT_POSITIONS &&
+      diagnostics.entryWindowOpen
+    ) {
+      const { standard, continuation, sourceRunId } = await fetchTopCandidates();
+      diagnostics.sourceRunId = sourceRunId;
       diagnostics.candidatesConsidered = standard.length + continuation.length;
+      const shadow = await recordProxShadowObservations(
+        supabase,
+        [...standard, ...continuation],
+        sourceRunId,
+      );
+      diagnostics.proxShadowPacketsObserved = shadow.observed;
+      diagnostics.proxShadowWouldVeto = shadow.wouldVeto;
+      diagnostics.proxShadowWouldReduceSize = shadow.wouldReduceSize;
+      diagnostics.proxShadowWriteUnavailable = shadow.unavailableReason;
 
       const heldTickers = new Set((openTrades ?? []).map((t) => t.ticker));
+      const continuationTickers = new Set(
+        continuation.map((candidate) => candidate.ticker),
+      );
       let best: { candidate: CanonicalOpportunity; score: number; isContinuation: boolean } | null = null;
       for (const candidate of standard) {
-        if (heldTickers.has(candidate.ticker)) continue;
+        if (
+          heldTickers.has(candidate.ticker) ||
+          continuationTickers.has(candidate.ticker)
+        ) {
+          continue;
+        }
         const score = computeBotScore(candidate);
         if (score === null) continue;
         if (!best || score > best.score) best = { candidate, score, isContinuation: false };
@@ -401,9 +570,21 @@ export async function GET(req: Request) {
 
       if (best) {
         const { candidate, score, isContinuation } = best;
-        const tf = candidate.tradeFramework!;
+        const tf = candidate.tradeFramework;
+        if (!tf) {
+          throw new Error(
+            `Canonical decision for ${candidate.ticker} has no trade framework.`,
+          );
+        }
         try {
           const account = await getAccount();
+          if (
+            (account?.status && account.status !== "ACTIVE") ||
+            account?.account_blocked ||
+            account?.trading_blocked
+          ) {
+            throw new Error("Alpaca paper account is not active for trading.");
+          }
           const equity = Number(account?.equity ?? account?.cash ?? 0);
           // Continuation entries are a higher-variance bet than the modeled
           // R:R path (no reliable upside number, just volume + momentum
@@ -462,11 +643,22 @@ export async function GET(req: Request) {
           console.error(`[trading-bot] buy order failed for ${candidate.ticker}:`, err);
         }
       }
+    } else if (
+      (openCount ?? 0) < MAX_CONCURRENT_POSITIONS &&
+      !diagnostics.entryWindowOpen
+    ) {
+      diagnostics.entriesDeferredOutsideRegularSession++;
     }
 
     return NextResponse.json({ success: true, diagnostics, timestamp: new Date().toISOString() });
-  } catch (error: any) {
+  } catch (error: unknown) {
     diagnostics.errors++;
-    return NextResponse.json({ error: error?.message ?? "Trading bot failed", diagnostics }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Trading bot failed",
+        diagnostics,
+      },
+      { status: 500 },
+    );
   }
 }

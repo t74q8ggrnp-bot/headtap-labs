@@ -1,5 +1,7 @@
 import type { TradeFrameworkResult } from "@/lib/canonical-trade-framework";
+import type { ExplosionAssessment } from "@/lib/canonical-opportunity";
 import type { MarketStock, TradeFrameworkDisplay } from "@/lib/contracts/market";
+import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 
 export type OpportunityStrategy = "spot_momentum" | "before_the_crowd";
 export type OpportunityTier = "scanner" | "watch" | "feature" | "hero";
@@ -33,12 +35,15 @@ export type Opportunity = {
   scannedAt: string | null;
   freshnessLabel: string;
   tradeFramework?: TradeFrameworkResult | null;
+  explosionAssessment?: ExplosionAssessment | null;
+  proxIntelligence?: ProxIntelligencePacket | null;
   strategy?: OpportunityStrategy;
   signalStrength?: number;
   strategyScore?: number;
   displayedConfidence?: number;
   tier?: OpportunityTier;
   eligibility?: { eligible: boolean; reasons: string[] };
+  displayEligibility?: { eligible: boolean; reasons: string[] };
   engineVersion?: string;
   sourceRunId?: string;
   _convictionTier?: string;
@@ -46,94 +51,161 @@ export type Opportunity = {
 };
 
 export type OpportunityStock = MarketStock;
+export type LiveOpportunityQuote = {
+  price: number;
+  change: number;
+};
+export type LiveOpportunityQuotes = Record<string, LiveOpportunityQuote>;
+
+export function resolveOpportunityDisplayQuote(
+  opportunity: Opportunity,
+  liveQuotes?: LiveOpportunityQuotes,
+) {
+  const liveQuote = liveQuotes?.[opportunity.ticker];
+  if (
+    liveQuote &&
+    Number.isFinite(liveQuote.price) &&
+    liveQuote.price > 0 &&
+    Number.isFinite(liveQuote.change)
+  ) {
+    return { ...liveQuote, isLive: true };
+  }
+  return {
+    price: opportunity.price,
+    change: opportunity.change,
+    isLive: false,
+  };
+}
+
+const objectValue = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 
 const numberValue = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-export function normalizeOpportunity(raw: any): Opportunity {
-  const ticker = String(raw?.ticker ?? "").toUpperCase();
-  const eligible = Boolean(raw?.eligibility?.eligible ?? raw?.eligible);
-  const eligibilityReasons = Array.isArray(raw?.eligibility?.reasons)
-    ? raw.eligibility.reasons.map(String)
-    : Array.isArray(raw?.rejectionReasons)
-      ? raw.rejectionReasons.map(String)
-      : [];
-  const tier = raw?.tier as OpportunityTier | undefined;
+export function normalizeOpportunity(raw: unknown): Opportunity {
+  const source = objectValue(raw);
+  const rawEligibility = objectValue(source.eligibility);
+  const rawDisplayEligibility = objectValue(source.displayEligibility);
+  const rawTradeFramework = objectValue(source.tradeFramework);
+  const ticker = String(source.ticker ?? "").toUpperCase();
+  const eligible = Boolean(
+    rawDisplayEligibility.eligible ??
+      rawEligibility.eligible ??
+      source.eligible,
+  );
+  const eligibilityReasons = Array.isArray(rawDisplayEligibility.reasons)
+    ? rawDisplayEligibility.reasons.map(String)
+    : Array.isArray(rawEligibility.reasons)
+      ? rawEligibility.reasons.map(String)
+      : Array.isArray(source.rejectionReasons)
+        ? source.rejectionReasons.map(String)
+        : [];
+  const tier = source.tier as OpportunityTier | undefined;
 
   return {
     ticker,
-    price: numberValue(raw?.price),
-    change: numberValue(raw?.change ?? raw?.change_percent),
+    price: numberValue(source.price),
+    change: numberValue(source.change ?? source.change_percent),
     opportunityType: String(
-      raw?.opportunityType ??
-        (numberValue(raw?.catalystScore ?? raw?.catalyst_score) >= 20
+      source.opportunityType ??
+        (numberValue(source.catalystScore ?? source.catalyst_score) >= 20
           ? "catalyst"
           : "momentum"),
     ),
-    opportunityScore: numberValue(raw?.strategyScore ?? raw?.opportunityScore),
-    qualityScore: numberValue(raw?.qualityScore ?? raw?.strategyScore ?? raw?.opportunityScore),
-    breakoutPotentialScore: numberValue(raw?.breakoutPotentialScore),
-    breakoutPotentialLabel: String(raw?.breakoutPotentialLabel ?? "Limited"),
-    floatDataStatus: raw?.floatDataStatus === "verified" ? "verified" : "unavailable",
-    momentumScore: numberValue(raw?.momentumScore ?? raw?.momentum_score),
+    opportunityScore: numberValue(
+      source.strategyScore ?? source.opportunityScore,
+    ),
+    qualityScore: numberValue(
+      source.qualityScore ?? source.strategyScore ?? source.opportunityScore,
+    ),
+    breakoutPotentialScore: numberValue(source.breakoutPotentialScore),
+    breakoutPotentialLabel: String(source.breakoutPotentialLabel ?? "Limited"),
+    floatDataStatus: source.floatDataStatus === "verified" ? "verified" : "unavailable",
+    momentumScore: numberValue(source.momentumScore ?? source.momentum_score),
     attentionScore: numberValue(
-      raw?.crowdScore ?? raw?.attentionScore ?? raw?.crowd_score,
+      source.crowdScore ?? source.attentionScore ?? source.crowd_score,
       50,
     ),
-    riskScore: numberValue(raw?.trapScore ?? raw?.riskScore ?? raw?.trap_score, 50),
-    stage: String(tier ?? raw?.stage ?? "Watch"),
+    riskScore: numberValue(
+      source.trapScore ?? source.riskScore ?? source.trap_score,
+      50,
+    ),
+    stage: String(source.stage ?? tier ?? "Watch"),
     stageEmoji:
-      tier === "hero" ? "🔥" : tier === "feature" ? "⚡" : tier === "watch" ? "👀" : "🔎",
+      String(
+        source.stageEmoji ??
+          (tier === "hero"
+            ? "🔥"
+            : tier === "feature"
+              ? "⚡"
+              : tier === "watch"
+                ? "👀"
+                : "🔎"),
+      ),
     confidence: numberValue(
-      raw?.displayedConfidence ?? raw?.confidence ?? raw?.strategyScore,
+      source.displayedConfidence ?? source.confidence ?? source.strategyScore,
     ),
     whyItMatters: String(
-      raw?.whyItMatters ??
+      source.whyItMatters ??
         (eligible
           ? `${ticker} passed the canonical opportunity gate.`
           : `${ticker} is not currently eligible for feature placement.`),
     ),
     whatChanged: String(
-      raw?.whatChanged ??
-        raw?.signalState ??
-        raw?.state ??
+      source.whatChanged ??
+        source.signalState ??
+        source.state ??
         "Canonical backend evaluation updated.",
     ),
     riskNote: String(
-      raw?.riskNote ??
-        raw?.eligibility?.reasons?.[0] ??
-        raw?.tradeFramework?.warnings?.[0] ??
+      source.riskNote ??
+        (Array.isArray(rawEligibility.reasons)
+          ? rawEligibility.reasons[0]
+          : undefined) ??
+        (Array.isArray(rawTradeFramework.warnings)
+          ? rawTradeFramework.warnings[0]
+          : undefined) ??
         "Entry timing and risk still require discipline.",
     ),
-    signals: Array.isArray(raw?.signals)
-      ? raw.signals.map(String)
+    signals: Array.isArray(source.signals)
+      ? source.signals.map(String)
       : [
-          ...(numberValue(raw?.change) > 0
-            ? [`Up ${numberValue(raw.change).toFixed(1)}%`]
+          ...(numberValue(source.change) > 0
+            ? [`Up ${numberValue(source.change).toFixed(1)}%`]
             : []),
-          ...(numberValue(raw?.relativeVolume) >= 1.2
-            ? [`${numberValue(raw.relativeVolume).toFixed(1)}x relative volume`]
+          ...(numberValue(source.relativeVolume) >= 1.2
+            ? [`${numberValue(source.relativeVolume).toFixed(1)}x relative volume`]
             : []),
         ],
-    isBeforeCrowd: raw?.strategy === "before_the_crowd" && eligible,
-    catalystScore: numberValue(raw?.catalystScore ?? raw?.catalyst_score),
-    catalystTags: Array.isArray(raw?.catalystTags) ? raw.catalystTags.map(String) : [],
-    riskTags: Array.isArray(raw?.riskTags) ? raw.riskTags.map(String) : [],
-    relativeVolume: numberValue(raw?.relativeVolume ?? raw?.relative_volume),
-    crowdStage: numberValue(raw?.crowdStage),
-    scannedAt: raw?.scannedAt ?? raw?.scanned_at ?? null,
-    freshnessLabel: String(raw?.freshnessLabel ?? "Live Scan"),
-    tradeFramework: raw?.tradeFramework ?? null,
-    strategy: raw?.strategy,
-    signalStrength: numberValue(raw?.signalStrength),
-    strategyScore: numberValue(raw?.strategyScore ?? raw?.opportunityScore),
-    displayedConfidence: numberValue(raw?.displayedConfidence ?? raw?.confidence),
+    isBeforeCrowd: source.strategy === "before_the_crowd" && eligible,
+    catalystScore: numberValue(source.catalystScore ?? source.catalyst_score),
+    catalystTags: Array.isArray(source.catalystTags)
+      ? source.catalystTags.map(String)
+      : [],
+    riskTags: Array.isArray(source.riskTags) ? source.riskTags.map(String) : [],
+    relativeVolume: numberValue(source.relativeVolume ?? source.relative_volume),
+    crowdStage: numberValue(source.crowdStage),
+    scannedAt: (source.scannedAt ?? source.scanned_at ?? null) as string | null,
+    freshnessLabel: String(source.freshnessLabel ?? "Live Scan"),
+    tradeFramework: (source.tradeFramework ?? null) as TradeFrameworkResult | null,
+    explosionAssessment: (source.explosionAssessment ??
+      null) as ExplosionAssessment | null,
+    proxIntelligence: (source.proxIntelligence ??
+      null) as ProxIntelligencePacket | null,
+    strategy: source.strategy as OpportunityStrategy | undefined,
+    signalStrength: numberValue(source.signalStrength),
+    strategyScore: numberValue(source.strategyScore ?? source.opportunityScore),
+    displayedConfidence: numberValue(source.displayedConfidence ?? source.confidence),
     tier,
     eligibility: { eligible, reasons: eligibilityReasons },
-    engineVersion: raw?.engineVersion,
-    sourceRunId: raw?.sourceRunId,
+    displayEligibility: { eligible, reasons: eligibilityReasons },
+    engineVersion: source.engineVersion as string | undefined,
+    sourceRunId: source.sourceRunId as string | undefined,
   };
 }
 
@@ -170,21 +242,14 @@ export function mergeOpportunityLists(...lists: unknown[][]) {
   for (const raw of lists.flat()) {
     const opportunity = normalizeOpportunity(raw);
     if (!opportunity.ticker) continue;
-    const existing = merged.get(opportunity.ticker);
-    merged.set(
-      opportunity.ticker,
-      existing
-        ? {
-            ...existing,
-            ...opportunity,
-            opportunityScore: Math.max(
-              existing.opportunityScore,
-              opportunity.opportunityScore,
-            ),
-            isBeforeCrowd: existing.isBeforeCrowd || opportunity.isBeforeCrowd,
-          }
-        : opportunity,
-    );
+    // Lists are supplied in authority order. Preserve the first complete
+    // canonical decision for a ticker instead of spreading two strategy
+    // records together. The old merge could combine one lane's score with
+    // another lane's labels/framework and create a record that never existed
+    // in either API response.
+    if (!merged.has(opportunity.ticker)) {
+      merged.set(opportunity.ticker, opportunity);
+    }
   }
   return [...merged.values()];
 }

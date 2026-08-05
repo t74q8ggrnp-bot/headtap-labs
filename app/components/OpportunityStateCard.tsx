@@ -10,7 +10,7 @@ export default function OpportunityStateCard({
   if (loading) {
     return (
       <div
-        className={`${compact ? "mx-4 mt-4 mb-3 rounded-2xl p-6" : "rounded-[1.65rem] p-8"} border border-white/10 bg-black/40 text-center animate-pulse`}
+        className={`${compact ? "mx-4 mt-4 mb-3 rounded-2xl p-6" : "grid min-h-[clamp(420px,70vh,760px)] place-content-center rounded-[1.65rem] p-8"} border border-white/10 bg-black/40 text-center animate-pulse`}
       >
         <div className="mx-auto mb-5 h-2 w-36 rounded-full bg-white/10" />
         <div className="mx-auto mb-3 h-8 w-64 max-w-full rounded-lg bg-white/10" />

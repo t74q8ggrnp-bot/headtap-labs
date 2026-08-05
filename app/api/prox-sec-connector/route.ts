@@ -66,8 +66,7 @@ function getSupabase() {
 function isAuthorized(req: Request) {
   if (!CRON_SECRET) return false;
   const authHeader = req.headers.get("authorization");
-  const querySecret = new URL(req.url).searchParams.get("secret");
-  return authHeader === `Bearer ${CRON_SECRET}` || querySecret === CRON_SECRET || querySecret === "htlabs-internal";
+  return authHeader === `Bearer ${CRON_SECRET}`;
 }
 
 type TickerMapEntry = { cik: number; ticker: string; title: string };

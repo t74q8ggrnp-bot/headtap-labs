@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
-const FRAMEWORK_VERSION = "ctf-v3";
+const FRAMEWORK_VERSION = "ctf-v4-honest-price-discovery";
 const FEATURE_VERSION = 4;
 const CACHE_TTL_MINUTES = 45;
 // Absolute floor to compute anything at all. Below this there just isn't
@@ -34,6 +34,8 @@ export type TradeFrameworkResult = {
   volatility20d: number | null;
   upsideMin: number | null;
   upsideMax: number | null;
+  upsideModel: "resistance_based" | "price_discovery_unmodeled" | "unavailable";
+  hasKnownResistance: boolean | null;
   downsideRisk: number | null;
   rrRatio: number | null;
   magnitudeQuality: "meaningful" | "negligible" | null;
@@ -136,6 +138,7 @@ function computeNearestSupportResistance(bars: DailyBar[], currentPrice: number,
   return {
     support: round(supports[0] ?? supportFallback, 4),
     resistance: round(resistances[0] ?? resistanceFallback, 4),
+    hasKnownResistance: resistances.length > 0,
   };
 }
 
@@ -146,7 +149,7 @@ async function fetchFreshBars(ticker: string) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) return null;
   const data = await response.json();
-  const bars: DailyBar[] = (data?.results ?? []).map((row: any) => ({
+  const bars: DailyBar[] = (data?.results ?? []).map((row: Record<string, unknown>) => ({
     o: Number(row.o), h: Number(row.h), l: Number(row.l), c: Number(row.c), v: Number(row.v), t: Number(row.t),
   })).filter((bar: DailyBar) => [bar.o, bar.h, bar.l, bar.c, bar.t].every(Number.isFinite) && bar.h > 0 && bar.l > 0 && bar.c > 0);
   const newest = bars.at(-1);
@@ -179,7 +182,8 @@ function computeFramework(
       ticker, frameworkVersion: FRAMEWORK_VERSION, sessionState,
       atr14: payload.atr14 || null, support: null, resistance: null,
       volatility20d: payload.volatility20d || null,
-      upsideMin: null, upsideMax: null, downsideRisk: null, rrRatio: null,
+      upsideMin: null, upsideMax: null, upsideModel: "unavailable", hasKnownResistance: null,
+      downsideRisk: null, rrRatio: null,
       magnitudeQuality: null, absoluteMagnitudePass: null, relativeMagnitudePass: null,
       extensionRisk: null, entryQuality: null, dataQualityState: "insufficient",
       warnings: [`At least ${MIN_BARS_HARD_FLOOR} valid daily bars are required.`], hardFailures,
@@ -201,7 +205,8 @@ function computeFramework(
       ticker, frameworkVersion: FRAMEWORK_VERSION, sessionState,
       atr14: payload.atr14, support: null, resistance: null,
       volatility20d: payload.volatility20d,
-      upsideMin: null, upsideMax: null, downsideRisk: null, rrRatio: null,
+      upsideMin: null, upsideMax: null, upsideModel: "unavailable", hasKnownResistance: null,
+      downsideRisk: null, rrRatio: null,
       magnitudeQuality: null, absoluteMagnitudePass: null, relativeMagnitudePass: null,
       extensionRisk: null, entryQuality: null, dataQualityState: "failed",
       warnings: [reason], hardFailures, passedHardGate: false,
@@ -210,51 +215,73 @@ function computeFramework(
     };
   }
 
-  const { support, resistance } = computeNearestSupportResistance(payload.bars, price, payload.atr14);
+  const { support, resistance, hasKnownResistance } = computeNearestSupportResistance(
+    payload.bars,
+    price,
+    payload.atr14,
+  );
   const atrPct = (payload.atr14 / price) * 100;
   const extensionRisk = round(Math.min(100, Math.max(0, (Math.abs(changePercent) / atrPct) * 25)), 1);
-  // Confirmed live: this discount, meant to penalize chasing an already-
-  // extended move, was compounding with a SEPARATE problem for genuine
-  // continuation runners — a stock that's blown through all recent
-  // resistance already has upsideReference reduced to a generic ATR-based
-  // guess (see computeNearestSupportResistance's fallback), and this
-  // compression then shrank that already-weak number further, while
-  // downsideRisk (real support, no discount) stayed full-strength. Result:
-  // PN showed +10.92% upside against a real -24.67% downside — upside
-  // LESS than risk for a stock still up 32%+ and actively confirming,
-  // which is incoherent on its face. The "already extended" risk this
-  // discount exists to price in is already handled at the call site by
-  // requiring separate continuation confirmation (real volume, not tagged
-  // "Exhaustion Risk", momentum still strong) before this flag is ever
-  // true — applying the discount on top double-penalizes the same
-  // "extended" fact for exactly the stocks that passed that check.
   const compression = isConfirmedContinuationRunner
     ? 1
     : extensionRisk >= 75 ? 0.5 : extensionRisk >= 50 ? 0.75 : 1;
   const rawUpsidePct = Math.max(0, ((resistance - price) / price) * 100);
   const rawDownsidePct = Math.max(0, ((price - support) / price) * 100);
   const downsideRisk = round(Math.max(rawDownsidePct, atrPct * 0.3), 2);
-  // Removing compression alone wasn't enough — confirmed live: PN still came
-  // out to ~14.5% upside against a real 24.67% downside even at compression=1,
-  // because rawUpsidePct is itself capped near ~1 ATR by the fallback (no
-  // real resistance found above price) while downsideRisk can be far larger
-  // whenever a real, distant support level exists. There's no reason those
-  // two should share a scale — one is "how far to the next known ceiling,"
-  // the other is "one normal day's range." For a confirmed continuation
-  // runner specifically, we have no reliable independent ceiling estimate at
-  // all (that's the entire premise of treating it differently) — so it's
-  // more honest to assume unknown upside is AT LEAST in line with the real,
-  // measured downside than to present a number that implies less reward than
-  // risk with no data actually backing that implication.
-  const upsideReference = isConfirmedContinuationRunner
-    ? Math.max(rawUpsidePct, atrPct * 0.5, downsideRisk)
-    : Math.max(rawUpsidePct, atrPct * 0.5) * compression;
-  const upsideMin = round(upsideReference * 0.7, 2);
-  const upsideMax = round(upsideReference * 1.3, 2);
-  let rrRatio = downsideRisk > 0 ? round(upsideReference / downsideRisk, 2) : null;
+  if (downsideRisk >= 100) {
+    const reason =
+      "Volatility model implies downside at or beyond the full share price; the trade framework is invalid.";
+    warnings.push(reason);
+    hardFailures.push(reason);
+    return {
+      ticker,
+      frameworkVersion: FRAMEWORK_VERSION,
+      sessionState,
+      atr14: payload.atr14,
+      support,
+      resistance,
+      volatility20d: payload.volatility20d,
+      upsideMin: null,
+      upsideMax: null,
+      upsideModel: "unavailable",
+      hasKnownResistance,
+      downsideRisk: null,
+      rrRatio: null,
+      magnitudeQuality: null,
+      absoluteMagnitudePass: null,
+      relativeMagnitudePass: null,
+      extensionRisk,
+      entryQuality: 0,
+      dataQualityState: "failed",
+      warnings,
+      hardFailures,
+      passedHardGate: false,
+      barCount: payload.bars.length,
+      newestBarAt: payload.newestBarAt,
+      calculatedAt,
+      cacheExpiresAt,
+    };
+  }
+  // A runner above every observed resistance level is in price discovery.
+  // The ATR fallback is useful for locating a chart reference, but it is not
+  // an independently observed upside ceiling. In that state we deliberately
+  // publish no upside percentage and no R:R. In particular, upside is never
+  // floored by downside: unknown remains unknown.
+  const isUnmodeledPriceDiscovery =
+    isConfirmedContinuationRunner && !hasKnownResistance;
+  const upsideReference = isUnmodeledPriceDiscovery
+    ? null
+    : isConfirmedContinuationRunner
+      ? rawUpsidePct
+      : Math.max(rawUpsidePct, atrPct * 0.5) * compression;
+  const upsideMin = upsideReference === null ? null : round(upsideReference * 0.7, 2);
+  const upsideMax = upsideReference === null ? null : round(upsideReference * 1.3, 2);
+  let rrRatio = upsideReference !== null && downsideRisk > 0
+    ? round(upsideReference / downsideRisk, 2)
+    : null;
   if (rrRatio !== null) rrRatio = Math.min(12, rrRatio);
 
-  const absoluteMagnitudePass = upsideMax >= 5;
+  const absoluteMagnitudePass = upsideMax === null ? null : upsideMax >= 5;
   // FIXED: was `upsideMax >= atrPct` — requiring projected upside to
   // exceed the stock's ENTIRE normal daily range, not a meaningful
   // fraction of it. That rejected real opportunities like RUBI (up 32%,
@@ -263,26 +290,30 @@ function computeFramework(
   // Real, tradeable room doesn't require space for an entire additional
   // average day's move stacked on top. Half the normal range is still a
   // real, defensible bar meaningfully above the flat 5% floor.
-  const relativeMagnitudePass = upsideMax >= atrPct * 0.5;
-  const magnitudeQuality = absoluteMagnitudePass && relativeMagnitudePass ? "meaningful" : "negligible";
+  const relativeMagnitudePass = upsideMax === null ? null : upsideMax >= atrPct * 0.5;
+  const magnitudeQuality = absoluteMagnitudePass === null || relativeMagnitudePass === null
+    ? null
+    : absoluteMagnitudePass && relativeMagnitudePass ? "meaningful" : "negligible";
 
   let entryQuality = 100;
   if (extensionRisk >= 75) entryQuality -= 50;
   else if (extensionRisk >= 50) entryQuality -= 25;
   else if (extensionRisk >= 35) entryQuality -= 10;
-  if (rrRatio === null || rrRatio < 1) entryQuality -= 35;
-  else if (rrRatio < 1.5) entryQuality -= 15;
+  if (!isUnmodeledPriceDiscovery && (rrRatio === null || rrRatio < 1)) entryQuality -= 35;
+  else if (rrRatio !== null && rrRatio < 1.5) entryQuality -= 15;
   if (downsideRisk >= Math.max(15, atrPct * 3)) entryQuality -= 20;
-  if (!absoluteMagnitudePass) entryQuality -= 15;
-  if (!relativeMagnitudePass) entryQuality -= 10;
+  if (absoluteMagnitudePass === false) entryQuality -= 15;
+  if (relativeMagnitudePass === false) entryQuality -= 10;
   entryQuality = Math.max(0, Math.min(100, Math.round(entryQuality)));
 
-  if (rrRatio === null || rrRatio < 1) {
+  if (isUnmodeledPriceDiscovery) {
+    warnings.push("Price discovery: upside and R:R are not reliably modeled after the breakout.");
+  } else if (rrRatio === null || rrRatio < 1) {
     const reason = `R:R ${rrRatio ?? "unavailable"} is below the 1.0 hard floor.`;
     warnings.push(reason); hardFailures.push(reason);
   } else if (rrRatio < 1.5) warnings.push(`R:R ${rrRatio}:1 is inside the caution band.`);
-  if (!absoluteMagnitudePass) warnings.push("Projected maximum upside is below the provisional 5% absolute floor.");
-  if (!relativeMagnitudePass) warnings.push("Projected maximum upside is below half of one normal ATR range.");
+  if (absoluteMagnitudePass === false) warnings.push("Projected maximum upside is below the provisional 5% absolute floor.");
+  if (relativeMagnitudePass === false) warnings.push("Projected maximum upside is below half of one normal ATR range.");
   // Deliberately NOT pushed to hardFailures here. Upside is measured as
   // distance to the next resistance level, which is small by definition for
   // a stock that hasn't broken out yet — exactly the profile Before The
@@ -302,7 +333,10 @@ function computeFramework(
   return {
     ticker, frameworkVersion: FRAMEWORK_VERSION, sessionState,
     atr14: payload.atr14, support, resistance, volatility20d: payload.volatility20d,
-    upsideMin, upsideMax, downsideRisk, rrRatio, magnitudeQuality,
+    upsideMin, upsideMax,
+    upsideModel: isUnmodeledPriceDiscovery ? "price_discovery_unmodeled" : "resistance_based",
+    hasKnownResistance,
+    downsideRisk, rrRatio, magnitudeQuality,
     absoluteMagnitudePass, relativeMagnitudePass, extensionRisk, entryQuality,
     dataQualityState, warnings, hardFailures, passedHardGate: hardFailures.length === 0,
     barCount: payload.bars.length, newestBarAt: payload.newestBarAt,
@@ -342,7 +376,8 @@ export async function getTradeFramework(
     return {
       ticker: normalizedTicker, frameworkVersion: FRAMEWORK_VERSION, sessionState: getMarketSessionState(),
       atr14: null, support: null, resistance: null, volatility20d: null,
-      upsideMin: null, upsideMax: null, downsideRisk: null, rrRatio: null,
+      upsideMin: null, upsideMax: null, upsideModel: "unavailable", hasKnownResistance: null,
+      downsideRisk: null, rrRatio: null,
       magnitudeQuality: null, absoluteMagnitudePass: null, relativeMagnitudePass: null,
       extensionRisk: null, entryQuality: null, dataQualityState: "failed",
       warnings: ["Polygon bars fetch failed."], hardFailures: ["Canonical trade-framework data is unavailable."],

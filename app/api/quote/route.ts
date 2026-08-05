@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+  resolveSnapshotChangePercent,
+  resolveSnapshotDisplayPrice,
+} from "@/lib/polygon-snapshot";
 
 async function getPolygonQuote(symbol: string) {
   const apiKey = process.env.POLYGON_API_KEY;
@@ -9,9 +13,9 @@ async function getPolygonQuote(symbol: string) {
   const data = await res.json();
   const t = data?.ticker;
   if (!t) throw new Error(`No ticker data from Polygon for ${symbol}`);
-  const price = Number(t?.day?.c || t?.prevDay?.c || 0);
+  const price = resolveSnapshotDisplayPrice(t);
   const prevClose = Number(t?.prevDay?.c || 0);
-  const change = prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : Number(t?.todaysChangePerc || 0);
+  const change = resolveSnapshotChangePercent(t, price);
   if (!price) throw new Error(`Polygon returned no price for ${symbol}`);
   return { symbol, c: price, dp: change, pc: prevClose, high: Number(t?.day?.h || 0), low: Number(t?.day?.l || 0), open: Number(t?.day?.o || 0), volume: Number(t?.day?.v || 0), source: "polygon" };
 }
@@ -49,7 +53,7 @@ export async function GET(req: Request) {
     try { return NextResponse.json(await getPolygonQuote(symbol)); } catch {}
     try { return NextResponse.json(await getFinnhubQuote(symbol)); } catch {}
     return NextResponse.json(await getYahooQuote(symbol));
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Failed to fetch quote", c: 0, dp: 0, symbol: null, source: "error" }, { status: 500 });
   }
 }

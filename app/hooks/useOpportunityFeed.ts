@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   mergeOpportunityLists,
   normalizeOpportunity,
@@ -8,6 +8,10 @@ import {
 } from "@/lib/opportunity-model";
 
 type OpportunityPayload = { opportunities?: unknown[] };
+type CachedOpportunityList = {
+  savedAt: number;
+  opportunities: unknown[];
+};
 
 async function readOpportunities(response: Response) {
   if (!response.ok) throw new Error(`Opportunity request failed (${response.status})`);
@@ -20,6 +24,38 @@ async function readOpportunities(response: Response) {
 // ticker with no visibility into what else is close behind.
 const MOMENTUM_CONTENDER_COUNT = 6;
 const BEFORE_CROWD_COUNT = 5;
+const MOMENTUM_CACHE_KEY = "htlabs:canonical-opportunities:momentum:v2";
+const BEFORE_CROWD_CACHE_KEY = "htlabs:canonical-opportunities:before-crowd:v2";
+const MAX_CACHED_FEED_AGE_MS = 10 * 60 * 1000;
+
+function readCachedOpportunities(key: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(key) ?? "null") as CachedOpportunityList | null;
+    if (
+      !cached ||
+      !Array.isArray(cached.opportunities) ||
+      !Number.isFinite(cached.savedAt) ||
+      Date.now() - cached.savedAt > MAX_CACHED_FEED_AGE_MS
+    ) {
+      return null;
+    }
+    return cached.opportunities.map(normalizeOpportunity);
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedOpportunities(key: string, opportunities: Opportunity[]) {
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({ savedAt: Date.now(), opportunities }),
+    );
+  } catch {
+    // Storage can be unavailable in private or locked-down browser contexts.
+  }
+}
 
 export function useOpportunityFeed() {
   const [spotMomentum, setSpotMomentum] = useState<Opportunity | null>(null);
@@ -31,8 +67,11 @@ export function useOpportunityFeed() {
   // candidates (e.g. the in-page Scanner feed), not just the top picks.
   const [fullRankedList, setFullRankedList] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
+  const refreshInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     try {
       // "momentum", "catalyst", and the default ("all") request types all map
       // to the identical spot_momentum evaluation server-side (same for
@@ -41,33 +80,91 @@ export function useOpportunityFeed() {
       // ~1.6-2s-each per-ticker evaluation from scratch just to return a
       // different slice/filter of data the other calls already computed.
       // One limit=100 call per strategy carries everything below needs.
-      const [momentumRes, beforeCrowdRes] = await Promise.all([
-        fetch("/api/opportunities?limit=100"),
-        fetch("/api/opportunities?type=before_crowd&limit=100"),
+      const momentumRequest = fetch("/api/opportunities?limit=100");
+      const beforeCrowdRequest = fetch(
+        "/api/opportunities?type=before_crowd&limit=100",
+      );
+
+      const momentumTask = momentumRequest.then(readOpportunities).then((momentumList) => {
+        setSpotMomentum(momentumList[0] ?? null);
+        setSpotMomentumRunnersUp(momentumList.slice(1, MOMENTUM_CONTENDER_COUNT));
+        // Same rule the server's own type=catalyst path applied (catalystScore
+        // >= 20), against a list already ranked the same way — same result.
+        setCatalyst(momentumList.find((o) => o.catalystScore >= 20) ?? null);
+        setLoading(false);
+        writeCachedOpportunities(MOMENTUM_CACHE_KEY, momentumList);
+        return momentumList;
+      });
+
+      // Start both strategies together, but do not hold Spot Momentum hostage
+      // to the slower Before-the-Crowd evaluation.
+      const beforeCrowdTask = beforeCrowdRequest.then(readOpportunities).then((beforeCrowdList) => {
+        setBeforeCrowd(beforeCrowdList.slice(0, BEFORE_CROWD_COUNT));
+        writeCachedOpportunities(BEFORE_CROWD_CACHE_KEY, beforeCrowdList);
+        return beforeCrowdList;
+      });
+
+      const [momentumResult, beforeCrowdResult] = await Promise.allSettled([
+        momentumTask,
+        beforeCrowdTask,
       ]);
+      if (momentumResult.status === "rejected") {
+        console.warn("Momentum opportunities fetch failed:", momentumResult.reason);
+      }
+      if (beforeCrowdResult.status === "rejected") {
+        console.warn("Before-the-Crowd opportunities fetch failed:", beforeCrowdResult.reason);
+      }
 
-      const momentumList = await readOpportunities(momentumRes);
-      setSpotMomentum(momentumList[0] ?? null);
-      setSpotMomentumRunnersUp(momentumList.slice(1, MOMENTUM_CONTENDER_COUNT));
-      // Same rule the server's own type=catalyst path applied (catalystScore
-      // >= 20), against a list already ranked the same way — same result.
-      setCatalyst(momentumList.find((o) => o.catalystScore >= 20) ?? null);
-      setLoading(false);
-
-      const beforeCrowdList = await readOpportunities(beforeCrowdRes);
-      setBeforeCrowd(beforeCrowdList.slice(0, BEFORE_CROWD_COUNT));
-
+      const momentumList =
+        momentumResult.status === "fulfilled"
+          ? momentumResult.value
+          : readCachedOpportunities(MOMENTUM_CACHE_KEY) ?? [];
+      const beforeCrowdList =
+        beforeCrowdResult.status === "fulfilled"
+          ? beforeCrowdResult.value
+          : readCachedOpportunities(BEFORE_CROWD_CACHE_KEY) ?? [];
       setFullRankedList(
         mergeOpportunityLists(momentumList, beforeCrowdList)
           .sort((a, b) => b.opportunityScore - a.opportunityScore),
       );
-    } catch (error) {
-      // Preserve the last verified response during transient refresh failures.
-      console.warn("API opportunities fetch failed:", error);
     } finally {
+      refreshInFlight.current = false;
       setLoading(false);
     }
   }, []);
+
+  // Canonical decisions are page-critical data. Load them immediately when
+  // the hook mounts rather than waiting for the separate quote-board request
+  // to finish and mutate `stocks`. Refresh on the signal writer's cadence.
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      const cachedMomentum = readCachedOpportunities(MOMENTUM_CACHE_KEY);
+      const cachedBeforeCrowd = readCachedOpportunities(BEFORE_CROWD_CACHE_KEY);
+      if (cachedMomentum) {
+        setSpotMomentum(cachedMomentum[0] ?? null);
+        setSpotMomentumRunnersUp(cachedMomentum.slice(1, MOMENTUM_CONTENDER_COUNT));
+        setCatalyst(cachedMomentum.find((o) => o.catalystScore >= 20) ?? null);
+        setLoading(false);
+      }
+      if (cachedBeforeCrowd) {
+        setBeforeCrowd(cachedBeforeCrowd.slice(0, BEFORE_CROWD_COUNT));
+      }
+      if (cachedMomentum || cachedBeforeCrowd) {
+        setFullRankedList(
+          mergeOpportunityLists(cachedMomentum ?? [], cachedBeforeCrowd ?? [])
+            .sort((a, b) => b.opportunityScore - a.opportunityScore),
+        );
+      }
+      void refresh();
+    }, 0);
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 60 * 1000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
+  }, [refresh]);
 
   return {
     spotMomentum,
