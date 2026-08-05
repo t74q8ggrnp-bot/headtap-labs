@@ -28,6 +28,9 @@ const LOOKBACK_HOURS = 48; // how far back a Pro X event still counts as "recent
 const BAR_WINDOW_MINUTES = 30; // how many 1-min bars to pull per ticker
 const CONCURRENCY = 5;
 const CANONICAL_SENSOR_LIMIT = 60;
+const CANONICAL_QUALITY_LANE_LIMIT = 30;
+const CANONICAL_MOMENTUM_LANE_LIMIT = 20;
+const CANONICAL_VOLUME_LANE_LIMIT = 10;
 const MAX_SENSOR_TICKERS = 100;
 
 function getSupabase() {
@@ -90,19 +93,39 @@ async function fetchCanonicalOpportunityTickers(
     .maybeSingle();
   if (runError || !run?.id) return [];
 
-  const { data, error } = await supabase
-    .from("ht_signal_run_rows")
-    .select("ticker")
-    .eq("scan_run_id", run.id)
-    .or(
-      "retrieved_for_sm.eq.true,retrieved_for_btc.eq.true,retrieved_for_catalyst.eq.true",
-    )
-    .order("ht_score", { ascending: false })
-    .limit(CANONICAL_SENSOR_LIMIT);
-  if (error) return [];
-  return (data ?? [])
+  const baseQuery = () =>
+    supabase
+      .from("ht_signal_run_rows")
+      .select("ticker")
+      .eq("scan_run_id", run.id)
+      .or(
+        "retrieved_for_sm.eq.true,retrieved_for_btc.eq.true,retrieved_for_catalyst.eq.true",
+      );
+  const [qualityLane, momentumLane, volumeLane] = await Promise.all([
+    baseQuery()
+      .order("ht_score", { ascending: false })
+      .limit(CANONICAL_QUALITY_LANE_LIMIT),
+    baseQuery()
+      .order("momentum_score", { ascending: false })
+      .limit(CANONICAL_MOMENTUM_LANE_LIMIT),
+    baseQuery()
+      .order("relative_volume", { ascending: false })
+      .limit(CANONICAL_VOLUME_LANE_LIMIT),
+  ]);
+  if (qualityLane.error || momentumLane.error || volumeLane.error) return [];
+
+  // Pro X must observe both the safest current names and the fastest emerging
+  // names. Ranking this sensor only by HT score created a circular blind spot:
+  // explosive early movers could be penalized before Pro X ever saw their tape.
+  return [
+    ...(qualityLane.data ?? []),
+    ...(momentumLane.data ?? []),
+    ...(volumeLane.data ?? []),
+  ]
     .map((row) => String(row.ticker ?? "").toUpperCase().trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((ticker, index, tickers) => tickers.indexOf(ticker) === index)
+    .slice(0, CANONICAL_SENSOR_LIMIT);
 }
 
 type Bar = { o: number; h: number; l: number; c: number; v: number; vw: number; t: number };

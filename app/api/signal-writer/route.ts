@@ -20,7 +20,7 @@ export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v6-peak-context";
+const ENGINE_VERSION = "signal-writer-v7-fused-session-momentum";
 
 const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
 const RECLAIM_MIN_RVOL = 2;
@@ -51,6 +51,27 @@ function isAuthorized(req: Request) {
 
 const clamp = (value: number, min = 0, max = 99) => Math.min(max, Math.max(min, Math.round(value)));
 
+function getFusedMomentumMove(candidate: Candidate) {
+  const fullDayCore = clamp(Math.max(0, candidate.changePercent) * 3);
+  const hasCurrentSessionReference =
+    (candidate.scanSession === "pre_market" ||
+      candidate.scanSession === "regular") &&
+    candidate.changeFromOpenPercent !== null;
+  if (!hasCurrentSessionReference) return fullDayCore / 3;
+
+  const activeSessionCore = clamp(
+    Math.max(0, candidate.changeFromOpenPercent ?? 0) * 3,
+  );
+  const fusedCore = candidate.retrievedForReclaim
+    ? activeSessionCore
+    : Math.round(fullDayCore * 0.45 + activeSessionCore * 0.55);
+
+  // Existing writer formulas consume a percentage-like move. Converting the
+  // shared 0-99 momentum core back to that scale keeps their thresholds stable
+  // while ensuring pre-market gaps and live follow-through both contribute.
+  return fusedCore / 3;
+}
+
 function getEasternSession() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -79,16 +100,7 @@ function computeSignal(
   includeReclaimColumns: boolean,
   includePeakRetentionColumns: boolean,
 ) {
-  const hasCurrentSessionReference =
-    (candidate.scanSession === "pre_market" ||
-      candidate.scanSession === "regular") &&
-    candidate.changeFromOpenPercent !== null;
-  const move = Math.max(
-    0,
-    hasCurrentSessionReference
-      ? candidate.changeFromOpenPercent ?? 0
-      : candidate.changePercent,
-  );
+  const move = getFusedMomentumMove(candidate);
   const volumeScore = candidate.rvol > 0 ? clamp(candidate.rvol * 10) : 0;
   const momentumScore = clamp(move * 4 + (move > 0 ? 10 : 0) + Math.min(25, candidate.rvol * 6));
   const crowdScore = clamp(Math.min(40, candidate.rvol * 8) + Math.min(30, move * 2) + (move > 5 ? 10 : 0));
