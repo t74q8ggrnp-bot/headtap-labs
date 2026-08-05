@@ -18,6 +18,30 @@ alter table public.prox_market_features
   add column if not exists minutes_since_window_high real,
   add column if not exists average_bar_range_percent real;
 
+-- Some early deployments had the latest-snapshot table without migration
+-- 0005's append-only history table. Make this migration safe for both paths
+-- so peak retention does not depend on an undocumented migration order.
+create table if not exists public.prox_market_feature_history (
+  id uuid primary key default gen_random_uuid(),
+  ticker text not null,
+  price real,
+  velocity_1m real,
+  acceleration_5m real,
+  volume_1m bigint,
+  avg_volume_1m real,
+  volume_acceleration real,
+  vwap real,
+  price_vs_vwap real,
+  dollar_volume real,
+  bar_count int,
+  computed_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  unique (ticker, computed_at)
+);
+
+create index if not exists prox_market_feature_history_ticker_time_idx
+  on public.prox_market_feature_history (ticker, computed_at desc);
+
 alter table public.prox_market_feature_history
   add column if not exists window_high_price real,
   add column if not exists pullback_from_window_high_percent real,
