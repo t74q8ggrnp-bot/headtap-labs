@@ -24,6 +24,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const ACTIVE_MAX_SIGNAL_AGE_HOURS = 20 / 60;
 const CLOSED_MAX_SIGNAL_AGE_HOURS = 8;
+const ACTIVE_MAX_PROX_AGE_HOURS = 10 / 60;
 
 type HealthCheck = {
   name: string;
@@ -148,6 +149,31 @@ export async function GET() {
       } : null,
     });
 
+    const candidateCounts = (promotedRun?.candidate_counts ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const sessionSchemaReady = candidateCounts.reclaimSchemaReady === true;
+    const writerIsSessionAware = String(
+      promotedRun?.engine_version ?? "",
+    ).startsWith("signal-writer-v4-");
+    checks.push({
+      name: "session_aware_writer",
+      ok: Boolean(promotedRun) && writerIsSessionAware && sessionSchemaReady,
+      message:
+        writerIsSessionAware && sessionSchemaReady
+          ? "Session-aware writer and database fields are active."
+          : "The promoted run is not using the complete session-aware writer.",
+      detail: promotedRun
+        ? {
+            engineVersion: promotedRun.engine_version,
+            schemaReady: sessionSchemaReady,
+            marketSession: candidateCounts.marketSession ?? null,
+            reclaimCandidates: candidateCounts.retrievedForReclaim ?? null,
+          }
+        : null,
+    });
+
     let runRowCount = 0;
     const expectedRunRowCount = Number(
       (promotedRun?.candidate_counts as { runRows?: unknown } | null)?.runRows ?? 0,
@@ -183,11 +209,91 @@ export async function GET() {
             : null,
       },
     });
+
+    if (promotedRun?.id && sessionSchemaReady) {
+      const { data: sessionRows, error: sessionRowsError } = await supabase
+        .from("ht_signal_run_rows")
+        .select(
+          "ticker,price,session_open_price,change_from_open_percent,scan_session",
+        )
+        .eq("scan_run_id", promotedRun.id)
+        .not("session_open_price", "is", null)
+        .not("change_from_open_percent", "is", null)
+        .limit(25);
+      if (sessionRowsError) throw sessionRowsError;
+      const validRows = (sessionRows ?? []).filter((row) => {
+        const price = Number(row.price);
+        const open = Number(row.session_open_price);
+        const storedChange = Number(row.change_from_open_percent);
+        const calculatedChange =
+          price > 0 && open > 0 ? ((price - open) / open) * 100 : NaN;
+        return (
+          Number.isFinite(calculatedChange) &&
+          Math.abs(calculatedChange - storedChange) <= 0.05 &&
+          ["pre_market", "regular", "after_hours", "closed"].includes(
+            String(row.scan_session),
+          )
+        );
+      });
+      checks.push({
+        name: "session_data_integrity",
+        ok: validRows.length > 0 && validRows.length === sessionRows?.length,
+        message:
+          validRows.length > 0 && validRows.length === sessionRows?.length
+            ? "Stored session movement matches price and current-day open."
+            : "Stored session movement failed its arithmetic or session-label check.",
+        detail: {
+          sampled: sessionRows?.length ?? 0,
+          valid: validRows.length,
+          tickers: validRows.slice(0, 5).map((row) => row.ticker),
+        },
+      });
+    }
   } catch (err: unknown) {
     checks.push({
       name: "promoted_run_pipeline",
       ok: false,
       message: "Could not verify the authoritative run-scoped pipeline.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+
+  try {
+    const { data: proxFeature, error: proxError } = await supabase
+      .from("prox_market_features")
+      .select("ticker,computed_at")
+      .order("computed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (proxError) throw proxError;
+    const proxAge = hoursSince(proxFeature?.computed_at);
+    const proxMaxAge = isActiveMarketSession()
+      ? ACTIVE_MAX_PROX_AGE_HOURS
+      : CLOSED_MAX_SIGNAL_AGE_HOURS;
+    checks.push({
+      name: "prox_market_pulse_freshness",
+      ok: Boolean(proxFeature) && proxAge <= proxMaxAge,
+      message:
+        proxFeature && proxAge <= proxMaxAge
+          ? "ProX market pulse is fresh."
+          : "ProX market pulse is missing or stale.",
+      detail: proxFeature
+        ? {
+            ticker: proxFeature.ticker,
+            computedAt: proxFeature.computed_at,
+            ageMinutes: Number.isFinite(proxAge)
+              ? Number((proxAge * 60).toFixed(1))
+              : null,
+            maxAgeMinutes: Number((proxMaxAge * 60).toFixed(1)),
+          }
+        : null,
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_market_pulse_freshness",
+      ok: false,
+      message: "Could not verify ProX market pulse freshness.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
