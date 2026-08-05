@@ -5,7 +5,7 @@ const positiveNumber = (value: unknown) => {
 
 export type PolygonSnapshotRow = {
   ticker?: unknown;
-  day?: { o?: unknown; c?: unknown; v?: unknown };
+  day?: { o?: unknown; h?: unknown; c?: unknown; v?: unknown };
   min?: { av?: unknown; c?: unknown; t?: unknown };
   prevDay?: { c?: unknown; v?: unknown };
   lastTrade?: { p?: unknown; t?: unknown };
@@ -14,6 +14,24 @@ export type PolygonSnapshotRow = {
 
 export function resolveSnapshotSessionOpen(row: PolygonSnapshotRow): number {
   return positiveNumber(row?.day?.o) ?? 0;
+}
+
+export function resolveSnapshotSessionHigh(
+  row: PolygonSnapshotRow,
+  price: number,
+): number | null {
+  const reportedHigh = positiveNumber(row?.day?.h);
+  if (reportedHigh === null && price <= 0) return null;
+  return Math.max(reportedHigh ?? 0, price);
+}
+
+export function resolveSnapshotPullbackFromSessionHighPercent(
+  row: PolygonSnapshotRow,
+  price: number,
+): number | null {
+  const sessionHigh = resolveSnapshotSessionHigh(row, price);
+  if (sessionHigh === null || sessionHigh <= 0 || price <= 0) return null;
+  return Math.max(0, ((sessionHigh - price) / sessionHigh) * 100);
 }
 
 export function resolveSnapshotChangeFromOpenPercent(

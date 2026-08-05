@@ -12,9 +12,9 @@
 // the complete spec describes — that still needs the plan upgrade plus
 // an always-on worker, neither of which exist yet.
 //
-// Does not read from or write to any ht_* table. Its output can be attached
-// to canonical opportunities as versioned Pro X shadow context, but cannot
-// change canonical eligibility, scoring, or execution.
+// Reads canonical tickers to decide what to monitor. The resulting market
+// pulse can inform HT Labs opportunity ranking, but this route has no order
+// or execution authority.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -127,8 +127,29 @@ async function fetchMinuteBars(ticker: string): Promise<Bar[]> {
       ? ((data as { results: PolygonAggregate[] }).results)
       : [];
   const bars: Bar[] = results
-    .map((r) => ({ o: Number(r.o), h: Number(r.h), l: Number(r.l), c: Number(r.c), v: Number(r.v), vw: Number(r.vw ?? r.c), t: Number(r.t) }))
-    .filter((b: Bar) => Number.isFinite(b.c) && b.c > 0);
+    .map((r) => {
+      const close = Number(r.c);
+      const high = Number(r.h);
+      const low = Number(r.l);
+      const volume = Number(r.v);
+      const vwap = Number(r.vw);
+      return {
+        o: Number(r.o),
+        h: Number.isFinite(high) ? high : close,
+        l: Number.isFinite(low) ? low : close,
+        c: close,
+        v: Number.isFinite(volume) ? volume : 0,
+        vw: Number.isFinite(vwap) && vwap > 0 ? vwap : close,
+        t: Number(r.t),
+      };
+    })
+    .filter(
+      (bar: Bar) =>
+        Number.isFinite(bar.c) &&
+        bar.c > 0 &&
+        Number.isFinite(bar.t) &&
+        bar.t > 0,
+    );
   // Polygon returned newest-first (sort=desc) — flip to chronological order.
   return bars.reverse();
 }
@@ -146,7 +167,38 @@ function computeFeatures(ticker: string, bars: Bar[]) {
   const avgVolume1m = priorBars.length > 0 ? priorBars.reduce((sum, b) => sum + b.v, 0) / priorBars.length : last.v;
   const volumeAcceleration = avgVolume1m > 0 ? last.v / avgVolume1m : 0;
 
-  const priceVsVwap = last.vw > 0 ? ((last.c - last.vw) / last.vw) * 100 : 0;
+  const totalWindowVolume = bars.reduce((sum, bar) => sum + bar.v, 0);
+  const windowVwap =
+    totalWindowVolume > 0
+      ? bars.reduce((sum, bar) => sum + bar.vw * bar.v, 0) /
+        totalWindowVolume
+      : last.vw;
+  const priceVsVwap =
+    windowVwap > 0 ? ((last.c - windowVwap) / windowVwap) * 100 : 0;
+  const averageBarRangePercent =
+    bars.reduce(
+      (sum, bar) =>
+        sum +
+        (bar.c > 0
+          ? (Math.max(0, bar.h - bar.l) / bar.c) * 100
+          : 0),
+      0,
+    ) / bars.length;
+  const peakBar = bars.reduce(
+    (peak, bar) => (bar.h >= peak.h ? bar : peak),
+    bars[0],
+  );
+  const windowHighPrice = Number.isFinite(peakBar.h)
+    ? Math.max(peakBar.h, last.c)
+    : last.c;
+  const pullbackFromWindowHighPercent =
+    windowHighPrice > 0
+      ? Math.max(0, ((windowHighPrice - last.c) / windowHighPrice) * 100)
+      : 0;
+  const minutesSinceWindowHigh = Math.max(
+    0,
+    (last.t - peakBar.t) / 60_000,
+  );
 
   return {
     ticker,
@@ -156,12 +208,48 @@ function computeFeatures(ticker: string, bars: Bar[]) {
     volume_1m: Math.round(last.v),
     avg_volume_1m: Number(avgVolume1m.toFixed(1)),
     volume_acceleration: Number(volumeAcceleration.toFixed(2)),
-    vwap: last.vw,
+    vwap: Number(windowVwap.toFixed(4)),
     price_vs_vwap: Number(priceVsVwap.toFixed(3)),
     dollar_volume: Number((last.c * last.v).toFixed(0)),
+    window_high_price: Number(windowHighPrice.toFixed(4)),
+    pullback_from_window_high_percent: Number(
+      pullbackFromWindowHighPercent.toFixed(3),
+    ),
+    minutes_since_window_high: Number(minutesSinceWindowHigh.toFixed(1)),
+    average_bar_range_percent: Number(averageBarRangePercent.toFixed(3)),
     bar_count: bars.length,
     computed_at: new Date().toISOString(),
   };
+}
+
+function omitPeakRetentionFeatures<T extends Record<string, unknown>>(
+  features: T,
+) {
+  const {
+    window_high_price: _windowHighPrice,
+    pullback_from_window_high_percent: _pullback,
+    minutes_since_window_high: _minutesSinceHigh,
+    average_bar_range_percent: _averageBarRange,
+    ...legacyFeatures
+  } = features;
+  void _windowHighPrice;
+  void _pullback;
+  void _minutesSinceHigh;
+  void _averageBarRange;
+  return legacyFeatures;
+}
+
+async function supportsPeakRetentionColumns(
+  supabase: ReturnType<typeof getSupabase>,
+  table: "prox_market_features" | "prox_market_feature_history",
+) {
+  const { error } = await supabase
+    .from(table)
+    .select(
+      "window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent",
+    )
+    .limit(1);
+  return !error;
 }
 
 export async function GET(req: Request) {
@@ -175,12 +263,25 @@ export async function GET(req: Request) {
     computed: 0,
     historyPersisted: 0,
     historyUnavailable: null as string | null,
+    peakRetentionSchemaReady: false,
+    peakRetentionHistorySchemaReady: false,
     skippedNoBars: 0,
     errors: 0,
   };
 
   try {
     const supabase = getSupabase();
+    const [peakRetentionSchemaReady, peakRetentionHistorySchemaReady] =
+      await Promise.all([
+        supportsPeakRetentionColumns(supabase, "prox_market_features"),
+        supportsPeakRetentionColumns(
+          supabase,
+          "prox_market_feature_history",
+        ),
+      ]);
+    diagnostics.peakRetentionSchemaReady = peakRetentionSchemaReady;
+    diagnostics.peakRetentionHistorySchemaReady =
+      peakRetentionHistorySchemaReady;
     const [eventTickers, canonicalTickers] = await Promise.all([
       fetchRecentEventTickers(supabase),
       fetchCanonicalOpportunityTickers(supabase),
@@ -212,7 +313,12 @@ export async function GET(req: Request) {
           diagnostics.skippedNoBars++;
           continue;
         }
-        const { error } = await supabase.from("prox_market_features").upsert(features, { onConflict: "ticker" });
+        const latestFeatures = peakRetentionSchemaReady
+          ? features
+          : omitPeakRetentionFeatures(features);
+        const { error } = await supabase
+          .from("prox_market_features")
+          .upsert(latestFeatures, { onConflict: "ticker" });
         if (error) {
           diagnostics.errors++;
           continue;
@@ -226,10 +332,15 @@ export async function GET(req: Request) {
         if (!diagnostics.historyUnavailable) {
           const { error: historyError } = await supabase
             .from("prox_market_feature_history")
-            .upsert(features, {
+            .upsert(
+              peakRetentionHistorySchemaReady
+                ? features
+                : omitPeakRetentionFeatures(features),
+              {
               onConflict: "ticker,computed_at",
               ignoreDuplicates: true,
-            });
+              },
+            );
           if (historyError) {
             diagnostics.historyUnavailable = historyError.message;
           } else {

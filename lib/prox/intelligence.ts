@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProxCatalystCategory, ProxVerificationState } from "@/lib/prox/types";
 
-export const PROX_INTELLIGENCE_VERSION = "prox-intelligence-v1-shadow";
+export const PROX_INTELLIGENCE_VERSION = "prox-intelligence-v2-peak-retention";
 export const PROX_PACKET_MODE = "shadow" as const;
 
 const EVENT_LOOKBACK_HOURS = 72;
@@ -77,6 +77,12 @@ export type ProxIntelligencePacket = {
     volumeAcceleration: number | null;
     priceVsVwap: number | null;
     dollarVolume: number | null;
+    windowHighPrice: number | null;
+    pullbackFromWindowHighPercent: number | null;
+    minutesSinceWindowHigh: number | null;
+    averageBarRangePercent: number | null;
+    peakFailureThresholdPercent: number;
+    peakFailureConfirmed: boolean;
     state: "expanding" | "stable" | "weakening" | "stale";
   } | null;
   scores: {
@@ -132,6 +138,10 @@ type MarketFeatureRow = {
   volume_acceleration?: unknown;
   price_vs_vwap?: unknown;
   dollar_volume?: unknown;
+  window_high_price?: unknown;
+  pullback_from_window_high_percent?: unknown;
+  minutes_since_window_high?: unknown;
+  average_bar_range_percent?: unknown;
   computed_at?: unknown;
 };
 
@@ -256,6 +266,16 @@ function buildPacket(args: {
   const acceleration5m = finiteNumber(market?.acceleration_5m);
   const volumeAcceleration = finiteNumber(market?.volume_acceleration);
   const priceVsVwap = finiteNumber(market?.price_vs_vwap);
+  const windowHighPrice = finiteNumber(market?.window_high_price);
+  const pullbackFromWindowHighPercent = finiteNumber(
+    market?.pullback_from_window_high_percent,
+  );
+  const minutesSinceWindowHigh = finiteNumber(
+    market?.minutes_since_window_high,
+  );
+  const averageBarRangePercent = finiteNumber(
+    market?.average_bar_range_percent,
+  );
   const pulseFresh =
     pulseAgeMinutes !== null && pulseAgeMinutes <= PULSE_FRESH_MINUTES;
   const pulseStale =
@@ -289,6 +309,27 @@ function buildPacket(args: {
           contradictions * 20,
       )
     : 0;
+  const peakFailureEvidence = [
+    (velocity1m ?? 0) <= -0.75,
+    (acceleration5m ?? 0) <= -1.5,
+    (priceVsVwap ?? 0) <= -0.75,
+    (volumeAcceleration ?? 0) >= 1.1 && (velocity1m ?? 0) < 0,
+  ].filter(Boolean).length;
+  const peakFailureThresholdPercent = clamp(
+    Math.max(6, (averageBarRangePercent ?? 0) * 2.5),
+    6,
+    15,
+  );
+  const peakFailureConfirmed = Boolean(
+    pulseFresh &&
+      (pullbackFromWindowHighPercent ?? 0) >=
+        peakFailureThresholdPercent &&
+      (minutesSinceWindowHigh ?? 0) >= 3 &&
+      peakFailureEvidence >= 2,
+  );
+  const peakFailurePenalty = peakFailureConfirmed
+    ? clamp(((pullbackFromWindowHighPercent ?? 0) - 4) * 4, 0, 35)
+    : 0;
   const marketConfirmation =
     pulseAgeMinutes !== null && !pulseStale
       ? clamp(
@@ -296,7 +337,8 @@ function buildPacket(args: {
             (velocity1m ?? 0) * 8 +
             (acceleration5m ?? 0) * 4 +
             ((volumeAcceleration ?? 1) - 1) * 10 +
-            (priceVsVwap ?? 0) * 3,
+            (priceVsVwap ?? 0) * 3 -
+            peakFailurePenalty,
         )
       : 0;
   const composite = recentEvent
@@ -319,6 +361,14 @@ function buildPacket(args: {
   if ((volumeAcceleration ?? 0) >= 2) supportFlags.push("volume_accelerating");
   if ((priceVsVwap ?? 0) > 0) supportFlags.push("price_above_vwap");
   if ((acceleration5m ?? 0) >= 2) supportFlags.push("positive_5m_acceleration");
+  if ((pullbackFromWindowHighPercent ?? 100) <= 2) {
+    supportFlags.push("holding_near_window_high");
+  } else if (
+    (acceleration5m ?? 0) >= 1 &&
+    (priceVsVwap ?? 0) >= 0
+  ) {
+    supportFlags.push("pullback_recovering");
+  }
 
   if (verificationState === "contradicted" || contradictions > 0) {
     riskFlags.push("contradictory_evidence");
@@ -332,6 +382,13 @@ function buildPacket(args: {
   if ((velocity1m ?? 0) <= -4) riskFlags.push("rapid_1m_breakdown");
   if ((acceleration5m ?? 0) <= -6) riskFlags.push("negative_5m_acceleration");
   if ((priceVsVwap ?? 0) <= -3) riskFlags.push("price_below_vwap");
+  if (peakFailureConfirmed) {
+    riskFlags.push(
+      (pullbackFromWindowHighPercent ?? 0) >= 10
+        ? "post_peak_breakdown"
+        : "post_peak_weakness",
+    );
+  }
 
   const wouldVeto =
     recentEvent &&
@@ -364,7 +421,9 @@ function buildPacket(args: {
   const pulseState =
     pulseStale
       ? "stale"
-      : marketConfirmation >= 65
+      : peakFailureConfirmed
+        ? "weakening"
+        : marketConfirmation >= 65
         ? "expanding"
         : marketConfirmation < 40
           ? "weakening"
@@ -418,6 +477,14 @@ function buildPacket(args: {
           volumeAcceleration,
           priceVsVwap,
           dollarVolume: finiteNumber(market.dollar_volume),
+          windowHighPrice,
+          pullbackFromWindowHighPercent,
+          minutesSinceWindowHigh,
+          averageBarRangePercent,
+          peakFailureThresholdPercent: round(
+            peakFailureThresholdPercent,
+          ),
+          peakFailureConfirmed,
           state: pulseState,
         }
       : null,
@@ -454,7 +521,7 @@ function buildPacket(args: {
             : marketConfirmation < 40 && recentEvent
               ? "defensive"
               : "neutral",
-        reason: "One-minute velocity, five-minute acceleration, volume acceleration, and VWAP relationship across the active session.",
+        reason: "One-minute velocity, five-minute acceleration, volume behavior, VWAP, and confirmed post-peak deterioration across the active session.",
       },
       {
         factor: "contradiction_risk",
@@ -561,12 +628,26 @@ export async function loadProxIntelligencePackets(
       }
     }
 
-    const { data: marketData, error: marketError } = await supabase
+    const expandedMarketResult = await supabase
       .from("prox_market_features")
       .select(
-        "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,price_vs_vwap,dollar_volume,computed_at",
+        "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,price_vs_vwap,dollar_volume,window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent,computed_at",
       )
       .in("ticker", tickers);
+    const legacyMarketResult = expandedMarketResult.error
+      ? await supabase
+          .from("prox_market_features")
+          .select(
+            "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,price_vs_vwap,dollar_volume,computed_at",
+          )
+          .in("ticker", tickers)
+      : null;
+    const marketData = expandedMarketResult.error
+      ? legacyMarketResult?.data
+      : expandedMarketResult.data;
+    const marketError = expandedMarketResult.error
+      ? legacyMarketResult?.error
+      : null;
     const marketByTicker = new Map<string, MarketFeatureRow>();
     if (!marketError) {
       for (const row of (marketData ?? []) as MarketFeatureRow[]) {

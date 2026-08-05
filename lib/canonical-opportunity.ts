@@ -4,7 +4,7 @@ import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 import { isSupportedType } from "@/lib/security-type-policy";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v7-active-momentum";
+  "opportunities-v8-peak-retention";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -37,6 +37,8 @@ export type SignalRow = {
   retrieved_for_catalyst?: boolean | null;
   session_open_price?: number | string | null;
   change_from_open_percent?: number | string | null;
+  session_high_price?: number | string | null;
+  pullback_from_session_high_percent?: number | string | null;
   scan_session?: string | null;
   retrieved_for_reclaim?: boolean | null;
   security_type?: string | null;
@@ -49,6 +51,8 @@ export type OpportunityCandidate = {
   change: number;
   sessionOpenPrice: number | null;
   changeFromOpenPercent: number | null;
+  sessionHighPrice: number | null;
+  pullbackFromSessionHighPercent: number | null;
   scanSession: string;
   relativeVolume: number;
   avgVolume: number;
@@ -125,6 +129,15 @@ export function mapSignalRow(row: SignalRow | Record<string, unknown>): Opportun
       row.change_from_open_percent === undefined
         ? null
         : num(row.change_from_open_percent),
+    sessionHighPrice:
+      row.session_high_price === null || row.session_high_price === undefined
+        ? null
+        : num(row.session_high_price),
+    pullbackFromSessionHighPercent:
+      row.pullback_from_session_high_percent === null ||
+      row.pullback_from_session_high_percent === undefined
+        ? null
+        : Math.max(0, num(row.pullback_from_session_high_percent)),
     scanSession: String(row.scan_session ?? "unknown"),
     relativeVolume: num(row.relative_volume, 1),
     avgVolume: num(row.avg_volume),
@@ -259,9 +272,12 @@ function buildExplosionAssessment(
   eligible: boolean,
   strategy: OpportunityStrategy,
   forcePriceDiscovery = false,
+  continuationConfirmed?: boolean,
 ): ExplosionAssessment {
   const momentumReferenceChange = getMomentumReferenceChange(candidate);
-  const confirmed = isConfirmedContinuationRunner(candidate, strategy);
+  const confirmed =
+    continuationConfirmed ??
+    isConfirmedContinuationRunner(candidate, strategy);
   const extreme = isExtremeMomentum(candidate, strategy);
   const state: ExplosionAssessment["state"] =
     confirmed &&
@@ -443,7 +459,30 @@ export function evaluateCanonicalOpportunity(
 ) {
   const sessionReclaim = isSessionReclaim(candidate);
   const momentumReferenceChange = getMomentumReferenceChange(candidate);
-  const confirmedRunner = isConfirmedContinuationRunner(candidate, strategy);
+  const rawConfirmedRunner = isConfirmedContinuationRunner(candidate, strategy);
+  const pulse = proxIntelligence?.pulse;
+  const sessionPeakPullback = candidate.pullbackFromSessionHighPercent;
+  const livePeakFailureEvidence = [
+    (pulse?.velocity1m ?? 0) <= -0.75,
+    (pulse?.acceleration5m ?? 0) <= -1.5,
+    (pulse?.priceVsVwap ?? 0) <= -0.75,
+    (pulse?.volumeAcceleration ?? 0) >= 1.1 &&
+      (pulse?.velocity1m ?? 0) < 0,
+  ].filter(Boolean).length;
+  const peakFailureConfirmed = Boolean(
+    pulse?.fresh === true &&
+      (pulse.peakFailureConfirmed ||
+        ((sessionPeakPullback ?? 0) >=
+          pulse.peakFailureThresholdPercent &&
+          livePeakFailureEvidence >= 2)),
+  );
+  const recentPeakPullback =
+    pulse?.pullbackFromWindowHighPercent ?? null;
+  const observedPeakPullback = Math.max(
+    sessionPeakPullback ?? 0,
+    recentPeakPullback ?? 0,
+  );
+  const confirmedRunner = rawConfirmedRunner && !peakFailureConfirmed;
   const extremeMomentum = isExtremeMomentum(candidate, strategy);
   // Price discovery already avoids creating an R:R hard failure when upside
   // is genuinely unmodeled. Any hard failure that does exist is therefore
@@ -588,6 +627,7 @@ export function evaluateCanonicalOpportunity(
     eligible,
     strategy,
     priceDiscoveryVisibilityOverride,
+    confirmedRunner,
   );
   const tradeQuality =
     framework.rrRatio === null
@@ -626,7 +666,9 @@ export function evaluateCanonicalOpportunity(
       ? proxIntelligence.scores.marketConfirmation
       : null;
   const proxMarketAdjustment =
-    proxMarketConfirmation === null
+    peakFailureConfirmed
+      ? -Math.min(30, 15 + Math.round(observedPeakPullback))
+      : proxMarketConfirmation === null
       ? isActiveMarketSession()
         ? -8
         : 0
@@ -646,8 +688,9 @@ export function evaluateCanonicalOpportunity(
     !isActiveMarketSession() ||
     (proxIntelligence?.pulse?.fresh === true &&
       proxMarketConfirmation !== null &&
-      proxMarketConfirmation >= 55);
-  const tier = sessionReclaimVisibilityOverride
+      proxMarketConfirmation >= 55 &&
+      !peakFailureConfirmed);
+  const tier = sessionReclaimVisibilityOverride || peakFailureConfirmed
     ? "watch"
     : displayEligible &&
     strategyScore >= 80 &&
@@ -663,6 +706,7 @@ export function evaluateCanonicalOpportunity(
   if (momentumReferenceChange >= 50) riskTags.push("Parabolic Move");
   else if (extremeMomentum) riskTags.push("Extreme Momentum");
   if (sessionReclaim) riskTags.push("Reclaiming Prior Close");
+  if (peakFailureConfirmed) riskTags.push("Post-Peak Weakness");
   if ((framework.extensionRisk ?? 0) >= 75) {
     riskTags.push("Extended — Chasing Risk");
   }
@@ -714,9 +758,14 @@ export function evaluateCanonicalOpportunity(
           ]
         : []),
     ...(isBeforeCrowd ? ["Before crowd saturation"] : []),
+    ...(peakFailureConfirmed
+      ? ["ProX detects confirmed post-peak deterioration"]
+      : []),
   ];
   const whyItMatters =
-    sessionReclaim
+    peakFailureConfirmed
+      ? `${candidate.ticker} remains on the momentum radar, but ProX currently sees a failed continuation rather than a strong chase entry.`
+      : sessionReclaim
       ? `${candidate.ticker} has a verified session reclaim. HT combined the current-session move, full-session context, volume, risk${proxIntelligence?.pulse?.fresh ? ", and live ProX pulse" : ""} into this single Spot Momentum decision.`
       : explosionAssessment.state === "price_discovery"
       ? priceDiscoveryVisibilityOverride
@@ -726,7 +775,9 @@ export function evaluateCanonicalOpportunity(
         ? `${candidate.ticker} currently qualifies for ${strategy === "spot_momentum" ? "Spot Momentum" : "Before The Crowd"} evaluation with a ${tier} tier.`
         : `${candidate.ticker} has an active signal, but it does not currently pass the full opportunity gate.`;
   const whatChanged =
-    sessionReclaim
+    peakFailureConfirmed
+      ? "The pullback from the recent high is now accompanied by weakening price structure, not merely distance from the high."
+      : sessionReclaim
       ? `Price recovered from the current-day open with ${candidate.relativeVolume.toFixed(1)}x relative volume.`
       : candidate.catalystScore >= 20 && candidate.state
       ? `${candidate.state} is active in the signal stack.`
@@ -736,7 +787,9 @@ export function evaluateCanonicalOpportunity(
           ? `Price momentum is up ${momentumReferenceChange.toFixed(1)}% with positive participation.`
           : "No verified positive momentum change is currently available.";
   const riskNote =
-    (sessionReclaimVisibilityOverride
+    (peakFailureConfirmed
+      ? "Price is below its recent peak and the live tape confirms deterioration through acceleration, VWAP, time, or selling-volume evidence. HT will wait for a real reclaim before restoring conviction."
+      : sessionReclaimVisibilityOverride
       ? "The rebound is verified, but the conventional trade framework remains weak; HT is showing it as a research watch, not a trade-ready conviction."
       : priceDiscoveryVisibilityOverride
       ? "Live momentum is confirmed, but the completed daily history cannot provide a reliable upside, downside, or resistance framework for this move."
@@ -744,7 +797,9 @@ export function evaluateCanonicalOpportunity(
     framework.warnings[0] ||
     "Momentum and volume must continue to hold. Entry timing still matters.";
   const stage =
-    sessionReclaim
+    peakFailureConfirmed
+      ? "Post-Peak Weakness"
+      : sessionReclaim
       ? candidate.scanSession === "pre_market"
         ? "Pre-Market Reclaim"
         : "Intraday Reclaim"
@@ -809,6 +864,11 @@ export function evaluateCanonicalOpportunity(
     scoreContext: {
       sessionAlignmentAdjustment,
       proxMarketAdjustment,
+      peakFailureConfirmed,
+      sessionPeakPullbackPercent:
+        sessionPeakPullback,
+      recentPeakPullbackPercent:
+        recentPeakPullback,
     },
     continuationEligible: explosionAssessment.paperEntryEligible,
     opportunityType,

@@ -154,9 +154,11 @@ export async function GET() {
       unknown
     >;
     const sessionSchemaReady = candidateCounts.reclaimSchemaReady === true;
+    const peakRetentionSchemaReady =
+      candidateCounts.peakRetentionSchemaReady === true;
     const writerIsSessionAware = String(
       promotedRun?.engine_version ?? "",
-    ).startsWith("signal-writer-v5-");
+    ).match(/^signal-writer-v(?:5|6)-/) !== null;
     checks.push({
       name: "session_aware_writer",
       ok: Boolean(promotedRun) && writerIsSessionAware && sessionSchemaReady,
@@ -249,6 +251,50 @@ export async function GET() {
         },
       });
     }
+
+    if (promotedRun?.id && peakRetentionSchemaReady) {
+      const { data: peakRows, error: peakRowsError } = await supabase
+        .from("ht_signal_run_rows")
+        .select(
+          "ticker,price,session_high_price,pullback_from_session_high_percent",
+        )
+        .eq("scan_run_id", promotedRun.id)
+        .not("session_high_price", "is", null)
+        .not("pullback_from_session_high_percent", "is", null)
+        .limit(25);
+      if (peakRowsError) throw peakRowsError;
+      const validPeakRows = (peakRows ?? []).filter((row) => {
+        const price = Number(row.price);
+        const high = Number(row.session_high_price);
+        const storedPullback = Number(
+          row.pullback_from_session_high_percent,
+        );
+        const calculatedPullback =
+          price > 0 && high >= price
+            ? Math.max(0, ((high - price) / high) * 100)
+            : NaN;
+        return (
+          Number.isFinite(calculatedPullback) &&
+          Math.abs(calculatedPullback - storedPullback) <= 0.05
+        );
+      });
+      checks.push({
+        name: "peak_retention_data_integrity",
+        ok:
+          validPeakRows.length > 0 &&
+          validPeakRows.length === peakRows?.length,
+        message:
+          validPeakRows.length > 0 &&
+          validPeakRows.length === peakRows?.length
+            ? "Session-high context is present and arithmetically valid."
+            : "Session-high context failed its arithmetic check.",
+        detail: {
+          sampled: peakRows?.length ?? 0,
+          valid: validPeakRows.length,
+          tickers: validPeakRows.slice(0, 5).map((row) => row.ticker),
+        },
+      });
+    }
   } catch (err: unknown) {
     checks.push({
       name: "promoted_run_pipeline",
@@ -260,12 +306,28 @@ export async function GET() {
 
 
   try {
-    const { data: proxFeature, error: proxError } = await supabase
+    const expandedProxResult = await supabase
       .from("prox_market_features")
-      .select("ticker,computed_at")
+      .select(
+        "ticker,computed_at,window_high_price,pullback_from_window_high_percent,minutes_since_window_high",
+      )
       .order("computed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    const legacyProxResult = expandedProxResult.error
+      ? await supabase
+          .from("prox_market_features")
+          .select("ticker,computed_at")
+          .order("computed_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : null;
+    const proxFeature = expandedProxResult.error
+      ? legacyProxResult?.data
+      : expandedProxResult.data;
+    const proxError = expandedProxResult.error
+      ? legacyProxResult?.error
+      : null;
     if (proxError) throw proxError;
     const proxAge = hoursSince(proxFeature?.computed_at);
     const proxMaxAge = isActiveMarketSession()
@@ -286,6 +348,18 @@ export async function GET() {
               ? Number((proxAge * 60).toFixed(1))
               : null,
             maxAgeMinutes: Number((proxMaxAge * 60).toFixed(1)),
+            windowHighPrice:
+              "window_high_price" in proxFeature
+                ? proxFeature.window_high_price
+                : null,
+            pullbackFromWindowHighPercent:
+              "pullback_from_window_high_percent" in proxFeature
+                ? proxFeature.pullback_from_window_high_percent
+                : null,
+            minutesSinceWindowHigh:
+              "minutes_since_window_high" in proxFeature
+                ? proxFeature.minutes_since_window_high
+                : null,
           }
         : null,
     });

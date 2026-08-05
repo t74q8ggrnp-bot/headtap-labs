@@ -13,6 +13,8 @@ export type Opportunity = {
   previousCloseChange?: number;
   sessionOpenPrice?: number | null;
   changeFromOpenPercent?: number | null;
+  sessionHighPrice?: number | null;
+  pullbackFromSessionHighPercent?: number | null;
   scanSession?: string;
   setupType?: "standard" | "session_reclaim";
   opportunityType: string;
@@ -148,6 +150,23 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
         : numberValue(
             source.changeFromOpenPercent ??
               source.change_from_open_percent,
+          ),
+    sessionHighPrice:
+      source.sessionHighPrice === null ||
+      source.session_high_price === null ||
+      (source.sessionHighPrice === undefined &&
+        source.session_high_price === undefined)
+        ? null
+        : numberValue(source.sessionHighPrice ?? source.session_high_price),
+    pullbackFromSessionHighPercent:
+      source.pullbackFromSessionHighPercent === null ||
+      source.pullback_from_session_high_percent === null ||
+      (source.pullbackFromSessionHighPercent === undefined &&
+        source.pullback_from_session_high_percent === undefined)
+        ? null
+        : numberValue(
+            source.pullbackFromSessionHighPercent ??
+              source.pullback_from_session_high_percent,
           ),
     scanSession: String(source.scanSession ?? source.scan_session ?? "unknown"),
     setupType:

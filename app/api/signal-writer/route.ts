@@ -5,7 +5,9 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangeFromOpenPercent,
   resolveSnapshotChangePercent,
+  resolveSnapshotPullbackFromSessionHighPercent,
   resolveSnapshotPrice,
+  resolveSnapshotSessionHigh,
   resolveSnapshotSessionOpen,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
@@ -18,7 +20,7 @@ export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v5-active-session-momentum";
+const ENGINE_VERSION = "signal-writer-v6-peak-context";
 
 const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
 const RECLAIM_MIN_RVOL = 2;
@@ -27,6 +29,7 @@ const RECLAIM_MIN_DOLLAR_VOLUME = 500_000;
 type Candidate = {
   ticker: string; price: number; changePercent: number; rvol: number; prevVol: number;
   sessionOpenPrice: number | null; changeFromOpenPercent: number | null;
+  sessionHighPrice: number | null; pullbackFromSessionHighPercent: number | null;
   scanSession: string;
   securityType: string | null; retrievedForSm: boolean; retrievedForBtc: boolean;
   retrievedForReclaim: boolean;
@@ -74,6 +77,7 @@ function computeSignal(
   candidate: Candidate,
   pool: "spot_momentum" | "before_the_crowd",
   includeReclaimColumns: boolean,
+  includePeakRetentionColumns: boolean,
 ) {
   const hasCurrentSessionReference =
     (candidate.scanSession === "pre_market" ||
@@ -151,10 +155,34 @@ function computeSignal(
           change_from_open_percent: candidate.changeFromOpenPercent,
           scan_session: candidate.scanSession,
           retrieved_for_reclaim: candidate.retrievedForReclaim,
+      }
+      : {}),
+    ...(includePeakRetentionColumns
+      ? {
+          session_high_price: candidate.sessionHighPrice,
+          pullback_from_session_high_percent:
+            candidate.pullbackFromSessionHighPercent,
         }
       : {}),
     scanned_at: new Date().toISOString(), _oppScore: oppScore, _pool: pool,
   };
+}
+
+async function supportsPeakRetentionColumns(
+  supabase: ReturnType<typeof getSupabase>,
+) {
+  const { error } = await supabase
+    .from("ht_signal_run_rows")
+    .select("session_high_price,pullback_from_session_high_percent")
+    .limit(1);
+  if (error) {
+    console.warn(
+      "[signal-writer] peak-retention migration is not active; continuing without the new context:",
+      error.message,
+    );
+    return false;
+  }
+  return true;
 }
 
 async function supportsIntradayReclaimColumns(
@@ -208,6 +236,7 @@ export async function GET(req: Request) {
   try {
     const catalystMap = await readActiveCatalysts(supabase);
     const reclaimSchemaReady = await supportsIntradayReclaimColumns(supabase);
+    const peakRetentionSchemaReady = await supportsPeakRetentionColumns(supabase);
     const marketSession = getEasternSession();
     const response = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`Polygon snapshot failed: ${response.status}`);
@@ -222,8 +251,11 @@ export async function GET(req: Request) {
       const price = resolveSnapshotPrice(row);
       const changePercent = resolveSnapshotChangePercent(row, price);
       const sessionOpenPrice = resolveSnapshotSessionOpen(row);
+      const sessionHighPrice = resolveSnapshotSessionHigh(row, price);
       const changeFromOpenPercent =
         resolveSnapshotChangeFromOpenPercent(row, price);
+      const pullbackFromSessionHighPercent =
+        resolveSnapshotPullbackFromSessionHighPercent(row, price);
       const currentVolume = Math.max(Number(row?.day?.v || 0), Number(row?.min?.av || 0));
       const previousVolume = Number(row?.prevDay?.v || 0);
       if (price <= 0 || previousVolume < 10_000) continue;
@@ -260,6 +292,8 @@ export async function GET(req: Request) {
       candidates.set(ticker, {
         ticker, price, changePercent, rvol, prevVol: previousVolume,
         sessionOpenPrice: sessionOpenPrice > 0 ? sessionOpenPrice : null,
+        sessionHighPrice,
+        pullbackFromSessionHighPercent,
         changeFromOpenPercent, scanSession: marketSession.name,
         securityType: null,
         retrievedForSm, retrievedForBtc, retrievedForReclaim,
@@ -294,6 +328,7 @@ export async function GET(req: Request) {
         candidate,
         candidate.retrievedForSm ? "spot_momentum" : "before_the_crowd",
         reclaimSchemaReady,
+        peakRetentionSchemaReady,
       ),
       scan_run_id: run.id,
     }));
@@ -318,7 +353,7 @@ export async function GET(req: Request) {
     }
 
     const compatibility = [...rows].sort((a, b) => b._oppScore - a._oppScore).slice(0, 100)
-      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, session_open_price, change_from_open_percent, scan_session, retrieved_for_reclaim, _oppScore, _pool, ...row }) => {
+      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, session_open_price, change_from_open_percent, scan_session, retrieved_for_reclaim, session_high_price, pullback_from_session_high_percent, _oppScore, _pool, ...row }) => {
         void scan_run_id;
         void security_type;
         void retrieved_for_sm;
@@ -328,6 +363,8 @@ export async function GET(req: Request) {
         void change_from_open_percent;
         void scan_session;
         void retrieved_for_reclaim;
+        void session_high_price;
+        void pullback_from_session_high_percent;
         void _oppScore;
         void _pool;
         return row;
@@ -346,6 +383,7 @@ export async function GET(req: Request) {
         retrievedForReclaim: rows.filter((r) => r.retrieved_for_reclaim).length,
         retrievedForCatalyst: rows.filter((r) => r.retrieved_for_catalyst).length,
         reclaimSchemaReady,
+        peakRetentionSchemaReady,
         securityMetadataCacheHits: metadata.cacheHits,
         securityMetadataFetched: metadata.fetched,
         securityMetadataFetchFailures: metadata.fetchFailures,
