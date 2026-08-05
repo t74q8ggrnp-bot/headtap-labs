@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getErrorMessage } from "@/lib/error-message";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 
@@ -80,9 +81,9 @@ export async function GET(request: Request) {
     const res = await fetch(url, { next: { revalidate: 3600 } }); // cache 1hr
     if (!res.ok) throw new Error(`Polygon bars ${res.status}`);
 
-    const data = await res.json();
+    const data = (await res.json()) as { results?: Array<{ o: number; h: number; l: number; c: number; v: number }> };
     const bars: { o: number; h: number; l: number; c: number; v: number }[] =
-      (data.results || []).map((r: any) => ({
+      (data.results || []).map((r) => ({
         o: r.o,
         h: r.h,
         l: r.l,
@@ -120,8 +121,9 @@ export async function GET(request: Request) {
       barCount: bars.length,
       computedAt: new Date().toISOString(),
     });
-  } catch (err: any) {
-    console.error(`[trade-framework] ${ticker}:`, err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = getErrorMessage(err, "Trade framework request failed");
+    console.error(`[trade-framework] ${ticker}:`, message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

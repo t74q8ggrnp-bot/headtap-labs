@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 
 const TOP_TICKERS = [
   "NVDA", "PLTR", "TSLA", "AAPL", "AMD", "MSFT", "MSTR", "HOOD",
@@ -104,7 +105,7 @@ export default function NewsPage() {
         {/* Header */}
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <a href="/" className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 transition">← Dashboard</a>
+            <Link href="/" className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 transition">← Dashboard</Link>
             <h1 className="mt-3 text-3xl font-black tracking-tight">News Intel</h1>
             <p className="mt-1 text-sm text-zinc-500">Live news velocity, catalyst strength, and narrative signals across the market.</p>
             {lastUpdated && (

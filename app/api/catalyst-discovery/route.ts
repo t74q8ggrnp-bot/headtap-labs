@@ -24,10 +24,41 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
+const CRON_SECRET = process.env.CRON_SECRET;
 const LOCK_NAME = "catalyst_discovery";
 const CURSOR_NAME = "catalyst_news_discovery";
 const LEASE_MINUTES = 10;
 const NEWS_LOOKBACK_HOURS = 3;
+
+type PolygonNewsArticle = {
+  id?: string;
+  article_url?: string;
+  title?: string;
+  description?: string;
+  tickers?: string[];
+  published_utc?: string;
+};
+
+type PolygonNewsResponse = {
+  results?: PolygonNewsArticle[];
+  count?: number;
+  request_id?: string;
+  next_url?: string;
+  error?: string;
+  message?: string;
+  status?: string;
+};
+
+type CatalystRow = {
+  article_id: string;
+  ticker: string;
+  category: string;
+  score: number;
+  published_at: string | null;
+  last_seen_at: string;
+  source: "polygon_news";
+  decay_state: "active";
+};
 
 const CATALYST_KEYWORDS = [
   {
@@ -81,9 +112,8 @@ function getSupabase() {
 }
 
 function isAuthorized(req: Request): boolean {
-  const { searchParams } = new URL(req.url);
-  const secret = searchParams.get("secret");
-  return secret === process.env.CRON_SECRET || secret === "htlabs-internal";
+  if (!CRON_SECRET) return false;
+  return req.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
 }
 
 export async function GET(req: Request) {
@@ -161,7 +191,7 @@ export async function GET(req: Request) {
     const res = await fetch(polygonUrl, { cache: "no-store", headers: { Accept: "application/json" } });
     const rawText = await res.text();
 
-    let data: any;
+    let data: PolygonNewsResponse;
     try {
       data = rawText ? JSON.parse(rawText) : {};
     } catch {
@@ -169,16 +199,16 @@ export async function GET(req: Request) {
     }
 
     if (!res.ok) {
-      const polygonMessage = data?.error || data?.message || data?.status || "Unknown Polygon error";
+      const polygonMessage = data.error || data.message || data.status || "Unknown Polygon error";
       throw new Error(`Polygon news request failed (${res.status}): ${polygonMessage}`);
     }
 
-    if (!Array.isArray(data?.results)) {
+    if (!Array.isArray(data.results)) {
       throw new Error(`Unexpected Polygon news response: ${JSON.stringify(data).slice(0, 500)}`);
     }
 
     const articles = data.results;
-    const rows: any[] = [];
+    const rows: CatalystRow[] = [];
 
     for (const article of articles) {
       const match = classify(`${article.title ?? ""} ${article.description ?? ""}`);
@@ -204,7 +234,7 @@ export async function GET(req: Request) {
       }
     }
 
-    const uniqueRowsMap = new Map<string, any>();
+    const uniqueRowsMap = new Map<string, CatalystRow>();
     for (const row of rows) uniqueRowsMap.set(`${row.article_id}::${row.ticker}`, row);
     const uniqueRows = Array.from(uniqueRowsMap.values());
 

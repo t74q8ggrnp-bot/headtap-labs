@@ -26,6 +26,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { ProxCatalystCategory } from "@/lib/prox/types";
+import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 // First run against a fresh table treats every fetched filing as new
@@ -70,6 +71,8 @@ function isAuthorized(req: Request) {
 }
 
 type TickerMapEntry = { cik: number; ticker: string; title: string };
+type FormerName = { name: string; from: string | null; to: string | null };
+type ProxSourceRow = { id: string; source_key: string };
 
 async function fetchCikTickerMap(): Promise<Map<number, TickerMapEntry>> {
   const res = await fetch("https://www.sec.gov/files/company_tickers.json", {
@@ -161,7 +164,7 @@ const ITEM_CODE_CATEGORY_PRIORITY: [string, ProxCatalystCategory][] = [
 // fetched once per entity (new entity, or one whose former_names is still
 // empty) — former names essentially never change, no reason to re-fetch
 // on every run.
-async function fetchFormerNames(cik: number): Promise<{ name: string; from: string | null; to: string | null }[]> {
+async function fetchFormerNames(cik: number): Promise<FormerName[]> {
   try {
     const paddedCik = String(cik).padStart(10, "0");
     const res = await fetch(`https://data.sec.gov/submissions/CIK${paddedCik}.json`, {
@@ -169,9 +172,13 @@ async function fetchFormerNames(cik: number): Promise<{ name: string; from: stri
       cache: "no-store",
     });
     if (!res.ok) return [];
-    const data = await res.json();
-    const formerNames = Array.isArray(data?.formerNames) ? data.formerNames : [];
-    return formerNames.map((f: any) => ({ name: String(f?.name ?? ""), from: f?.from ?? null, to: f?.to ?? null }));
+    const data = (await res.json()) as { formerNames?: Array<{ name?: string; from?: string; to?: string }> };
+    const formerNames = Array.isArray(data.formerNames) ? data.formerNames : [];
+    return formerNames.map((formerName) => ({
+      name: String(formerName.name ?? ""),
+      from: formerName.from ?? null,
+      to: formerName.to ?? null,
+    }));
   } catch {
     return [];
   }
@@ -216,7 +223,7 @@ export async function GET(req: Request) {
       .select("id, source_key")
       .in("source_key", Object.values(SOURCE_KEY_BY_FORM));
     if (sourcesError) throw sourcesError;
-    const sourceIdByKey = new Map((sources ?? []).map((s: any) => [s.source_key as string, s.id as string]));
+    const sourceIdByKey = new Map(((sources ?? []) as ProxSourceRow[]).map((source) => [source.source_key, source.id]));
 
     const cikMap = await fetchCikTickerMap();
 
@@ -335,7 +342,7 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json({ success: true, diagnostics, timestamp: new Date().toISOString() });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message ?? "Pro X SEC connector failed", diagnostics }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error, "Pro X SEC connector failed"), diagnostics }, { status: 500 });
   }
 }

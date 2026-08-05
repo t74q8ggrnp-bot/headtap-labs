@@ -7,6 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
       totalCount: totalCount ?? 0,
       timestamp: new Date().toISOString(),
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error?.message ?? "Failed to load Pro X events", events: [] }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: getErrorMessage(error, "Failed to load Pro X events"), events: [] }, { status: 500 });
   }
 }

@@ -1,35 +1,35 @@
 {
   "crons": [
     {
-      "path": "/api/signal-writer?secret=htlabs-internal",
+      "path": "/api/signal-writer",
       "schedule": "*/5 8-23 * * 1-5"
     },
     {
-      "path": "/api/signal-writer?secret=htlabs-internal",
+      "path": "/api/signal-writer",
       "schedule": "*/5 0 * * 2-6"
     },
     {
-      "path": "/api/shadow-retrieval?secret=htlabs-internal",
+      "path": "/api/shadow-retrieval",
       "schedule": "*/5 8-23 * * 1-5"
     },
     {
-      "path": "/api/shadow-retrieval?secret=htlabs-internal",
+      "path": "/api/shadow-retrieval",
       "schedule": "*/5 0 * * 2-6"
     },
     {
-      "path": "/api/catalyst-discovery?secret=htlabs-internal",
+      "path": "/api/catalyst-discovery",
       "schedule": "*/5 8-23 * * 1-5"
     },
     {
-      "path": "/api/catalyst-discovery?secret=htlabs-internal",
+      "path": "/api/catalyst-discovery",
       "schedule": "*/5 0 * * 2-6"
     },
     {
-      "path": "/api/outcome-tracker?secret=htlabs-internal",
+      "path": "/api/outcome-tracker",
       "schedule": "0 20 * * 1-5"
     },
     {
-      "path": "/api/outcome-tracker?secret=htlabs-internal",
+      "path": "/api/outcome-tracker",
       "schedule": "0 0 * * 2-6"
     },
     {
@@ -45,7 +45,7 @@
       "schedule": "1-59/2 * * * *"
     },
     {
-      "path": "/api/trading-bot?secret=htlabs-internal",
+      "path": "/api/trading-bot",
       "schedule": "*/5 8-23 * * 1-5"
     }
   ]

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { AreaSeries, ColorType, createChart } from "lightweight-charts";
+import { AreaSeries, ColorType, createChart, type UTCTimestamp } from "lightweight-charts";
 
 type MiniStockChartProps = {
   symbol: string;
@@ -58,7 +58,7 @@ export default function MiniStockChart({
       const noise = Math.cos(index * 1.7) * 0.45;
 
       return {
-        time: index as any,
+        time: (index + 1) as UTCTimestamp,
         value: Number((basePrice + wave + trend + noise).toFixed(2)),
       };
     });

@@ -4,7 +4,9 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotPrice,
+  type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
+import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +29,7 @@ export async function GET() {
       fetch(`${base}/gainers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" }),
       fetch(`${base}/losers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" }),
     ]);
-    const tickers: any[] = [];
+    const tickers: PolygonSnapshotRow[] = [];
 
     if (gainersRes.status === "fulfilled" && gainersRes.value.ok) {
       const data = await gainersRes.value.json();
@@ -50,14 +52,15 @@ export async function GET() {
     const seen = new Set<string>();
     const movers: { symbol: string; price: number; change: number; volume: number; prevVolume: number }[] = [];
     for (const t of tickers) {
-      if (!t.ticker || seen.has(t.ticker) || EXCLUDED.has(t.ticker)) continue;
-      seen.add(t.ticker);
+      const ticker = String(t.ticker ?? "");
+      if (!ticker || seen.has(ticker) || EXCLUDED.has(ticker)) continue;
+      seen.add(ticker);
       const price = resolveSnapshotPrice(t);
       const change = resolveSnapshotChangePercent(t, price);
       const volume = Number(t.day?.v || 0);
       const prevVolume = Number(t.prevDay?.v || 1);
       if (price < 1 || volume < 10000) continue;
-      movers.push({ symbol: t.ticker, price, change, volume, prevVolume });
+      movers.push({ symbol: ticker, price, change, volume, prevVolume });
     }
 
     return NextResponse.json({
@@ -65,8 +68,9 @@ export async function GET() {
       count: movers.length,
       timestamp: new Date().toISOString(),
     });
-  } catch (err: any) {
-    console.error("[market-movers] Fatal error:", err.message);
-    return NextResponse.json({ movers: [], count: 0, error: err.message });
+  } catch (err: unknown) {
+    const message = getErrorMessage(err, "Market movers request failed");
+    console.error("[market-movers] Fatal error:", message);
+    return NextResponse.json({ movers: [], count: 0, error: message });
   }
 }

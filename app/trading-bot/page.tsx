@@ -6,6 +6,7 @@
 // from canonical HT Labs scoring — this page only reflects bot_trades.
 
 import { useEffect, useState } from "react";
+import { getErrorMessage } from "@/lib/error-message";
 
 type BotTrade = {
   id: string;
@@ -54,8 +55,8 @@ export default function TradingBotPage() {
           setTrades(data.trades ?? []);
           setSummary(data.summary ?? null);
         }
-      } catch (err: any) {
-        if (!cancelled) setError(err?.message ?? "Failed to load bot trades");
+      } catch (err: unknown) {
+        if (!cancelled) setError(getErrorMessage(err, "Failed to load bot trades"));
       } finally {
         if (!cancelled) setLoading(false);
       }

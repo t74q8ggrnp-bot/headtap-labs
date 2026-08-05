@@ -3,10 +3,11 @@ const positiveNumber = (value: unknown) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
-type PolygonSnapshotRow = {
-  day?: { c?: unknown };
-  min?: { c?: unknown; t?: unknown };
-  prevDay?: { c?: unknown };
+export type PolygonSnapshotRow = {
+  ticker?: unknown;
+  day?: { c?: unknown; v?: unknown };
+  min?: { av?: unknown; c?: unknown; t?: unknown };
+  prevDay?: { c?: unknown; v?: unknown };
   lastTrade?: { p?: unknown; t?: unknown };
   todaysChangePerc?: unknown;
 };

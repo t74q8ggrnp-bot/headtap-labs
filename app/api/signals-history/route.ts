@@ -4,6 +4,38 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getErrorMessage } from "@/lib/error-message";
+
+type SignalHistoryRow = {
+  id: string;
+  ticker: string;
+  scanned_at: string;
+  price: number;
+  ht_score: number;
+  ht_confidence: string;
+  state: string;
+  signal_state: string;
+  pattern: string;
+  change_percent: number;
+  relative_volume: number;
+  catalyst_score: number;
+  crowd_score: number;
+  engine: string;
+  dual_engine: boolean | null;
+  reasoning: unknown;
+  upside_min: number | null;
+  upside_max: number | null;
+  risk_zone: number | null;
+  rr_ratio: number | null;
+  decision: string | null;
+};
+
+type PolygonPriceRow = {
+  ticker?: string;
+  lastTrade?: { p?: number };
+  day?: { c?: number };
+  prevDay?: { c?: number };
+};
 
 function getSupabase() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -46,7 +78,8 @@ export async function GET() {
 
     const seen = new Set<string>();
 
-    const deduped = rows.filter((row: any) => {
+    const historyRows = rows as unknown as SignalHistoryRow[];
+    const deduped = historyRows.filter((row) => {
       const day = row.scanned_at?.split("T")[0] ?? "";
       const key = `${row.ticker}:${row.engine}:${day}`;
 
@@ -56,9 +89,9 @@ export async function GET() {
       return true;
     });
 
-    const tickers = [...new Set(deduped.map((row: any) => row.ticker).filter(Boolean))];
+    const tickers = [...new Set(deduped.map((row) => row.ticker).filter(Boolean))];
 
-    let currentPrices: Record<string, number> = {};
+    const currentPrices: Record<string, number> = {};
 
     if (polygonKey && tickers.length > 0) {
       try {
@@ -69,7 +102,7 @@ export async function GET() {
         const res = await fetch(url, { next: { revalidate: 60 } });
 
         if (res.ok) {
-          const data = await res.json();
+          const data = (await res.json()) as { tickers?: PolygonPriceRow[] };
 
           for (const tickerData of data.tickers ?? []) {
             const price =
@@ -88,7 +121,7 @@ export async function GET() {
       }
     }
 
-    const signals = deduped.slice(0, 30).map((row: any) => {
+    const signals = deduped.slice(0, 30).map((row) => {
       const entryPrice = Number(row.price || 0);
       const currentPrice = currentPrices[row.ticker] ?? 0;
 
@@ -125,12 +158,13 @@ export async function GET() {
     });
 
     return NextResponse.json({ signals });
-  } catch (err: any) {
-    console.error("[signals-history]", err?.message || err);
+  } catch (err: unknown) {
+    const message = getErrorMessage(err, "Failed to load signals history");
+    console.error("[signals-history]", message);
 
     return NextResponse.json(
       {
-        error: err?.message || "Failed to load signals history",
+        error: message,
         signals: [],
       },
       { status: 500 }

@@ -7,6 +7,7 @@ import {
 } from "@/lib/opportunity-model";
 import OpportunityMetrics from "./OpportunityMetrics";
 import OpportunityWindow from "./OpportunityWindow";
+import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
 import ProxPulse from "./ProxPulse";
 
 type MobileCardDetailProps = {
@@ -119,6 +120,12 @@ export default function MobileCardDetail({
       {framework && (
         <div className="flex-shrink-0 px-4 pb-3">
           <OpportunityWindow framework={framework} />
+        </div>
+      )}
+
+      {current.explosionAssessment?.state === "price_discovery" && (
+        <div className="flex-shrink-0 px-4 pb-3">
+          <PriceDiscoveryWindow assessment={current.explosionAssessment} />
         </div>
       )}
 

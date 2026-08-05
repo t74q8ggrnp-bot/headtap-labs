@@ -21,6 +21,21 @@ type PremarketMover = {
   sessionType: "pre_market" | "after_hours" | "regular";
 };
 
+type YahooQuote = {
+  symbol?: string;
+  regularMarketPrice?: number;
+  regularMarketChange?: number;
+  regularMarketChangePercent?: number;
+  regularMarketVolume?: number;
+  preMarketPrice?: number;
+  preMarketChange?: number;
+  preMarketChangePercent?: number;
+  postMarketPrice?: number;
+  postMarketChange?: number;
+  postMarketChangePercent?: number;
+  marketCap?: number;
+};
+
 function getMarketSession(): { session: string; label: string } {
   const now = new Date();
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
@@ -34,8 +49,8 @@ function getMarketSession(): { session: string; label: string } {
   return { session: "closed", label: "💤 Market Closed" };
 }
 
-async function getMoversWithExtended(screenerIds: string[]): Promise<any[]> {
-  const allQuotes: any[] = [];
+async function getMoversWithExtended(screenerIds: string[]): Promise<YahooQuote[]> {
+  const allQuotes: YahooQuote[] = [];
 
   for (const scrId of screenerIds) {
     try {
@@ -51,8 +66,8 @@ async function getMoversWithExtended(screenerIds: string[]): Promise<any[]> {
         }
       );
       if (!res.ok) continue;
-      const data = await res.json();
-      const quotes = data?.finance?.result?.[0]?.quotes ?? [];
+      const data = (await res.json()) as { finance?: { result?: Array<{ quotes?: YahooQuote[] }> } };
+      const quotes = data.finance?.result?.[0]?.quotes ?? [];
       allQuotes.push(...quotes);
     } catch {
       continue;
@@ -62,7 +77,7 @@ async function getMoversWithExtended(screenerIds: string[]): Promise<any[]> {
   return allQuotes;
 }
 
-function scoreAndClassify(q: any, session: string): PremarketMover | null {
+function scoreAndClassify(q: YahooQuote, session: string): PremarketMover | null {
   const symbol = q.symbol;
   if (!symbol || EXCLUDED.has(symbol)) return null;
 

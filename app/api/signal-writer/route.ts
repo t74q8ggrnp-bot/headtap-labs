@@ -5,7 +5,9 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotPrice,
+  type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
+import { getErrorMessage } from "@/lib/error-message";
 import { loadSecurityMetadata } from "@/lib/security-metadata";
 import { createClient } from "@supabase/supabase-js";
 
@@ -32,8 +34,7 @@ function getSupabase() {
 function isAuthorized(req: Request) {
   if (!CRON_SECRET) return false;
   const authHeader = req.headers.get("authorization");
-  const querySecret = new URL(req.url).searchParams.get("secret");
-  return authHeader === `Bearer ${CRON_SECRET}` || querySecret === CRON_SECRET || querySecret === "htlabs-internal";
+  return authHeader === `Bearer ${CRON_SECRET}`;
 }
 
 const clamp = (value: number, min = 0, max = 99) => Math.min(max, Math.max(min, Math.round(value)));
@@ -154,8 +155,8 @@ export async function GET(req: Request) {
     const marketSession = getEasternSession();
     const response = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`Polygon snapshot failed: ${response.status}`);
-    const payload = await response.json();
-    const tickers: any[] = payload?.tickers ?? [];
+    const payload = (await response.json()) as { tickers?: PolygonSnapshotRow[] };
+    const tickers = payload.tickers ?? [];
     if (!tickers.length) throw new Error("Polygon returned an empty market snapshot.");
 
     const candidates = new Map<string, Candidate>();
@@ -216,14 +217,27 @@ export async function GET(req: Request) {
 
     let written = 0;
     for (let i = 0; i < rows.length; i += 100) {
-      const batch = rows.slice(i, i + 100).map(({ _oppScore, _pool, ...row }) => row);
+      const batch = rows.slice(i, i + 100).map(({ _oppScore, _pool, ...row }) => {
+        void _oppScore;
+        void _pool;
+        return row;
+      });
       const { error } = await supabase.from("ht_signal_run_rows").insert(batch);
       if (error) throw new Error(`Run-row insert failed: ${error.message}`);
       written += batch.length;
     }
 
     const compatibility = [...rows].sort((a, b) => b._oppScore - a._oppScore).slice(0, 100)
-      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, _oppScore, _pool, ...row }) => row);
+      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, _oppScore, _pool, ...row }) => {
+        void scan_run_id;
+        void security_type;
+        void retrieved_for_sm;
+        void retrieved_for_btc;
+        void retrieved_for_catalyst;
+        void _oppScore;
+        void _pool;
+        return row;
+      });
     for (let i = 0; i < compatibility.length; i += 25) {
       const { error } = await supabase.from("ht_signals").upsert(compatibility.slice(i, i + 25), { onConflict: "ticker" });
       if (error) console.error("[signal-writer] compatibility write failed:", error.message);
@@ -245,8 +259,9 @@ export async function GET(req: Request) {
     }).eq("id", run.id);
 
     return NextResponse.json({ success: true, runId: run.id, engineVersion: ENGINE_VERSION, runRowsWritten: written, elapsedMs: Date.now() - startedMs });
-  } catch (error: any) {
-    await supabase.from("ht_scan_runs").update({ status: "failed", completed_at: new Date().toISOString(), error_summary: error?.message ?? "Unknown failure" }).eq("id", run.id);
-    return NextResponse.json({ error: error?.message ?? "Signal writer failed", runId: run.id }, { status: 500 });
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, "Signal writer failed");
+    await supabase.from("ht_scan_runs").update({ status: "failed", completed_at: new Date().toISOString(), error_summary: message }).eq("id", run.id);
+    return NextResponse.json({ error: message, runId: run.id }, { status: 500 });
   }
 }

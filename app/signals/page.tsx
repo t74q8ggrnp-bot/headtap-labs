@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
 
 type Signal = {
   id: string;
@@ -53,7 +55,7 @@ export default function SignalsPage() {
         setSignals(data.signals ?? []);
         setLoading(false);
       })
-      .catch((e) => {
+      .catch(() => {
         setError("Failed to load signals. Please try again.");
         setLoading(false);
       });
@@ -64,7 +66,6 @@ export default function SignalsPage() {
     : signals.filter((s) => s.engine === filter);
 
   const smCount = signals.filter(s => s.engine === "spot_momentum").length;
-  const btcCount = signals.filter(s => s.engine === "before_the_crowd").length;
   const dualCount = signals.filter(s => s.dual_engine).length;
   const winners = signals.filter(s => s.pct_move !== null && s.pct_move > 0).length;
   const withMoves = signals.filter(s => s.pct_move !== null).length;
@@ -75,14 +76,14 @@ export default function SignalsPage() {
       {/* Nav */}
       <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-black/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1400px] items-center gap-6 px-6 py-4">
-          <a href="/" className="flex items-center gap-2">
-            <img src="/logo.png" alt="HT Labs" className="h-8 w-auto" />
-          </a>
+          <Link href="/" className="flex items-center gap-2">
+            <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-8 w-auto" priority />
+          </Link>
           <nav className="hidden flex-1 items-center gap-6 text-sm font-semibold text-zinc-500 md:flex">
-            <a className="transition hover:text-orange-300" href="/">Top Convictions</a>
-            <a className="transition hover:text-orange-300" href="/scanner">Scanner</a>
-            <a className="text-orange-400" href="/signals">Signals</a>
-            <a className="transition hover:text-orange-300" href="/news">News</a>
+            <Link className="transition hover:text-orange-300" href="/">Top Convictions</Link>
+            <Link className="transition hover:text-orange-300" href="/scanner">Scanner</Link>
+            <Link className="text-orange-400" href="/signals">Signals</Link>
+            <Link className="transition hover:text-orange-300" href="/news">News</Link>
           </nav>
         </div>
       </header>

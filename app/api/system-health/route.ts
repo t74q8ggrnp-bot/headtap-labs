@@ -29,11 +29,11 @@ type HealthCheck = {
   name: string;
   ok: boolean;
   message: string;
-  detail?: any;
+  detail?: unknown;
 };
 
-function hoursSince(value: any) {
-  if (!value) return Infinity;
+function hoursSince(value: unknown) {
+  if (typeof value !== "string" && typeof value !== "number" && !(value instanceof Date)) return Infinity;
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return Infinity;
   return (Date.now() - timestamp) / (1000 * 60 * 60);
@@ -149,6 +149,9 @@ export async function GET() {
     });
 
     let runRowCount = 0;
+    const expectedRunRowCount = Number(
+      (promotedRun?.candidate_counts as { runRows?: unknown } | null)?.runRows ?? 0,
+    );
     if (promotedRun?.id) {
       const { count, error: countError } = await supabase
         .from("ht_signal_run_rows")
@@ -159,11 +162,26 @@ export async function GET() {
     }
     checks.push({
       name: "promoted_run_rows",
-      ok: runRowCount > 0,
-      message: runRowCount > 0
-        ? "Authoritative run rows are available to Home and Scanner."
-        : "The latest authoritative run has no readable rows.",
-      detail: { count: runRowCount },
+      ok:
+        runRowCount > 0 &&
+        (!Number.isFinite(expectedRunRowCount) ||
+          expectedRunRowCount <= 0 ||
+          runRowCount === expectedRunRowCount),
+      message:
+        runRowCount <= 0
+          ? "The latest authoritative run has no readable rows."
+          : Number.isFinite(expectedRunRowCount) &&
+              expectedRunRowCount > 0 &&
+              runRowCount !== expectedRunRowCount
+            ? "The promoted run row count does not match the writer's recorded total."
+            : "Authoritative run rows are available to Home and Scanner.",
+      detail: {
+        count: runRowCount,
+        expectedCount:
+          Number.isFinite(expectedRunRowCount) && expectedRunRowCount > 0
+            ? expectedRunRowCount
+            : null,
+      },
     });
   } catch (err: unknown) {
     checks.push({
@@ -174,7 +192,14 @@ export async function GET() {
     });
   }
 
-  let latestSignal: any = null;
+  let latestSignal: {
+    ticker?: string;
+    scanned_at?: string;
+    price?: number;
+    change_percent?: number;
+    relative_volume?: number;
+    ht_score?: number;
+  } | null = null;
   let readable = false;
 
   try {
@@ -215,12 +240,12 @@ export async function GET() {
           : null,
       });
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     checks.push({
       name: "ht_signals_read",
       ok: false,
       message: "Unexpected ht_signals read failure.",
-      detail: err?.message || String(err),
+      detail: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -288,12 +313,12 @@ export async function GET() {
           count: displayableCount,
         },
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       checks.push({
         name: "displayable_signals",
         ok: false,
         message: "Could not verify displayable signals.",
-        detail: err?.message || String(err),
+        detail: err instanceof Error ? err.message : String(err),
       });
     }
   }

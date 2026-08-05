@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import {
   mergeOpportunityLists,
   type Opportunity as HTOpportunity,
@@ -67,10 +69,13 @@ export default function ScannerPage() {
   // Same localStorage key Home uses — so a star toggled here shows up
   // there too. These were previously two different, disconnected lists.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("headtap-watchlist");
-      if (saved) setWatchlist(JSON.parse(saved));
-    } catch {}
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem("headtap-watchlist");
+        if (saved) setWatchlist(JSON.parse(saved));
+      } catch {}
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const toggleWatchlist = (symbol: string) => {
@@ -110,9 +115,12 @@ export default function ScannerPage() {
   }, []);
 
   useEffect(() => {
-    fetchAll();
+    const initialFetch = window.setTimeout(() => void fetchAll(), 0);
     const interval = setInterval(fetchAll, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      window.clearTimeout(initialFetch);
+      clearInterval(interval);
+    };
   }, [fetchAll]);
 
   const filtered = useMemo(() => {
@@ -143,11 +151,11 @@ export default function ScannerPage() {
       <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#050505]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
           <div className="flex items-center gap-6">
-            <a href="/"><img src="/logo.png" alt="HT Labs" className="h-10 w-auto" /></a>
+            <Link href="/"><Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-10 w-auto" priority /></Link>
             <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-500 md:flex">
-              <a href="/" className="transition hover:text-orange-300">Dashboard</a>
+              <Link href="/" className="transition hover:text-orange-300">Dashboard</Link>
               <span className="text-orange-400">Scanner</span>
-              <a href="/news" className="transition hover:text-orange-300">News</a>
+              <Link href="/news" className="transition hover:text-orange-300">News</Link>
             </nav>
           </div>
           <div className="flex items-center gap-3">
@@ -170,7 +178,7 @@ export default function ScannerPage() {
         <div className="mb-8">
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-400">HT Labs</p>
           <h1 className="mt-1 text-4xl font-black tracking-tight">Full Scanner</h1>
-          <p className="mt-2 text-sm text-zinc-500">The full ranked list from the same engine that picks Home's #1 signal. Auto-refreshes every 30s.</p>
+          <p className="mt-2 text-sm text-zinc-500">The full ranked list from the same engine that picks Home&apos;s #1 signal. Auto-refreshes every 30s.</p>
         </div>
 
         {!loading && (
@@ -202,7 +210,7 @@ export default function ScannerPage() {
         {!loading && opportunities.length === 0 && (
           <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.025] px-5 py-3">
             <p className="text-sm font-black text-zinc-300">No verified signals yet.</p>
-            <p className="text-[10px] font-semibold text-zinc-500">The scanner hasn't found a qualifying candidate this cycle.</p>
+            <p className="text-[10px] font-semibold text-zinc-500">The scanner hasn&apos;t found a qualifying candidate this cycle.</p>
           </div>
         )}
 

@@ -7,6 +7,7 @@
 // side only; nothing here feeds or reflects canonical HT Labs scoring.
 
 import { useEffect, useState } from "react";
+import { getErrorMessage } from "@/lib/error-message";
 
 type ProxEventTicker = {
   ticker: string;
@@ -69,8 +70,8 @@ export default function ProxPage() {
           setEvents(data.events ?? []);
           setTotalCount(data.totalCount ?? 0);
         }
-      } catch (err: any) {
-        if (!cancelled) setError(err?.message ?? "Failed to load Pro X events");
+      } catch (err: unknown) {
+        if (!cancelled) setError(getErrorMessage(err, "Failed to load Pro X events"));
       } finally {
         if (!cancelled) setLoading(false);
       }

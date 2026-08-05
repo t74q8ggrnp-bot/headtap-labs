@@ -29,9 +29,18 @@ type ScannedTicker = {
   source: string;
 };
 
-function mapQuote(q: any, source: string): ScannedTicker {
+type YahooQuote = {
+  symbol?: string;
+  regularMarketPrice?: number;
+  regularMarketChange?: number;
+  regularMarketChangePercent?: number;
+  regularMarketVolume?: number;
+  averageDailyVolume10Day?: number;
+};
+
+function mapQuote(q: YahooQuote, source: string): ScannedTicker {
   return {
-    symbol: q.symbol,
+    symbol: q.symbol ?? "",
     price: Number(q.regularMarketPrice ?? 0),
     change: Number(q.regularMarketChange ?? 0),
     changePercent: Number(q.regularMarketChangePercent ?? 0),
@@ -52,11 +61,11 @@ async function fetchScreener(scrId: string, count: number, source: string): Prom
       }
     );
     if (!res.ok) return [];
-    const data = await res.json();
-    const quotes = data?.finance?.result?.[0]?.quotes ?? [];
+    const data = (await res.json()) as { finance?: { result?: Array<{ quotes?: YahooQuote[] }> } };
+    const quotes = data.finance?.result?.[0]?.quotes ?? [];
     return quotes
-      .filter((q: any) => q.symbol && !EXCLUDED.has(q.symbol) && q.regularMarketPrice > 1)
-      .map((q: any) => mapQuote(q, source));
+      .filter((q): q is YahooQuote & { symbol: string } => Boolean(q.symbol && !EXCLUDED.has(q.symbol) && Number(q.regularMarketPrice) > 1))
+      .map((q) => mapQuote(q, source));
   } catch {
     return [];
   }

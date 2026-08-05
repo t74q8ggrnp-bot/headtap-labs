@@ -8,6 +8,30 @@ const getSupabase = () => createClient(
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+type MarketBehaviorRow = {
+  day_of_week: number;
+  outcome: string;
+  gain_1d: number | null;
+  gain_3d: number | null;
+  market_session: string;
+  pattern: string;
+  social_score: number;
+};
+
+type PerformanceStat = {
+  signals: number;
+  winRate: number;
+};
+
+type DayStat = PerformanceStat & {
+  day: string;
+  avgGain1d: number;
+  avgGain3d: number;
+};
+
+type SessionStat = PerformanceStat & { session: string };
+type PatternStat = PerformanceStat & { pattern: string; avgGain: number };
+
 function getMarketSession(hour: number): string {
   if (hour < 9 || (hour === 9 && true)) return "pre_market";
   if (hour < 10) return "open";
@@ -90,17 +114,18 @@ export async function GET(req: Request) {
         });
       }
 
-      const dayStats = DAY_NAMES.map((dayName, dayIndex) => {
-        const daySignals = data.filter((s) => s.day_of_week === dayIndex);
+      const signals = data as MarketBehaviorRow[];
+      const dayStats = DAY_NAMES.map((dayName, dayIndex): DayStat | null => {
+        const daySignals = signals.filter((s) => s.day_of_week === dayIndex);
         if (daySignals.length === 0) return null;
         const winners = daySignals.filter((s) => s.outcome === "winner").length;
         const winRate = Math.round((winners / daySignals.length) * 100);
         const avgGain1d = daySignals
           .filter((s) => s.gain_1d !== null)
-          .reduce((sum, s, _, arr) => sum + s.gain_1d / arr.length, 0);
+          .reduce((sum, s, _, arr) => sum + (s.gain_1d ?? 0) / arr.length, 0);
         const avgGain3d = daySignals
           .filter((s) => s.gain_3d !== null)
-          .reduce((sum, s, _, arr) => sum + s.gain_3d / arr.length, 0);
+          .reduce((sum, s, _, arr) => sum + (s.gain_3d ?? 0) / arr.length, 0);
         return {
           day: dayName,
           signals: daySignals.length,
@@ -108,53 +133,53 @@ export async function GET(req: Request) {
           avgGain1d: Math.round(avgGain1d * 10) / 10,
           avgGain3d: Math.round(avgGain3d * 10) / 10,
         };
-      }).filter(Boolean);
+      }).filter((stat): stat is DayStat => stat !== null);
 
-      const sessionStats = ["pre_market", "open", "mid_session", "power_hour"].map((session) => {
-        const sessionSignals = data.filter((s) => s.market_session === session);
+      const sessionStats = ["pre_market", "open", "mid_session", "power_hour"].map((session): SessionStat | null => {
+        const sessionSignals = signals.filter((s) => s.market_session === session);
         if (sessionSignals.length < 2) return null;
         const winners = sessionSignals.filter((s) => s.outcome === "winner").length;
         const winRate = Math.round((winners / sessionSignals.length) * 100);
         return { session: session.replace("_", " "), signals: sessionSignals.length, winRate };
-      }).filter(Boolean);
+      }).filter((stat): stat is SessionStat => stat !== null);
 
-      const patternStats = [...new Set(data.map((s) => s.pattern))].map((pattern) => {
-        const patternSignals = data.filter((s) => s.pattern === pattern);
+      const patternStats = [...new Set(signals.map((s) => s.pattern))].map((pattern): PatternStat | null => {
+        const patternSignals = signals.filter((s) => s.pattern === pattern);
         if (patternSignals.length < 2) return null;
         const winners = patternSignals.filter((s) => s.outcome === "winner").length;
         const winRate = Math.round((winners / patternSignals.length) * 100);
         const avgGain = patternSignals
           .filter((s) => s.gain_1d !== null)
-          .reduce((sum, s, _, arr) => sum + s.gain_1d / arr.length, 0);
+          .reduce((sum, s, _, arr) => sum + (s.gain_1d ?? 0) / arr.length, 0);
         return { pattern, signals: patternSignals.length, winRate, avgGain: Math.round(avgGain * 10) / 10 };
-      }).filter(Boolean).sort((a: any, b: any) => b.winRate - a.winRate);
+      }).filter((stat): stat is PatternStat => stat !== null).sort((a, b) => b.winRate - a.winRate);
 
       const insights: string[] = [];
 
-      const sortedDays = [...dayStats].sort((a: any, b: any) => b.winRate - a.winRate);
+      const sortedDays = [...dayStats].sort((a, b) => b.winRate - a.winRate);
       if (sortedDays.length >= 2) {
-        const best = sortedDays[0] as any;
-        const worst = sortedDays[sortedDays.length - 1] as any;
+        const best = sortedDays[0];
+        const worst = sortedDays[sortedDays.length - 1];
         if (best.signals >= 3) insights.push(`${best.day} signals have the highest win rate at ${best.winRate}%.`);
         if (worst.signals >= 3 && worst.winRate < best.winRate - 15)
           insights.push(`${worst.day} signals underperform by ${best.winRate - worst.winRate}% compared to ${best.day}.`);
       }
 
-      const sortedSessions = [...sessionStats].sort((a: any, b: any) => b.winRate - a.winRate);
+      const sortedSessions = [...sessionStats].sort((a, b) => b.winRate - a.winRate);
       if (sortedSessions.length >= 2) {
-        const bestSession = sortedSessions[0] as any;
+        const bestSession = sortedSessions[0];
         if (bestSession.signals >= 3)
           insights.push(`${bestSession.session.replace("_", " ")} signals outperform with ${bestSession.winRate}% win rate.`);
       }
 
       if (patternStats.length >= 2) {
-        const bestPattern = patternStats[0] as any;
+        const bestPattern = patternStats[0];
         if (bestPattern.signals >= 3)
           insights.push(`${bestPattern.pattern} setups win ${bestPattern.winRate}% of the time with avg ${bestPattern.avgGain > 0 ? "+" : ""}${bestPattern.avgGain}% gain.`);
       }
 
-      const highSocial = data.filter((s) => s.social_score >= 60);
-      const lowSocial = data.filter((s) => s.social_score < 30);
+      const highSocial = signals.filter((s) => s.social_score >= 60);
+      const lowSocial = signals.filter((s) => s.social_score < 30);
       if (highSocial.length >= 3 && lowSocial.length >= 3) {
         const socialWinRate = Math.round((highSocial.filter(s => s.outcome === "winner").length / highSocial.length) * 100);
         const volWinRate = Math.round((lowSocial.filter(s => s.outcome === "winner").length / lowSocial.length) * 100);
@@ -162,14 +187,14 @@ export async function GET(req: Request) {
           insights.push(`Social momentum signals outperform volume-only signals by ${socialWinRate - volWinRate}%.`);
       }
 
-      const totalWinners = data.filter((s) => s.outcome === "winner").length;
-      const overallWinRate = Math.round((totalWinners / data.length) * 100);
-      insights.push(`Overall HT signal win rate: ${overallWinRate}% across ${data.length} tracked signals.`);
+      const totalWinners = signals.filter((s) => s.outcome === "winner").length;
+      const overallWinRate = Math.round((totalWinners / signals.length) * 100);
+      insights.push(`Overall HT signal win rate: ${overallWinRate}% across ${signals.length} tracked signals.`);
 
       return NextResponse.json({
         patterns: patternStats.slice(0, 5),
         insights,
-        totalSignals: data.length,
+        totalSignals: signals.length,
         dayStats,
         sessionStats,
         overallWinRate,

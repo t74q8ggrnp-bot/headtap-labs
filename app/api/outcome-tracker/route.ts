@@ -54,10 +54,8 @@ function gradeOutcome(entryPrice: number, currentPrice: number, daysElapsed: num
 }
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const secret = searchParams.get("secret");
-
-  if (secret !== process.env.CRON_SECRET && secret !== "htlabs-internal") {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || req.headers.get("authorization") !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

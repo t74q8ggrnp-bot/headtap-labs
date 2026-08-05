@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { getErrorMessage } from "@/lib/error-message";
 
 type SystemStatus = "operational" | "degraded" | "offline" | "checking";
 
@@ -114,8 +116,8 @@ export default function QAPage() {
               ? `${count}/3 tickers returned · NVDA $${nvda?.price?.toFixed(2) || "?"} · Source: ${nvda?.source || "?"}`
               : `Failed — ${count} tickers returned`,
           });
-        } catch (e: any) {
-          updateSystem("Polygon (Bulk Quote)", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("Polygon (Bulk Quote)", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Bulk quote check failed") });
         }
       },
 
@@ -133,8 +135,8 @@ export default function QAPage() {
               ? `AAPL $${data.c?.toFixed(2)} · ${data.dp?.toFixed(2)}% · Vol: ${data.volume?.toLocaleString()} · Source: ${data.source}`
               : `HTTP ${res.status}`,
           });
-        } catch (e: any) {
-          updateSystem("Polygon (Single Quote)", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("Polygon (Single Quote)", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Single quote check failed") });
         }
       },
 
@@ -153,8 +155,8 @@ export default function QAPage() {
               ? `${count} opportunities · Top: ${data.opportunities?.[0]?.ticker || "none"} (${data.opportunities?.[0]?.confidence || 0}% conf)`
               : `HTTP ${res.status}`,
           });
-        } catch (e: any) {
-          updateSystem("Opportunities API", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("Opportunities API", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Opportunities check failed") });
         }
       },
 
@@ -176,34 +178,27 @@ export default function QAPage() {
               ? `Analysis generated · ${data.analysis.length} chars · ${latency}ms`
               : `HTTP ${res.status}: ${data.error || "No analysis returned"}`,
           });
-        } catch (e: any) {
-          updateSystem("AI Analysis", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("AI Analysis", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "AI analysis check failed") });
         }
       },
 
-      // 5. Supabase (write test)
+      // 5. Supabase (read-only production health test)
       async () => {
         const start = Date.now();
         try {
-          const res = await fetch("/api/market-behavior", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ticker: "QA_PING",
-              htScore: 50, momentumScore: 50, volumeScore: 10,
-              socialScore: 0, crowdStage: 1,
-              signalState: "QA Check", pattern: "No Clean Pattern",
-              price: 100, userId: null,
-            }),
-          });
+          const res = await fetch("/api/system-health", { cache: "no-store" });
+          const data = await res.json();
           const latency = Date.now() - start;
           updateSystem("Supabase", {
-            status: res.ok ? getStatus(true, latency) : "degraded",
+            status: data.checks?.some((check: { name?: string; ok?: boolean }) => check.name === "supabase_env" && check.ok)
+              ? getStatus(true, latency)
+              : "degraded",
             latency,
-            message: res.ok ? `Write successful · Tables: ht_scan_log, ht_signal_memory, ht_change_log` : `HTTP ${res.status} — check RLS policies`,
+            message: res.ok ? "Read-only database health confirmed" : `HTTP ${res.status} — check database pipeline`,
           });
-        } catch (e: any) {
-          updateSystem("Supabase", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("Supabase", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Supabase health check failed") });
         }
       },
 
@@ -222,7 +217,7 @@ export default function QAPage() {
             latency,
             message: res.ok ? `Supabase Auth reachable · Login/Signup/Signout functional` : `Status ${res.status} — auth may be limited`,
           });
-        } catch (e: any) {
+        } catch {
           // Auth might not be directly testable — mark as operational if supabase worked
           const latency = Date.now() - start;
           updateSystem("Authentication", {
@@ -248,8 +243,8 @@ export default function QAPage() {
               ? `${count} articles · Velocity: ${data.newsVelocity || 0} · Sentiment: ${data.sentimentBias || "N/A"}`
               : `HTTP ${res.status}`,
           });
-        } catch (e: any) {
-          updateSystem("News Intel", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("News Intel", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "News check failed") });
         }
       },
 
@@ -267,8 +262,8 @@ export default function QAPage() {
               ? `Score: ${data.socialScore} · Stage: ${data.crowdStageLabel} · Stocktwits: ${data.stocktwits?.mentions || 0} mentions`
               : `HTTP ${res.status}`,
           });
-        } catch (e: any) {
-          updateSystem("Social Intel", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("Social Intel", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Social check failed") });
         }
       },
 
@@ -287,8 +282,8 @@ export default function QAPage() {
               ? `${count} movers · Market: ${data.marketStatus || "unknown"} · ${count === 0 ? "Normal during market hours" : `Top: ${data.movers[0]?.symbol}`}`
               : `HTTP ${res.status}`,
           });
-        } catch (e: any) {
-          updateSystem("Premarket API", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("Premarket API", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Premarket check failed") });
         }
       },
 
@@ -306,8 +301,8 @@ export default function QAPage() {
               ? `${data.totalSignals || 0} signals tracked · Win rate: ${data.overallWinRate || 0}% · Patterns: ${data.patterns?.length || 0}`
               : `HTTP ${res.status}`,
           });
-        } catch (e: any) {
-          updateSystem("Market Behavior", { status: "offline", latency: Date.now() - start, message: e.message });
+        } catch (error: unknown) {
+          updateSystem("Market Behavior", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Market behavior check failed") });
         }
       },
     ];
@@ -318,7 +313,10 @@ export default function QAPage() {
     setRunning(false);
   }, []);
 
-  useEffect(() => { runChecks(); }, []);
+  useEffect(() => {
+    const initialCheck = window.setTimeout(() => void runChecks(), 0);
+    return () => window.clearTimeout(initialCheck);
+  }, [runChecks]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -346,7 +344,7 @@ export default function QAPage() {
         {/* Header */}
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <a href="/" className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 transition">← Dashboard</a>
+            <Link href="/" className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 transition">← Dashboard</Link>
             <h1 className="mt-3 text-3xl font-black tracking-tight">HT Labs System Health</h1>
             <p className="mt-1 text-sm text-zinc-500">Real-time status for every API, service, and data source.</p>
           </div>

@@ -9,6 +9,8 @@ declare global { interface Window { _htScannerLastFetch?: number } }
 import { motion } from "framer-motion";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
 import MiniStockChart from "./components/MiniStockChart";
 import ScannerGrid from "./components/desktop/ScannerGrid";
 import OpportunityStateCard from "./components/OpportunityStateCard";
@@ -96,6 +98,28 @@ type MarketScanStats = {
   losers: number;
   highVolume: number;
   lastFullScan: Date | null;
+};
+
+type MarketMoverSummary = { symbol: string };
+
+type SignalFeedRow = {
+  ticker: string;
+  price?: number;
+  change_percent?: number;
+  relative_volume?: number;
+  catalyst_score?: number;
+  ht_score?: number;
+  momentum_score?: number;
+  crowd_score?: number;
+  trap_score?: number;
+  state?: string;
+  pattern?: string;
+};
+
+type ScannerExpansionTicker = {
+  symbol: string;
+  price: number;
+  change?: number;
 };
 
 const fallbackQuotes: Record<string, Stock> = {
@@ -478,8 +502,7 @@ function HomeInner() {
   const [authMessage, setAuthMessage] = useState("");
   const [searchStatus, setSearchStatus] = useState("Search any ticker to pull it into HT instantly.");
   const [cloudSyncMessage, setCloudSyncMessage] = useState("");
-  const [signalMemoryInsight, setSignalMemoryInsight] = useState<SignalMemoryInsight | null>(null);
-  const lastSignalMemoryKey = useRef("");
+  const [signalMemoryInsight] = useState<SignalMemoryInsight | null>(null);
   const [savedSetups, setSavedSetups] = useState<string[]>([]);
   const [traderMode] = useState<
     "Scalper" | "Momentum" | "Swing" | "Conservative" | "Aggressive"
@@ -1211,8 +1234,6 @@ function HomeInner() {
   };
 
 
-  type SignalMemoryStatus = "tracking" | "watching" | "winner" | "strong_winner" | "neutral" | "failed" | "failed_momentum" | "fake_momentum" | "trap";
-
   type SignalMemoryInsight = {
     tracked: number;
     winners: number;
@@ -1226,35 +1247,6 @@ function HomeInner() {
     failureDNA: string;
     summary: string;
   };
-
-  type SignalMemoryPayload = {
-    user_id: string;
-    symbol: string;
-    picked_at: string;
-    entry_price: number;
-    change_percent: number;
-    ht_score: number;
-    final_score: number;
-    discovery_score: number;
-    acceleration_score: number;
-    fingerprint_score: number;
-    crowd_saturation_score: number;
-    opportunity_window: OpportunityWindow;
-    opportunity_window_open: boolean;
-    pattern: PatternSignalName;
-    contender_status: ContenderStatus;
-    quality_gate: QualityGateLabel;
-    trap_risk: number;
-    entry_quality: number;
-    participation: number;
-    continuation: number;
-    consumer_label: BackgroundOpportunityEngine["consumerLabel"];
-    discovery_read: string;
-    internal_reason: string;
-    status: SignalMemoryStatus;
-  };
-
-
 
   type CrowdSaturationLevel =
     | "Low Saturation"
@@ -3626,194 +3618,6 @@ function HomeInner() {
     };
   };
 
-  const getSignalMemoryStatus = (engine: BackgroundOpportunityEngine): SignalMemoryStatus => {
-    if (engine.tooLate || engine.qualityGate === "Reject") return "fake_momentum";
-    if (engine.consumerLabel === "Top Conviction" && engine.opportunityWindowOpen) return "tracking";
-    if (engine.consumerLabel === "Strong Watch" || engine.consumerLabel === "Developing") return "watching";
-
-    return "tracking";
-  };
-
-  const buildSignalMemoryPayload = (stock: Stock): SignalMemoryPayload | null => {
-    if (!session?.user?.id) return null;
-
-    const engine = getBackgroundOpportunityEngine(stock);
-    const read = getSimpleConvictionRead(stock);
-
-    return {
-      user_id: session.user.id,
-      symbol: stock.symbol,
-      picked_at: new Date().toISOString(),
-      entry_price: Number(stock.price || 0),
-      change_percent: Number(stock.change || 0),
-      ht_score: read.score,
-      final_score: engine.finalScore,
-      discovery_score: engine.discoveryScore,
-      acceleration_score: engine.accelerationScore,
-      fingerprint_score: engine.fingerprintScore,
-      crowd_saturation_score: engine.crowdSaturationScore,
-      opportunity_window: engine.opportunityWindow,
-      opportunity_window_open: engine.opportunityWindowOpen,
-      pattern: engine.pattern,
-      contender_status: engine.contenderStatus,
-      quality_gate: engine.qualityGate,
-      trap_risk: engine.trapRisk,
-      entry_quality: engine.entryQuality,
-      participation: engine.participation,
-      continuation: engine.continuation,
-      consumer_label: engine.consumerLabel,
-      discovery_read: read.discoveryRead,
-      internal_reason: engine.internalReason,
-      status: getSignalMemoryStatus(engine),
-    };
-  };
-
-  const saveTopConvictionToMemory = async (stock: Stock) => {
-    if (!session?.user?.id) {
-      return;
-    }
-
-    const payload = buildSignalMemoryPayload(stock);
-    if (!payload) return;
-
-    const memoryKey = `${payload.user_id}-${payload.symbol}-${payload.opportunity_window}-${new Date().toISOString().slice(0, 13)}`;
-
-    if (lastSignalMemoryKey.current === memoryKey) return;
-    lastSignalMemoryKey.current = memoryKey;
-
-    try {
-      await fetch("/api/signal-memory-writer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } catch (error) {
-      console.error("SIGNAL MEMORY SAVE ERROR:", error);
-    }
-  };
-
-
-
-
-
-  const loadSignalMemoryIntelligence = async () => {
-    if (!session?.user?.id) {
-      setSignalMemoryInsight(null);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from("ht_signal_memory")
-        .select("outcome_status,status,discovery_score,acceleration_score,crowd_saturation_score,trap_risk,ht_score,pattern")
-        .eq("user_id", session.user.id)
-        .order("picked_at", { ascending: false })
-        .limit(100);
-
-      if (error) {
-        console.error("SIGNAL MEMORY INTELLIGENCE ERROR:", error);
-        return;
-      }
-
-      const rows = (data || []) as Array<{
-        outcome_status: string | null;
-        status: string | null;
-        discovery_score: number | null;
-        acceleration_score: number | null;
-        crowd_saturation_score: number | null;
-        trap_risk: number | null;
-        ht_score: number | null;
-        pattern: string | null;
-      }>;
-
-      const tracked = rows.length;
-      if (!tracked) {
-        setSignalMemoryInsight({
-          tracked: 0,
-          winners: 0,
-          failures: 0,
-          traps: 0,
-          tracking: 0,
-          successRate: null,
-          confidenceStatus: "Developing",
-          confidenceLabel: "Confidence developing",
-          winnerDNA: "Winner DNA: collecting outcome data...",
-          failureDNA: "Failure DNA: collecting outcome data...",
-          summary: "HT confidence is online and waiting for tracked outcomes.",
-        });
-        return;
-      }
-
-      const outcomeFor = (row: { outcome_status: string | null; status: string | null }) =>
-        String(row.outcome_status || row.status || "tracking").toLowerCase();
-
-      const winnerRows = rows.filter((row) => ["strong_winner", "winner"].includes(outcomeFor(row)));
-      const failureRows = rows.filter((row) => ["failed", "failed_momentum", "fake_momentum", "trap"].includes(outcomeFor(row)));
-      const trapRows = rows.filter((row) => ["trap", "fake_momentum", "failed_momentum"].includes(outcomeFor(row)));
-      const trackingRows = rows.filter((row) => ["tracking", "watching"].includes(outcomeFor(row)));
-      const gradedCount = winnerRows.length + failureRows.length;
-      const successRate = gradedCount ? Math.round((winnerRows.length / gradedCount) * 100) : null;
-
-      const avg = (items: typeof rows, field: keyof (typeof rows)[number]) => {
-        const values = items
-          .map((item) => Number(item[field] || 0))
-          .filter((value) => Number.isFinite(value) && value > 0);
-
-        if (!values.length) return 0;
-        return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
-      };
-
-      const topPattern = (items: typeof rows) => {
-        const counts = items.reduce<Record<string, number>>((acc, item) => {
-          const pattern = String(item.pattern || "Unknown");
-          acc[pattern] = (acc[pattern] || 0) + 1;
-          return acc;
-        }, {});
-
-        return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Building";
-      };
-
-      const winnerDNA = winnerRows.length >= 5
-        ? `Winner DNA: Discovery ${avg(winnerRows, "discovery_score")}, Acceleration ${avg(winnerRows, "acceleration_score")}, HT Score ${avg(winnerRows, "ht_score")}, Pattern ${topPattern(winnerRows)}.`
-        : `Winner DNA: collecting outcome data... ${Math.max(0, 5 - winnerRows.length)} more winner sample${Math.max(0, 5 - winnerRows.length) === 1 ? "" : "s"} needed.`;
-
-      const failureDNA = failureRows.length >= 5
-        ? `Failure DNA: Saturation ${avg(failureRows, "crowd_saturation_score")}, Acceleration ${avg(failureRows, "acceleration_score")}, HT Score ${avg(failureRows, "ht_score")}, Pattern ${topPattern(failureRows)}.`
-        : `Failure DNA: collecting outcome data... ${Math.max(0, 5 - failureRows.length)} more failure sample${Math.max(0, 5 - failureRows.length) === 1 ? "" : "s"} needed.`;
-
-      const confidenceStatus: SignalMemoryInsight["confidenceStatus"] =
-        tracked >= 50
-          ? "Proving"
-          : tracked >= 10
-            ? "Active"
-            : "Developing";
-
-      const confidenceLabel = successRate === null || tracked < 10
-        ? "Confidence developing"
-        : `HT Confidence ${successRate}%`;
-
-      const summary = successRate === null || tracked < 10
-        ? `Status: ${confidenceStatus} · ${tracked}/10 signals needed for active confidence.`
-        : `Status: ${confidenceStatus} · ${successRate}% graded success · ${trapRows.length} fake/trap cluster${trapRows.length === 1 ? "" : "s"}.`;
-
-      setSignalMemoryInsight({
-        tracked,
-        winners: winnerRows.length,
-        failures: failureRows.length,
-        traps: trapRows.length,
-        tracking: trackingRows.length,
-        successRate,
-        confidenceStatus,
-        confidenceLabel,
-        winnerDNA,
-        failureDNA,
-        summary,
-      });
-    } catch (error) {
-      console.error("SIGNAL MEMORY INTELLIGENCE LOAD ERROR:", error);
-    }
-  };
-
   const getSignalEvolutionState = (stock: Stock) => {
     const htScore = getHTScore(stock);
     const attention = getAttentionScore(stock);
@@ -5725,7 +5529,7 @@ function HomeInner() {
     }
 
     // Step 3: Parse ht_signals if they arrived — optional enrichment
-    let signalsMap: Record<string, {
+    const signalsMap: Record<string, {
       relativeVolume?: number;
       catalystScore?: number;
       htSignalScore?: number;
@@ -5810,19 +5614,19 @@ function HomeInner() {
       ]);
 
       const moverSymbols: string[] = moversRes.status === "fulfilled"
-        ? (moversRes.value.movers ?? []).map((m: any) => m.symbol)
+        ? ((moversRes.value.movers ?? []) as MarketMoverSummary[]).map((mover) => mover.symbol)
         : [];
 
       // Pull tickers from ht_signals that aren't in our universe
       // These are the real discoveries from the full market scan
-      const signalsRaw: any[] = signalsFeedRes.status === "fulfilled"
-        ? (signalsFeedRes.value.signals ?? [])
+      const signalsRaw: SignalFeedRow[] = signalsFeedRes.status === "fulfilled"
+        ? ((signalsFeedRes.value.signals ?? []) as SignalFeedRow[])
         : [];
-      const signalSymbols: string[] = signalsRaw.map((s: any) => s.ticker);
+      const signalSymbols: string[] = signalsRaw.map((signal) => signal.ticker);
 
       // Build a map of signal data so new discoveries get proper enrichment
       // Include price and change so stocks with no bulk-quote data survive filtering
-      const signalEnrichmentMap: Record<string, any> = {};
+      const signalEnrichmentMap: Record<string, SignalFeedRow> = {};
       for (const s of signalsRaw) {
         signalEnrichmentMap[s.ticker] = s;
       }
@@ -6103,9 +5907,10 @@ function HomeInner() {
         .then(data => {
           if (!data?.tickers?.length) return;
           const existing = new Set(stocks.map(s => s.symbol));
-          const newTickers: Stock[] = data.tickers
-            .filter((t: any) => !existing.has(t.symbol) && t.price > 0)
-            .map((t: any) => ({ symbol: t.symbol, price: t.price, change: t.change || 0, volume: 0, prevVolume: 0 }));
+          const scannerTickers = data.tickers as ScannerExpansionTicker[];
+          const newTickers: Stock[] = scannerTickers
+            .filter((scannerTicker) => !existing.has(scannerTicker.symbol) && scannerTicker.price > 0)
+            .map((scannerTicker) => ({ symbol: scannerTicker.symbol, price: scannerTicker.price, change: scannerTicker.change || 0, volume: 0, prevVolume: 0 }));
           if (newTickers.length > 0) {
             setStocks(prev => [...prev, ...newTickers].slice(0, 50));
           }
@@ -6174,7 +5979,7 @@ function HomeInner() {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
 
 
@@ -6232,7 +6037,7 @@ function HomeInner() {
 
     if (resolvedSpotMomentumTarget) logPick(resolvedSpotMomentumTarget, "spot_momentum", smFramework);
     if (resolvedBeforeTheCrowdTarget) logPick(resolvedBeforeTheCrowdTarget, "before_the_crowd", btcFramework);
-  }, [smSymbol, btcSymbol, lastUpdated, mounted]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [smSymbol, btcSymbol, lastUpdated, mounted]);
 
 
 
@@ -6488,7 +6293,7 @@ function HomeInner() {
       }
 
       if (data) {
-        const symbols = data.map((item: any) => item.symbol);
+        const symbols = (data as Array<{ symbol: string }>).map((item) => item.symbol);
         setWatchlist(symbols);
       }
     } catch (error) {
@@ -7076,25 +6881,25 @@ function HomeInner() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.5 }}
             >
-              <img src="/logo.png" alt="HT Labs" className="h-12 w-auto" />
+              <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-12 w-auto" priority />
             </motion.div>
 
             <nav className="hidden flex-1 items-center gap-6 text-sm font-semibold text-zinc-500 md:flex">
-              <a className="text-orange-400 hover:text-orange-300 transition" href="/">
+              <Link className="text-orange-400 hover:text-orange-300 transition" href="/">
                 Before The Crowd
-              </a>
-              <a className="transition hover:text-orange-300" href="/">
+              </Link>
+              <Link className="transition hover:text-orange-300" href="/">
                 Dashboard
-              </a>
-              <a className="transition hover:text-orange-300" href="/scanner">
+              </Link>
+              <Link className="transition hover:text-orange-300" href="/scanner">
                 Scanner
-              </a>
-              <a className="transition hover:text-orange-300" href="/signals">
+              </Link>
+              <Link className="transition hover:text-orange-300" href="/signals">
                 Signals
-              </a>
-              <a className="transition hover:text-orange-300" href="/news">
+              </Link>
+              <Link className="transition hover:text-orange-300" href="/news">
                 News
-              </a>
+              </Link>
               <button onClick={() => document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth" })} className="transition hover:text-orange-300">
                 Watchlist
               </button>
@@ -7224,7 +7029,7 @@ function HomeInner() {
           <div className="mx-auto grid max-w-7xl gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <img src="/logo.png" alt="HT Labs" className="h-9 w-auto md:h-10" />
+                <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-9 w-auto md:h-10" priority />
                 <div className="hidden sm:block">
                   <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-400">
                     Global Search
@@ -7558,7 +7363,7 @@ function HomeInner() {
               <div className="flex flex-col gap-3 border-b border-white/10 pb-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-center gap-7">
                   <div className="flex items-center gap-2">
-                    <img src="/logo.png" alt="HT Labs" className="h-8 w-auto" />
+                    <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-8 w-auto" />
                   </div>
                   <nav className="hidden items-center gap-7 text-xs font-bold text-zinc-500 lg:flex">
                     {[
@@ -8248,7 +8053,7 @@ function HomeInner() {
                         {otherReads.length === 0 ? (
                           <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-4 text-center">
                             <p className="text-sm font-semibold text-zinc-400">No other qualifying reads right now.</p>
-                            <p className="mt-1 text-[10px] font-semibold text-zinc-600">The market's quiet, or nothing else clears the bar at the moment.</p>
+                            <p className="mt-1 text-[10px] font-semibold text-zinc-600">The market&apos;s quiet, or nothing else clears the bar at the moment.</p>
                           </div>
                         ) : (
                           <>
@@ -8451,7 +8256,7 @@ function HomeInner() {
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">Why it's moving</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">Why it&apos;s moving</p>
                   <div className="mt-4 space-y-3">
                     {liveHeroTarget ? [
                       [`${getRelativeVolume(liveHeroTarget)}x`, "More volume than usual", getRelativeVolume(liveHeroTarget) >= 3 ? "Unusual activity" : "Elevated activity", "text-green-300"],
@@ -8471,7 +8276,7 @@ function HomeInner() {
 
                 <div id="why-ht-likes-this" className="rounded-2xl border border-cyan-300/12 bg-cyan-400/[0.035] p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">HT's reasoning</p>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">HT&apos;s reasoning</p>
                     <span className="rounded-full border border-cyan-300/15 bg-cyan-400/[0.08] px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.12em] text-cyan-100">Plain English</span>
                   </div>
                   <h3 className="mt-3 text-xl font-black leading-tight text-white">
@@ -8611,10 +8416,10 @@ function HomeInner() {
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="text-sm font-black uppercase tracking-[0.2em] text-orange-300">Today's Battlefield</p>
+                    <p className="text-sm font-black uppercase tracking-[0.2em] text-orange-300">Today&apos;s Battlefield</p>
                     <p className="mt-0.5 text-xs font-semibold text-zinc-500">Every name HT is watching right now — each one has a story.</p>
                   </div>
-                  <a href="/scanner" className="text-xs font-black uppercase tracking-[0.14em] text-sky-300 hover:text-sky-200">Full Scanner →</a>
+                  <Link href="/scanner" className="text-xs font-black uppercase tracking-[0.14em] text-sky-300 hover:text-sky-200">Full Scanner →</Link>
                 </div>
                 <div className="mt-3 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10">
                   {(convictionLeaders.length > 0 ? convictionLeaders : [...stocks].sort((a, b) => getHTScore(b) - getHTScore(a))).slice(0, 10).map((stock) => {
@@ -8699,7 +8504,7 @@ function HomeInner() {
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 mb-2">Win Rate by Day</p>
                         <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-7">
-                          {marketIntel.dayStats.filter(Boolean).map((day: any) => (
+                          {marketIntel.dayStats.filter(Boolean).map((day) => (
                             <div key={day.day} className={`rounded-xl border p-2.5 text-center ${day.winRate >= 65 ? "border-green-400/20 bg-green-500/[0.06]" : day.winRate >= 50 ? "border-white/10 bg-white/[0.025]" : "border-red-400/15 bg-red-500/[0.04]"}`}>
                               <p className="text-[9px] font-black uppercase text-zinc-500">{day.day.slice(0, 3)}</p>
                               <p className={`mt-1 font-mono text-lg font-black ${day.winRate >= 65 ? "text-green-300" : day.winRate >= 50 ? "text-white" : "text-red-300"}`}>{day.winRate}%</p>
@@ -8713,7 +8518,7 @@ function HomeInner() {
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500 mb-2">Best Performing Patterns</p>
                         <div className="space-y-1.5">
-                          {marketIntel.patterns.slice(0, 3).map((p: any) => (
+                          {marketIntel.patterns.slice(0, 3).map((p) => (
                             <div key={p.pattern} className="flex items-center justify-between rounded-xl border border-white/10 bg-black/26 px-3 py-2">
                               <p className="text-xs font-black text-zinc-300">{p.pattern}</p>
                               <div className="flex items-center gap-3">
@@ -10848,7 +10653,7 @@ function HomeInner() {
 
         <footer className="border-t border-orange-500/10 bg-black/60 px-5 py-8">
           <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-start">
-            <img src="/logo.png" alt="HT Labs" className="h-12 w-auto" />
+            <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-12 w-auto" />
 
             <p className="text-sm text-zinc-500">
               Track live momentum, catalysts, daily briefings, relative volume,

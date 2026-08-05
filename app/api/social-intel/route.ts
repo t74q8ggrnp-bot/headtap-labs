@@ -7,6 +7,13 @@ import { NextResponse } from "next/server";
 
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
+type NewsArticle = {
+  publishedAt?: string;
+  title?: string;
+  description?: string;
+  source?: { name?: string };
+};
+
 async function getNewsIntel(ticker: string, apiKey: string) {
   try {
     const res = await fetch(
@@ -14,18 +21,19 @@ async function getNewsIntel(ticker: string, apiKey: string) {
       { cache: "no-store", signal: AbortSignal.timeout(5000) }
     );
     if (!res.ok) throw new Error(`NewsAPI ${res.status}`);
-    const data = await res.json();
-    const articles = data?.articles || [];
+    const data = (await res.json()) as { articles?: NewsArticle[] };
+    const articles = data.articles ?? [];
 
     const now = Date.now();
     const oneHour  = 60 * 60 * 1000;
     const sixHours = 6  * oneHour;
 
-    const lastHour  = articles.filter((a: any) => now - new Date(a.publishedAt).getTime() < oneHour).length;
-    const last6h    = articles.filter((a: any) => now - new Date(a.publishedAt).getTime() < sixHours).length;
+    const publishedAt = (article: NewsArticle) => new Date(article.publishedAt ?? "").getTime();
+    const lastHour = articles.filter((article) => now - publishedAt(article) < oneHour).length;
+    const last6h = articles.filter((article) => now - publishedAt(article) < sixHours).length;
 
     const text = articles
-      .map((a: any) => `${a.title ?? ""} ${a.description ?? ""}`)
+      .map((article) => `${article.title ?? ""} ${article.description ?? ""}`)
       .join(" ")
       .toLowerCase();
 
@@ -39,8 +47,8 @@ async function getNewsIntel(ticker: string, apiKey: string) {
 
     // Sources — deduplicated
     const sources = [...new Set(
-      articles.map((a: any) => a.source?.name).filter(Boolean)
-    )].slice(0, 5) as string[];
+      articles.map((article) => article.source?.name).filter((name): name is string => Boolean(name))
+    )].slice(0, 5);
 
     return {
       articles: articles.length,

@@ -8,6 +8,7 @@ import {
   mapSignalRow,
   type OpportunityCandidate,
   type OpportunityStrategy,
+  type SignalRow,
 } from "@/lib/canonical-opportunity";
 import { loadProxIntelligencePackets } from "@/lib/prox/intelligence";
 
@@ -15,6 +16,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const CONCURRENCY = 20;
+const RUN_ROW_PAGE_SIZE = 1_000;
+const PROX_LOOKUP_BATCH_SIZE = 100;
 type RequestType = "all" | "momentum" | "catalyst" | "before_crowd";
 const OPPORTUNITY_CACHE_HEADERS = {
   // The authoritative writer promotes a new run every five minutes. Keep the
@@ -36,15 +39,56 @@ function getSupabase() {
   return createClient(url, key);
 }
 
+async function loadAllRunRows(
+  supabase: ReturnType<typeof getSupabase>,
+  sourceRunId: string,
+): Promise<SignalRow[]> {
+  const rows: SignalRow[] = [];
+
+  // Supabase projects commonly cap a single select at 1,000 rows. A promoted
+  // run can be larger than that, so one unpaged query silently drops valid
+  // candidates before canonical scoring ever sees them. Order by ticker to
+  // keep page boundaries deterministic while the immutable run is read.
+  for (let from = 0; ; from += RUN_ROW_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("ht_signal_run_rows")
+      .select("*")
+      .eq("scan_run_id", sourceRunId)
+      .order("ticker", { ascending: true })
+      .range(from, from + RUN_ROW_PAGE_SIZE - 1);
+    if (error) throw error;
+
+    const page = (data ?? []) as SignalRow[];
+    rows.push(...page);
+    if (page.length < RUN_ROW_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
 async function evaluateAll(
   supabase: ReturnType<typeof getSupabase>,
   candidates: OpportunityCandidate[],
   strategy: OpportunityStrategy,
   sourceRunId: string,
 ) {
-  const proxPackets = await loadProxIntelligencePackets(
-    supabase,
-    candidates.map((candidate) => candidate.ticker),
+  const proxPacketBatches = await Promise.all(
+    Array.from(
+      { length: Math.ceil(candidates.length / PROX_LOOKUP_BATCH_SIZE) },
+      (_, index) =>
+        loadProxIntelligencePackets(
+          supabase,
+          candidates
+            .slice(
+              index * PROX_LOOKUP_BATCH_SIZE,
+              (index + 1) * PROX_LOOKUP_BATCH_SIZE,
+            )
+            .map((candidate) => candidate.ticker),
+        ),
+    ),
+  );
+  const proxPackets = new Map(
+    proxPacketBatches.flatMap((packets) => [...packets.entries()]),
   );
   const output: ReturnType<typeof evaluateCanonicalOpportunity>[] = [];
   for (let index = 0; index < candidates.length; index += CONCURRENCY) {
@@ -114,13 +158,9 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data: rows, error: rowError } = await supabase
-      .from("ht_signal_run_rows")
-      .select("*")
-      .eq("scan_run_id", run.id);
-    if (rowError) throw rowError;
+    const rows = await loadAllRunRows(supabase, String(run.id));
 
-    const candidates = (rows ?? [])
+    const candidates = rows
       .map(mapSignalRow)
       .filter((candidate) =>
         strategy === "spot_momentum"
@@ -176,7 +216,7 @@ export async function GET(req: Request) {
           candidateCounts: run.candidate_counts,
         },
         diagnostics: {
-          runRows: rows?.length ?? 0,
+          runRows: rows.length,
           strategyCandidates: candidates.length,
           evaluated: evaluated.length,
           eligible: eligible.length,

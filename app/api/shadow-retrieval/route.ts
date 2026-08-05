@@ -20,10 +20,12 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotPrice,
+  type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
 import { createClient } from "@supabase/supabase-js";
 import { loadSecurityMetadata } from "@/lib/security-metadata";
 import { getTradeFramework, TradeFrameworkResult } from "@/lib/canonical-trade-framework";
+import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 // Tonight's test runs were warm-cache (~2s) since metadata was already
@@ -34,6 +36,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
+const CRON_SECRET = process.env.CRON_SECRET;
 const LOCK_NAME = "shadow_retrieval";
 const LEASE_MINUTES = 10;
 const ENGINE_VERSION = "phase2-v1";
@@ -56,9 +59,8 @@ function getSupabase() {
 }
 
 function isAuthorized(req: Request): boolean {
-  const { searchParams } = new URL(req.url);
-  const secret = searchParams.get("secret");
-  return secret === process.env.CRON_SECRET || secret === "htlabs-internal";
+  if (!CRON_SECRET) return false;
+  return req.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
 }
 
 type PrecheckedTicker = {
@@ -111,7 +113,6 @@ export async function GET(req: Request) {
   const testLockOnly = searchParams.get("testLockOnly") === "true";
 
   const supabase = getSupabase();
-  const now = new Date();
   const startTime = Date.now();
 
   const { data: run, error: runError } = await supabase
@@ -236,6 +237,8 @@ export async function GET(req: Request) {
     finalUniqueShortlistSize: 0,
     shadowRowsAttempted: 0,
     shadowRowsWritten: 0,
+    tradeFrameworkFetched: 0,
+    tradeFrameworkCacheHits: 0,
   };
 
   try {
@@ -245,8 +248,8 @@ export async function GET(req: Request) {
       { cache: "no-store" }
     );
     if (!snapRes.ok) throw new Error(`Polygon snapshot failed: ${snapRes.status}`);
-    const snapData = await snapRes.json();
-    const allTickers: any[] = snapData?.tickers ?? [];
+    const snapData = (await snapRes.json()) as { tickers?: PolygonSnapshotRow[] };
+    const allTickers = snapData.tickers ?? [];
     diag.totalSnapshotTickers = allTickers.length;
 
     // ── 2. Cheap prechecks — free, from data already in hand ────────────
@@ -306,7 +309,7 @@ export async function GET(req: Request) {
       .select("ticker")
       .eq("decay_state", "active")
       .gte("last_seen_at", activeCatalystSince);
-    const catalystTickers = new Set((catalystRows ?? []).map((r: any) => r.ticker));
+    const catalystTickers = new Set((catalystRows ?? []).map((row) => String(row.ticker)));
     diag.activeCatalystCandidates = catalystTickers.size;
 
     // ── 5. Apply security-type gate, assign independent lane flags ───────
@@ -443,8 +446,8 @@ export async function GET(req: Request) {
         }
       }
     }
-    (diag as any).tradeFrameworkFetched = frameworkFetched;
-    (diag as any).tradeFrameworkCacheHits = frameworkCacheHits;
+    diag.tradeFrameworkFetched = frameworkFetched;
+    diag.tradeFrameworkCacheHits = frameworkCacheHits;
 
     // ── 7. Write immutable shadow rows, keyed by (scan_run_id, ticker) ────
     const shadowRows = finalCandidates.map((c) => {
@@ -504,13 +507,14 @@ export async function GET(req: Request) {
       note: "Shadow-only. ht_signals and production SM/BTC selection were not touched.",
       lockDiagnostics,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = getErrorMessage(err, "Shadow retrieval failed");
     await supabase.from("ht_scan_runs").update({
       status: "failed",
       completed_at: new Date().toISOString(),
-      error_summary: err.message,
+      error_summary: message,
     }).eq("id", run.id);
     await supabase.from("ht_scan_lock").update({ status: "released" }).eq("lock_name", LOCK_NAME).eq("run_id", run.id);
-    return NextResponse.json({ success: false, shadowOnly: true, runId: run.id, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, shadowOnly: true, runId: run.id, error: message }, { status: 500 });
   }
 }

@@ -4,6 +4,7 @@
 // separate UI" block. No behavior change — same JSX, same canonical data
 // sources, same handlers, now passed in as props instead of closed over.
 import type { Session } from "@supabase/supabase-js";
+import Image from "next/image";
 import type {
   DecisionTraceDisplay as DecisionTraceModel,
   BullBearAnalysis,
@@ -98,7 +99,7 @@ export default function MobileExperience({
         {/* Mobile Header */}
         <div className="flex-shrink-0 border-b border-white/10 bg-black/80 backdrop-blur-xl px-4 pt-safe">
           <div className="flex items-center justify-between gap-3 py-3">
-            <img src="/logo.png" alt="HT Labs" className="h-8 w-auto" />
+            <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-8 w-auto" priority />
             <div className="flex-1 mx-3">
               <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-3 py-2">
                 <span className="text-zinc-600 text-sm">⌕</span>
@@ -282,7 +283,7 @@ export default function MobileExperience({
               {mobileScannerReads.length === 0 ? (
                 <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-6 text-center">
                   <p className="text-sm font-semibold text-zinc-400">No qualifying reads right now.</p>
-                  <p className="mt-1 text-[10px] font-semibold text-zinc-600">The market's quiet, or nothing clears the bar at the moment.</p>
+                  <p className="mt-1 text-[10px] font-semibold text-zinc-600">The market&apos;s quiet, or nothing clears the bar at the moment.</p>
                 </div>
               ) : (
                 <div className="space-y-2">

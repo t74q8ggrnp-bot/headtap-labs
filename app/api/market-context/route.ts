@@ -4,13 +4,13 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotPrice,
+  type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
+import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY!;
-
-const EXCLUDED_FROM_VIX = new Set(["SQQQ","TQQQ","UVXY","SVXY"]);
 
 export async function GET() {
   try {
@@ -29,9 +29,11 @@ export async function GET() {
     }
 
     const data = await res.json();
-    const tickerMap: Record<string, any> = {};
-    for (const t of data?.tickers ?? []) {
-      tickerMap[t.ticker] = t;
+    const tickerMap: Record<string, PolygonSnapshotRow> = {};
+    const snapshotRows: PolygonSnapshotRow[] = Array.isArray(data?.tickers) ? data.tickers : [];
+    for (const t of snapshotRows) {
+      const ticker = String(t.ticker ?? "");
+      if (ticker) tickerMap[ticker] = t;
     }
 
     const parse = (symbol: string) => {
@@ -79,8 +81,9 @@ export async function GET() {
       timestamp: new Date().toISOString(),
     });
 
-  } catch (err: any) {
-    console.error("[market-context]", err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = getErrorMessage(err, "Market context request failed");
+    console.error("[market-context]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

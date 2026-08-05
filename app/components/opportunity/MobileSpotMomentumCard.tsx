@@ -8,6 +8,7 @@ import {
 import DecisionTrace from "./DecisionTrace";
 import OpportunityMetrics from "./OpportunityMetrics";
 import OpportunityWindow from "./OpportunityWindow";
+import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
 import ProxPulse from "./ProxPulse";
 
 type MobileSpotMomentumCardProps = {
@@ -81,6 +82,12 @@ export default function MobileSpotMomentumCard({
       </div>
 
       {framework && <OpportunityWindow framework={framework} compact />}
+
+      {opportunity.explosionAssessment?.state === "price_discovery" && (
+        <div className="border-b border-white/8 px-5 py-4">
+          <PriceDiscoveryWindow assessment={opportunity.explosionAssessment} />
+        </div>
+      )}
 
       {opportunity.signals.length > 0 && (
         <div className="border-b border-white/8 px-5 py-3">
