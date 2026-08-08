@@ -12,6 +12,7 @@ import {
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
 import { getErrorMessage } from "@/lib/error-message";
+import { hydrateSnapshotLeaders } from "@/lib/intraday-snapshot-hydration";
 import { loadSecurityMetadata } from "@/lib/security-metadata";
 import { createClient } from "@supabase/supabase-js";
 
@@ -20,7 +21,7 @@ export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v8-live-liquidity";
+const ENGINE_VERSION = "signal-writer-v9-minute-hydration";
 
 const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
 const RECLAIM_MIN_RVOL = 2;
@@ -75,7 +76,10 @@ function getFusedMomentumMove(candidate: Candidate) {
   return fusedCore / 3;
 }
 
-function getEasternSession() {
+function getEasternSession(): {
+  name: "pre_market" | "regular" | "after_hours" | "closed";
+  expectedVolumeFraction: number;
+} {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     weekday: "short",
@@ -259,20 +263,37 @@ export async function GET(req: Request) {
     const tickers = payload.tickers ?? [];
     if (!tickers.length) throw new Error("Polygon returned an empty market snapshot.");
 
+    const hydratedLeaders = await hydrateSnapshotLeaders(
+      tickers,
+      POLYGON_KEY,
+      marketSession.name,
+    );
+
     const candidates = new Map<string, Candidate>();
     let liveLiquidityOverrides = 0;
+    let hydratedCandidates = 0;
     for (const row of tickers) {
       const ticker = String(row?.ticker ?? "").toUpperCase();
       if (!ticker) continue;
-      const price = resolveSnapshotPrice(row);
+      const hydrated = hydratedLeaders.get(ticker);
+      const price = hydrated?.price ?? resolveSnapshotPrice(row);
       const changePercent = resolveSnapshotChangePercent(row, price);
-      const sessionOpenPrice = resolveSnapshotSessionOpen(row);
-      const sessionHighPrice = resolveSnapshotSessionHigh(row, price);
+      const sessionOpenPrice =
+        hydrated?.sessionOpenPrice ?? resolveSnapshotSessionOpen(row);
+      const sessionHighPrice =
+        hydrated?.sessionHighPrice ?? resolveSnapshotSessionHigh(row, price);
       const changeFromOpenPercent =
+        hydrated?.changeFromOpenPercent ??
         resolveSnapshotChangeFromOpenPercent(row, price);
       const pullbackFromSessionHighPercent =
-        resolveSnapshotPullbackFromSessionHighPercent(row, price);
-      const currentVolume = Math.max(Number(row?.day?.v || 0), Number(row?.min?.av || 0));
+        sessionHighPrice !== null && sessionHighPrice > 0
+          ? Math.max(0, ((sessionHighPrice - price) / sessionHighPrice) * 100)
+          : resolveSnapshotPullbackFromSessionHighPercent(row, price);
+      const currentVolume = Math.max(
+        Number(row?.day?.v || 0),
+        Number(row?.min?.av || 0),
+        hydrated?.currentVolume ?? 0,
+      );
       const previousVolume = Number(row?.prevDay?.v || 0);
       if (price <= 0) continue;
       const liveLiquidityOverride =
@@ -286,7 +307,11 @@ export async function GET(req: Request) {
         continue;
       }
       if (liveLiquidityOverride) liveLiquidityOverrides += 1;
-      const rawVolumeRatio = currentVolume > 0 ? currentVolume / previousVolume : 0;
+      if (hydrated) hydratedCandidates += 1;
+      const rawVolumeRatio =
+        currentVolume > 0 && previousVolume > 0
+          ? currentVolume / previousVolume
+          : 0;
       const rvol = Math.min(25, rawVolumeRatio / marketSession.expectedVolumeFraction);
       const catalyst = catalystMap.get(ticker);
       const retrievedForReclaim = Boolean(
@@ -417,6 +442,8 @@ export async function GET(req: Request) {
         unsupportedSecurityTypes,
         unknownSecurityTypes,
         liveLiquidityOverrides,
+        hydratedCandidates,
+        hydrationCandidatesRequested: hydratedLeaders.size,
       },
     }).eq("id", run.id);
 
