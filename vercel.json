@@ -25,12 +25,12 @@
       "schedule": "*/5 0 * * 2-6"
     },
     {
-      "path": "/api/outcome-tracker",
-      "schedule": "0 20 * * 1-5"
+      "path": "/api/opportunity-ledger",
+      "schedule": "4-59/5 8-23 * * 1-5"
     },
     {
-      "path": "/api/outcome-tracker",
-      "schedule": "0 0 * * 2-6"
+      "path": "/api/opportunity-ledger",
+      "schedule": "4-59/5 0 * * 2-6"
     },
     {
       "path": "/api/prox-sec-connector",

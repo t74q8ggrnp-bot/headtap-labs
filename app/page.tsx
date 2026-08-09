@@ -43,7 +43,6 @@ import {
   type Opportunity as APIOpportunity,
 } from "@/lib/opportunity-model";
 import {
-  getMomentumScore,
   getRiskLabel,
   getRelativeVolume,
   getVolumeAcceleration,
@@ -448,29 +447,6 @@ function HomeInner() {
       setMarketIntelLoaded(true);
     } catch (e) {
       console.warn("Market intel fetch failed:", e);
-    }
-  };
-
-  const logMarketBehaviorSignal = async (stock: Stock, socialScore = 0, crowdStage = 1) => {
-    try {
-      await fetch("/api/market-behavior", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticker: stock.symbol,
-          htScore: getHTScore(stock),
-          momentumScore: getMomentumScore ? getMomentumScore(stock) : 0,
-          volumeScore: Math.round(getRelativeVolume(stock) * 10),
-          socialScore,
-          crowdStage,
-          signalState: getSimpleConvictionRead(stock).state,
-          pattern: detectPatternSignal(stock).name,
-          price: stock.price,
-          userId: session?.user?.id ?? null,
-        }),
-      });
-    } catch (e) {
-      console.warn("Market behavior log failed:", e);
     }
   };
 
@@ -5922,11 +5898,6 @@ function HomeInner() {
         .catch(e => console.warn("Scanner expansion failed:", e));
     }
 
-    // Log top conviction signal to market behavior
-    if (stocks.length > 0 && mounted) {
-      const top = stocks[0];
-      logMarketBehaviorSignal(top, 0, 1);
-    }
   }, [stocks]);
 
   // Load market intelligence and premarket once on mount
@@ -5990,60 +5961,6 @@ function HomeInner() {
   // ATR is cached per ticker (1hr TTL) — not refetched every 30s.
   const smSymbol = resolvedSpotMomentumTarget?.symbol ?? "";
   const btcSymbol = resolvedBeforeTheCrowdTarget?.symbol ?? "";
-
-  // Log top picks to ht_scan_log with full engine data whenever active picks change.
-  useEffect(() => {
-    if (!mounted || !lastUpdated) return;
-
-    const logPick = (stock: Stock, engine: "spot_momentum" | "before_the_crowd", fw: typeof smFramework) => {
-      try {
-        const canonicalPick = engine === "before_the_crowd" ? apiBeforeCrowdPick : apiMomentum;
-        const score = Math.max(0, Math.min(100, Math.round(canonicalPick?.opportunityScore ?? 0)));
-        const stack = buildPressureStack(stock);
-        const isDual = isDualEngineConfirmation;
-        const isBTC = engine === "before_the_crowd";
-        const conv = Math.max(0, Math.min(100, Math.round(canonicalPick?.confidence ?? 0)));
-        const saturation = Math.max(0, Math.min(100, canonicalPick?.attentionScore ?? 0));
-        const reasonSentence = canonicalPick?.signals?.[0] ?? canonicalPick?.whyItMatters ?? "Canonical backend opportunity selected.";
-
-        supabase.from("ht_scan_log").insert({
-          ticker: stock.symbol,
-          price: stock.price,
-          rank: 1,
-          ht_confidence: score,
-          ht_score: score,
-          state: isBTC
-            ? (conv >= 80 ? "High Conviction" : conv >= 65 ? "Building Conviction" : conv >= 50 ? "Early Conviction" : "Watch Only")
-            : canonicalPick?.stage ?? "Watch",
-          engine,
-          dual_engine: isDual,
-          source: "top_pick",
-          change_percent: stock.change,
-          relative_volume: canonicalPick?.relativeVolume ?? 0,
-          catalyst_score: canonicalPick?.catalystScore ?? 0,
-          pattern: canonicalPick?.signals?.[1] ?? canonicalPick?.stage ?? "Canonical",
-          signal_state: stock.signalState ?? null,
-          crowd_score: saturation,
-          trap_score: canonicalPick?.riskScore ?? stack.trapRiskScore,
-          decision: getHTStance(stock).label,
-          reasoning: reasonSentence,
-          upside_min: fw?.uptideMin ?? null,
-          upside_max: fw?.uptideMax ?? null,
-          risk_zone: fw?.riskZone ?? null,
-          rr_ratio: fw?.rr ?? null,
-        }).then(({ error }) => {
-          if (error) console.warn(`[${engine} log]:`, error.message);
-        });
-      } catch (e) {
-        console.warn(`[${engine} log] error:`, e);
-      }
-    };
-
-    if (resolvedSpotMomentumTarget) logPick(resolvedSpotMomentumTarget, "spot_momentum", smFramework);
-    if (resolvedBeforeTheCrowdTarget) logPick(resolvedBeforeTheCrowdTarget, "before_the_crowd", btcFramework);
-  }, [smSymbol, btcSymbol, lastUpdated, mounted]);
-
-
 
   useEffect(() => {
     if (!mounted) return;

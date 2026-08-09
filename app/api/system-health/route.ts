@@ -56,6 +56,18 @@ function isActiveMarketSession(now = new Date()) {
   return minutes >= 240 && minutes < 1200;
 }
 
+function isWeekend(now = new Date()) {
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+  }).format(now);
+  return weekday === "Sat" || weekday === "Sun";
+}
+
+function finiteAgeLimit(value: number) {
+  return Number.isFinite(value) ? Number(value.toFixed(2)) : null;
+}
+
 function getSupabase() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey =
@@ -72,9 +84,13 @@ function getSupabase() {
 
 export async function GET() {
   const checks: HealthCheck[] = [];
-  const maxSignalAgeHours = isActiveMarketSession()
-    ? ACTIVE_MAX_SIGNAL_AGE_HOURS
-    : CLOSED_MAX_SIGNAL_AGE_HOURS;
+  const activeMarketSession = isActiveMarketSession();
+  const closedWeekend = isWeekend();
+  const maxSignalAgeHours = closedWeekend
+    ? Infinity
+    : activeMarketSession
+      ? ACTIVE_MAX_SIGNAL_AGE_HOURS
+      : CLOSED_MAX_SIGNAL_AGE_HOURS;
 
   const hasSupabaseUrl = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const hasSupabaseKey = Boolean(
@@ -139,7 +155,9 @@ export async function GET() {
       message: !promotedRun
         ? "No promoted authoritative scan run exists."
         : runAge <= maxSignalAgeHours
-          ? "Latest authoritative scan run is fresh."
+          ? closedWeekend
+            ? "Latest authoritative scan run is retained for the closed weekend."
+            : "Latest authoritative scan run is fresh."
           : "Latest authoritative scan run is stale.",
       detail: promotedRun ? {
         runId: promotedRun.id,
@@ -332,15 +350,19 @@ export async function GET() {
       : null;
     if (proxError) throw proxError;
     const proxAge = hoursSince(proxFeature?.computed_at);
-    const proxMaxAge = isActiveMarketSession()
-      ? ACTIVE_MAX_PROX_AGE_HOURS
-      : CLOSED_MAX_SIGNAL_AGE_HOURS;
+    const proxMaxAge = closedWeekend
+      ? Infinity
+      : activeMarketSession
+        ? ACTIVE_MAX_PROX_AGE_HOURS
+        : CLOSED_MAX_SIGNAL_AGE_HOURS;
     checks.push({
       name: "prox_market_pulse_freshness",
       ok: Boolean(proxFeature) && proxAge <= proxMaxAge,
       message:
         proxFeature && proxAge <= proxMaxAge
-          ? "ProX market pulse is fresh."
+          ? closedWeekend
+            ? "Latest ProX market pulse is retained for the closed weekend."
+            : "ProX market pulse is fresh."
           : "ProX market pulse is missing or stale.",
       detail: proxFeature
         ? {
@@ -349,7 +371,9 @@ export async function GET() {
             ageMinutes: Number.isFinite(proxAge)
               ? Number((proxAge * 60).toFixed(1))
               : null,
-            maxAgeMinutes: Number((proxMaxAge * 60).toFixed(1)),
+            maxAgeMinutes: Number.isFinite(proxMaxAge)
+              ? Number((proxMaxAge * 60).toFixed(1))
+              : null,
             windowHighPrice:
               "window_high_price" in proxFeature
                 ? proxFeature.window_high_price
@@ -442,11 +466,13 @@ export async function GET() {
       name: "signal_freshness",
       ok: age <= maxSignalAgeHours,
       message: age <= maxSignalAgeHours
-        ? "Latest verified signal is within acceptable freshness window."
+        ? closedWeekend
+          ? "Latest verified signal is retained for the closed weekend."
+          : "Latest verified signal is within acceptable freshness window."
         : "Latest signal is too stale for homepage confidence.",
       detail: {
         ageHours: Number.isFinite(age) ? Number(age.toFixed(2)) : null,
-        maxAgeHours: Number(maxSignalAgeHours.toFixed(2)),
+        maxAgeHours: finiteAgeLimit(maxSignalAgeHours),
         scanned_at: latestSignal.scanned_at,
       },
     });
@@ -512,6 +538,71 @@ export async function GET() {
         detail: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // This is the canonical record of what HT actually displayed and what price
+  // did afterward. A missing migration or impossible MFE/MAE arithmetic must be
+  // visible here instead of silently producing empty performance history.
+  try {
+    const { data: ledger, error: ledgerError } = await supabase
+      .from("ht_opportunity_ledger")
+      .select(
+        "ticker,trading_date,first_seen_at,first_seen_price,highest_price_after_signal,lowest_price_after_signal,max_gain_percent,max_drawdown_percent,updated_at",
+      )
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (ledgerError) throw ledgerError;
+
+    if (!ledger) {
+      checks.push({
+        name: "opportunity_outcome_ledger",
+        ok: true,
+        message: "Opportunity ledger schema is ready and awaiting its first market-session record.",
+      });
+    } else {
+      const entry = Number(ledger.first_seen_price);
+      const high = Number(ledger.highest_price_after_signal);
+      const low = Number(ledger.lowest_price_after_signal);
+      const storedMfe = Number(ledger.max_gain_percent);
+      const storedMae = Number(ledger.max_drawdown_percent);
+      const calculatedMfe = entry > 0 ? ((high - entry) / entry) * 100 : NaN;
+      const calculatedMae = entry > 0 ? ((low - entry) / entry) * 100 : NaN;
+      const validLedgerMath =
+        entry > 0 &&
+        high >= entry &&
+        low <= entry &&
+        Number.isFinite(storedMfe) &&
+        Number.isFinite(storedMae) &&
+        Math.abs(storedMfe - calculatedMfe) <= 0.05 &&
+        Math.abs(storedMae - calculatedMae) <= 0.05;
+
+      checks.push({
+        name: "opportunity_outcome_ledger",
+        ok: validLedgerMath,
+        message: validLedgerMath
+          ? "First-discovery price and post-discovery outcome math are valid."
+          : "Opportunity ledger contains invalid first-price or MFE/MAE arithmetic.",
+        detail: {
+          ticker: ledger.ticker,
+          tradingDate: ledger.trading_date,
+          firstSeenAt: ledger.first_seen_at,
+          firstSeenPrice: entry,
+          highestPriceAfterSignal: high,
+          lowestPriceAfterSignal: low,
+          maxGainPercent: storedMfe,
+          maxDrawdownPercent: storedMae,
+          updatedAt: ledger.updated_at,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "opportunity_outcome_ledger",
+      ok: false,
+      message: "Opportunity ledger is unavailable; run migration 0008 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 
   const hardFailures = checks.filter((check) => !check.ok);
