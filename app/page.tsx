@@ -6177,8 +6177,9 @@ function HomeInner() {
           display: none !important;
         }
 
-        /* Auth section always visible regardless of mode */
-        .ht-simplified-ui #account { display: block !important; }
+        /* The integrated command header owns sign-in. The full account/profile
+           section belongs only to the Portfolio workspace. */
+        .ht-simplified-ui #account { display: none !important; }
 
         .ht-simplified-ui #capital-intelligence { order: 2 !important; }
         .ht-simplified-ui #portfolio-intelligence { order: 3 !important; }
@@ -6365,6 +6366,15 @@ function HomeInner() {
           z-index: 30;
         }
 
+        [data-active-mode="capital"] #mode-switcher,
+        [data-active-mode="portfolio"] #mode-switcher,
+        [data-active-mode="signals"] #mode-switcher,
+        [data-active-mode="replay"] #mode-switcher {
+          display: block !important;
+        }
+
+        [data-active-mode="portfolio"] #account { display: block !important; }
+
         [data-active-mode="command"] #capital-intelligence,
         [data-active-mode="command"] #portfolio-intelligence,
         [data-active-mode="command"] #interactive-intelligence,
@@ -6413,7 +6423,6 @@ function HomeInner() {
         [data-active-mode="portfolio"] #scanner { display: none !important; }
 
         [data-active-mode="signals"] #mobile-command,
-        [data-active-mode="signals"] #account,
         [data-active-mode="signals"] #capital-intelligence,
         [data-active-mode="signals"] #portfolio-intelligence,
         [data-active-mode="signals"] #watchlist,
@@ -6427,7 +6436,6 @@ function HomeInner() {
 
         [data-active-mode="replay"] #mobile-command,
         [data-active-mode="replay"] #conviction-engine,
-        [data-active-mode="replay"] #account,
         [data-active-mode="replay"] #capital-intelligence,
         [data-active-mode="replay"] #portfolio-intelligence,
         [data-active-mode="replay"] #watchlist,
