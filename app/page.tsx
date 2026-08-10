@@ -35,7 +35,6 @@ import {
   opportunityToStock,
   selectDistinctBeforeCrowd,
   tradeFrameworkToDisplay,
-  type LiveOpportunityQuotes,
   type Opportunity as APIOpportunity,
 } from "@/lib/opportunity-model";
 import {
@@ -222,8 +221,6 @@ function HomeInner() {
   const initialStocks: Stock[] = [];
 
   const [stocks, setStocks] = useState<Stock[]>(initialStocks);
-  const [liveOpportunityQuotes, setLiveOpportunityQuotes] =
-    useState<LiveOpportunityQuotes>({});
   const [ticker, setTicker] = useState("");
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
@@ -5176,23 +5173,6 @@ function HomeInner() {
         quotes = data.quotes ?? {};
       } catch { /* silent */ }
     }
-    const nextLiveQuotes: LiveOpportunityQuotes = {};
-    for (const [symbol, quote] of Object.entries(quotes)) {
-      if (
-        Number.isFinite(quote.price) &&
-        quote.price > 0 &&
-        Number.isFinite(quote.change)
-      ) {
-        nextLiveQuotes[symbol] = {
-          price: quote.price,
-          change: quote.change,
-        };
-      }
-    }
-    if (Object.keys(nextLiveQuotes).length > 0) {
-      setLiveOpportunityQuotes(nextLiveQuotes);
-    }
-
     // Step 3: Parse ht_signals if they arrived — optional enrichment
     const signalsMap: Record<string, {
       relativeVolume?: number;
@@ -7150,7 +7130,6 @@ function HomeInner() {
                                   watched={watchlist.includes(apiHero.ticker)}
                                   onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
                                   onWatch={() => toggleWatchlist(apiHero.ticker)}
-                                  liveQuotes={liveOpportunityQuotes}
                                 />
                               )}
                               {apiHero && (
@@ -7167,7 +7146,6 @@ function HomeInner() {
                             <MomentumContenders
                               candidates={apiMomentumRunnersUp}
                               onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
-                              liveQuotes={liveOpportunityQuotes}
                             />
                           </div>
                           {/* ── Bottom strip — 4 quick stats ── */}
@@ -7208,7 +7186,6 @@ function HomeInner() {
                         updatedLabel={mounted && lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}
                         onOpen={() => setSelectedStock(opportunityToStock(apiBeforeCrowdPick))}
                         onWatch={() => toggleWatchlist(apiBeforeCrowdPick.ticker)}
-                        liveQuotes={liveOpportunityQuotes}
                       />
                     )}
 
@@ -9778,7 +9755,6 @@ function HomeInner() {
         lastUpdated={lastUpdated}
         canonicalMobileOpportunities={canonicalMobileOpportunities}
         momentumRunnersUp={apiMomentumRunnersUp}
-        liveQuotes={liveOpportunityQuotes}
         mobileCardIndex={mobileCardIndex}
         setMobileCardIndex={setMobileCardIndex}
         mobileTouchStart={mobileTouchStart}

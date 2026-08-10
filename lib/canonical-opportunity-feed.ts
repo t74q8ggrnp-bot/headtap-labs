@@ -13,6 +13,10 @@ import {
   type SignalRow,
 } from "@/lib/canonical-opportunity";
 import { loadProxIntelligencePackets } from "@/lib/prox/intelligence";
+import {
+  attachOpportunityDisplayQuote,
+  loadOpportunityDisplayQuotes,
+} from "@/lib/opportunity-display-quotes";
 
 const CONCURRENCY = 20;
 const RUN_ROW_PAGE_SIZE = 1_000;
@@ -204,8 +208,20 @@ export async function buildCanonicalOpportunityFeed({
           .slice(0, 10)
       : [];
 
+  const visibleOpportunities = eligible.slice(0, limit);
+  const visibleContinuationCandidates = continuationCandidates;
+  const displayQuotes = await loadOpportunityDisplayQuotes(
+    [
+      ...visibleOpportunities,
+      ...momentumRadar,
+      ...(includeContinuation ? visibleContinuationCandidates : []),
+    ].map((candidate) => candidate.ticker),
+  );
+  const withDisplayQuote = <T extends (typeof evaluated)[number]>(candidate: T) =>
+    attachOpportunityDisplayQuote(candidate, displayQuotes);
+
   return {
-    opportunities: eligible.slice(0, limit),
+    opportunities: visibleOpportunities.map(withDisplayQuote),
     strategy,
     sourceRun: {
       id: run.id,
@@ -228,7 +244,7 @@ export async function buildCanonicalOpportunityFeed({
       ).length,
       momentumRadar: momentumRadar.length,
     },
-    momentumRadar,
+    momentumRadar: momentumRadar.map(withDisplayQuote),
     ...(debug
       ? {
           rejectedSample: ranked
@@ -245,7 +261,12 @@ export async function buildCanonicalOpportunityFeed({
             })),
         }
       : {}),
-    ...(includeContinuation ? { continuationCandidates } : {}),
+    ...(includeContinuation
+      ? {
+          continuationCandidates:
+            visibleContinuationCandidates.map(withDisplayQuote),
+        }
+      : {}),
     engineVersion: CANONICAL_OPPORTUNITY_VERSION,
     timestamp: new Date().toISOString(),
   };

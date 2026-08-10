@@ -15,6 +15,8 @@ export type Opportunity = {
   ticker: string;
   price: number;
   change: number;
+  displayQuoteLive?: boolean;
+  displayQuoteAsOf?: string | null;
   previousCloseChange?: number;
   sessionOpenPrice?: number | null;
   changeFromOpenPercent?: number | null;
@@ -64,40 +66,6 @@ export type Opportunity = {
 };
 
 export type OpportunityStock = MarketStock;
-export type LiveOpportunityQuote = {
-  price: number;
-  change: number;
-};
-export type LiveOpportunityQuotes = Record<string, LiveOpportunityQuote>;
-
-export function resolveOpportunityDisplayQuote(
-  opportunity: Opportunity,
-  liveQuotes?: LiveOpportunityQuotes,
-) {
-  const liveQuote = liveQuotes?.[opportunity.ticker];
-  if (
-    liveQuote &&
-    Number.isFinite(liveQuote.price) &&
-    liveQuote.price > 0 &&
-    Number.isFinite(liveQuote.change)
-  ) {
-    // Keep the public move aligned with the canonical opportunity decision:
-    // Polygon's live quote change is measured from the previous close. The
-    // session-open move is a separate ProX/scoring input and must not replace
-    // the full-day percentage shown beside a ranked momentum candidate.
-    return {
-      price: liveQuote.price,
-      change: liveQuote.change,
-      isLive: true,
-    };
-  }
-  return {
-    price: opportunity.price,
-    change: opportunity.change,
-    isLive: false,
-  };
-}
-
 const objectValue = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -130,10 +98,14 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
 
   return {
     ticker,
-    price: numberValue(source.price),
+    price: numberValue(source.displayPrice ?? source.price),
     change: numberValue(
       source.displayChange ?? source.change ?? source.change_percent,
     ),
+    displayQuoteLive: source.displayQuoteLive === true,
+    displayQuoteAsOf: source.displayQuoteAsOf
+      ? String(source.displayQuoteAsOf)
+      : null,
     previousCloseChange: numberValue(
       source.change ?? source.change_percent,
     ),

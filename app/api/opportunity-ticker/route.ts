@@ -11,6 +11,10 @@ import {
   type SignalRow,
 } from "@/lib/canonical-opportunity";
 import { loadProxIntelligencePackets } from "@/lib/prox/intelligence";
+import {
+  attachOpportunityDisplayQuote,
+  loadOpportunityDisplayQuotes,
+} from "@/lib/opportunity-display-quotes";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -131,25 +135,30 @@ export async function GET(req: Request) {
       sourceRunId,
       proxPackets.get(ticker) ?? null,
     );
+    const displayQuotes = await loadOpportunityDisplayQuotes([ticker]);
+    const displayedOpportunity = attachOpportunityDisplayQuote(
+      opportunity,
+      displayQuotes,
+    );
     const displayEligibility = opportunity.displayEligibility;
 
     if (mode === "explain") {
       return NextResponse.json({
         ticker,
         explanation: {
-          summary: opportunity.whyItMatters,
-          whatChanged: opportunity.whatChanged,
-          riskNote: opportunity.riskNote,
-          stage: `${opportunity.stageEmoji} ${opportunity.stage}`,
-          confidence: `${opportunity.confidence}% confidence`,
-          signals: opportunity.signals,
+          summary: displayedOpportunity.whyItMatters,
+          whatChanged: displayedOpportunity.whatChanged,
+          riskNote: displayedOpportunity.riskNote,
+          stage: `${displayedOpportunity.stageEmoji} ${displayedOpportunity.stage}`,
+          confidence: `${displayedOpportunity.confidence}% confidence`,
+          signals: displayedOpportunity.signals,
           eligibility: displayEligibility.eligible,
           rejectionReasons: displayEligibility.reasons,
           dataQualityWarnings: opportunity.rejectionReasons,
-          strategy: opportunity.strategy,
-          tier: opportunity.tier,
-          explosionAssessment: opportunity.explosionAssessment,
-          proxIntelligence: opportunity.proxIntelligence,
+          strategy: displayedOpportunity.strategy,
+          tier: displayedOpportunity.tier,
+          explosionAssessment: displayedOpportunity.explosionAssessment,
+          proxIntelligence: displayedOpportunity.proxIntelligence,
           verdict: displayEligibility.eligible
             ? `HT currently classifies ${ticker} as a ${opportunity.tier} opportunity for ${opportunity.strategy}.`
             : `HT is monitoring ${ticker}, but it does not currently pass the complete opportunity gate.`,
@@ -163,7 +172,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ticker,
-      opportunity,
+      opportunity: displayedOpportunity,
       scannedAt: row.scanned_at,
       sourceTable: "ht_signal_run_rows",
       sourceRunId,

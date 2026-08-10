@@ -1,8 +1,5 @@
 import type { DecisionTraceDisplay, TradeFrameworkDisplay } from "@/lib/contracts/market";
-import type {
-  LiveOpportunityQuotes,
-  Opportunity,
-} from "@/lib/opportunity-model";
+import type { Opportunity } from "@/lib/opportunity-model";
 import OpportunityBottomStats from "./OpportunityBottomStats";
 import OpportunityScorePanel from "./OpportunityScorePanel";
 import OpportunityStory from "./OpportunityStory";
@@ -16,7 +13,6 @@ type BeforeCrowdCardProps = {
   updatedLabel: string;
   onOpen: () => void;
   onWatch: () => void;
-  liveQuotes?: LiveOpportunityQuotes;
 };
 
 export default function BeforeCrowdCard({
@@ -28,7 +24,6 @@ export default function BeforeCrowdCard({
   updatedLabel,
   onOpen,
   onWatch,
-  liveQuotes,
 }: BeforeCrowdCardProps) {
   const isCatalyst = opportunity.catalystScore >= 20 || opportunity.catalystTags.length > 0;
 
@@ -57,7 +52,6 @@ export default function BeforeCrowdCard({
           watched={watched}
           onOpen={onOpen}
           onWatch={onWatch}
-          liveQuotes={liveQuotes}
         />
         <OpportunityScorePanel
           opportunity={opportunity}

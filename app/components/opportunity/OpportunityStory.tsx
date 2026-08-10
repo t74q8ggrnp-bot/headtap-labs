@@ -2,8 +2,6 @@ import OpportunityWindow from "./OpportunityWindow";
 import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
 import {
   getOpportunityPresentation,
-  resolveOpportunityDisplayQuote,
-  type LiveOpportunityQuotes,
   type Opportunity,
 } from "@/lib/opportunity-model";
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
@@ -15,7 +13,6 @@ type OpportunityStoryProps = {
   watched: boolean;
   onOpen: () => void;
   onWatch: () => void;
-  liveQuotes?: LiveOpportunityQuotes;
 };
 
 export default function OpportunityStory({
@@ -25,10 +22,8 @@ export default function OpportunityStory({
   watched,
   onOpen,
   onWatch,
-  liveQuotes,
 }: OpportunityStoryProps) {
   const view = getOpportunityPresentation(opportunity);
-  const displayQuote = resolveOpportunityDisplayQuote(opportunity, liveQuotes);
   const explosion = opportunity.explosionAssessment;
   const catalyst = opportunity.catalystTags[0] ?? null;
   const catalystPlay = opportunity.catalystScore >= 20 || Boolean(catalyst);
@@ -57,11 +52,11 @@ export default function OpportunityStory({
             {opportunity.ticker}
           </p>
           <div className="flex items-center gap-2 pb-1">
-            <span className="font-mono text-xl font-black text-white">${displayQuote.price.toFixed(2)}</span>
-            <span className={`font-mono text-sm font-black ${displayQuote.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-              {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(2)}%
+            <span className="font-mono text-xl font-black text-white">${opportunity.price.toFixed(2)}</span>
+            <span className={`font-mono text-sm font-black ${opportunity.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(2)}%
             </span>
-            {displayQuote.isLive && (
+            {opportunity.displayQuoteLive && (
               <span className="text-[7px] font-black uppercase tracking-[0.14em] text-green-400">
                 Live
               </span>

@@ -15,6 +15,7 @@ type DisplayRole = "hero" | "contender" | "radar";
 type OpportunitySnapshot = {
   ticker?: unknown;
   price?: unknown;
+  displayPrice?: unknown;
   opportunityScore?: unknown;
   visibilityState?: unknown;
   sourceRunId?: unknown;
@@ -104,7 +105,8 @@ function mapDisplayed(
   rank: number,
 ): DisplayedOpportunity | null {
   const ticker = String(opportunity.ticker ?? "").trim().toUpperCase();
-  const price = finiteNumber(opportunity.price);
+  const price =
+    finiteNumber(opportunity.displayPrice) ?? finiteNumber(opportunity.price);
   if (!ticker || price === null || price <= 0) return null;
   return {
     ticker,

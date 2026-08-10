@@ -1,19 +1,13 @@
-import {
-  resolveOpportunityDisplayQuote,
-  type LiveOpportunityQuotes,
-  type Opportunity,
-} from "@/lib/opportunity-model";
+import type { Opportunity } from "@/lib/opportunity-model";
 
 type MomentumContendersProps = {
   candidates: Opportunity[];
   onSelect: (opportunity: Opportunity) => void;
-  liveQuotes?: LiveOpportunityQuotes;
 };
 
 export default function MomentumContenders({
   candidates,
   onSelect,
-  liveQuotes,
 }: MomentumContendersProps) {
   return (
     <div className="flex h-full min-h-full flex-col bg-white/[0.01] p-5">
@@ -35,12 +29,7 @@ export default function MomentumContenders({
         </div>
       ) : (
         <div className="grid content-start gap-2">
-          {candidates.map((opportunity, index) => {
-            const displayQuote = resolveOpportunityDisplayQuote(
-              opportunity,
-              liveQuotes,
-            );
-            return (
+          {candidates.map((opportunity, index) => (
               <button
                 key={opportunity.ticker}
                 onClick={() => onSelect(opportunity)}
@@ -51,8 +40,8 @@ export default function MomentumContenders({
                 <div className="flex min-w-0 flex-col gap-1.5">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm font-black text-white truncate">{opportunity.ticker}</span>
-                    <span className={`font-mono text-[10px] font-black shrink-0 ${displayQuote.change >= 0 ? "text-orange-400" : "text-red-400"}`}>
-                      {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(1)}%
+                    <span className={`font-mono text-[10px] font-black shrink-0 ${opportunity.change >= 0 ? "text-orange-400" : "text-red-400"}`}>
+                      {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(1)}%
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -80,8 +69,7 @@ export default function MomentumContenders({
                 <p className="text-[7px] font-black uppercase tracking-[0.14em] text-orange-400">HT Score</p>
               </div>
               </button>
-            );
-          })}
+          ))}
         </div>
       )}
     </div>

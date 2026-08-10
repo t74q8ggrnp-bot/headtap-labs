@@ -1,19 +1,13 @@
-import {
-  resolveOpportunityDisplayQuote,
-  type LiveOpportunityQuotes,
-  type Opportunity,
-} from "@/lib/opportunity-model";
+import type { Opportunity } from "@/lib/opportunity-model";
 
 type MobileConvictionsListProps = {
   opportunities: Opportunity[];
   onOpen: (opportunity: Opportunity) => void;
-  liveQuotes?: LiveOpportunityQuotes;
 };
 
 export default function MobileConvictionsList({
   opportunities,
   onOpen,
-  liveQuotes,
 }: MobileConvictionsListProps) {
   const ranked = [...opportunities].sort((a, b) => b.opportunityScore - a.opportunityScore);
 
@@ -26,12 +20,7 @@ export default function MobileConvictionsList({
         </div>
       ) : (
         <div className="space-y-3">
-          {ranked.map((opportunity) => {
-            const displayQuote = resolveOpportunityDisplayQuote(
-              opportunity,
-              liveQuotes,
-            );
-            return (
+          {ranked.map((opportunity) => (
               <button key={opportunity.ticker} onClick={() => onOpen(opportunity)} className="w-full rounded-2xl border border-white/10 bg-white/[0.025] p-4 text-left">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -39,8 +28,8 @@ export default function MobileConvictionsList({
                   <p className="mt-1 text-xs font-semibold text-zinc-400">{opportunity.stage}</p>
                 </div>
                 <div className="text-right">
-                  <p className={`font-mono text-lg font-black ${displayQuote.change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                    {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(2)}%
+                  <p className={`font-mono text-lg font-black ${opportunity.change >= 0 ? "text-green-300" : "text-red-300"}`}>
+                    {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(2)}%
                   </p>
                   <p className="mt-0.5 text-xs font-black text-orange-300">HT {Math.round(opportunity.opportunityScore)}</p>
                 </div>
@@ -49,8 +38,7 @@ export default function MobileConvictionsList({
                 {opportunity.whatChanged}
               </div>
               </button>
-            );
-          })}
+          ))}
         </div>
       )}
     </div>

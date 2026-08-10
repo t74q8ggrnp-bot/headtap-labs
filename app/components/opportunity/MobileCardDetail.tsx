@@ -1,8 +1,6 @@
 import {
   getOpportunityPresentation,
-  resolveOpportunityDisplayQuote,
   tradeFrameworkToDisplay,
-  type LiveOpportunityQuotes,
   type Opportunity,
 } from "@/lib/opportunity-model";
 import OpportunityMetrics from "./OpportunityMetrics";
@@ -17,7 +15,6 @@ type MobileCardDetailProps = {
   setCurrentIndex: (value: number | ((index: number) => number)) => void;
   onOpen: (opportunity: Opportunity) => void;
   onWatch: (ticker: string) => void;
-  liveQuotes?: LiveOpportunityQuotes;
 };
 
 export default function MobileCardDetail({
@@ -27,13 +24,11 @@ export default function MobileCardDetail({
   setCurrentIndex,
   onOpen,
   onWatch,
-  liveQuotes,
 }: MobileCardDetailProps) {
   const current = opportunities[currentIndex];
   if (!current) return null;
 
   const view = getOpportunityPresentation(current);
-  const displayQuote = resolveOpportunityDisplayQuote(current, liveQuotes);
   const watched = watchlist.includes(current.ticker);
   const framework = tradeFrameworkToDisplay(current.tradeFramework);
 
@@ -73,11 +68,11 @@ export default function MobileCardDetail({
         </div>
         <p className="mt-2 text-sm font-semibold leading-5 text-zinc-400">{current.whyItMatters}</p>
         <div className="mt-4 flex items-center gap-3">
-          <span className="font-mono text-2xl font-black text-white">${displayQuote.price.toFixed(2)}</span>
-          <span className={`font-mono text-xl font-black ${displayQuote.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-            {displayQuote.change >= 0 ? "+" : ""}{displayQuote.change.toFixed(2)}%
+          <span className="font-mono text-2xl font-black text-white">${current.price.toFixed(2)}</span>
+          <span className={`font-mono text-xl font-black ${current.change >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {current.change >= 0 ? "+" : ""}{current.change.toFixed(2)}%
           </span>
-          {displayQuote.isLive && (
+          {current.displayQuoteLive && (
             <span className="text-[8px] font-black uppercase tracking-[0.14em] text-green-400">
               Live
             </span>
@@ -151,21 +146,15 @@ export default function MobileCardDetail({
           {opportunities
             .filter((opportunity) => opportunity.ticker !== current.ticker)
             .slice(0, 8)
-            .map((opportunity) => {
-              const quote = resolveOpportunityDisplayQuote(
-                opportunity,
-                liveQuotes,
-              );
-              return (
+            .map((opportunity) => (
                 <button key={opportunity.ticker} onClick={() => onOpen(opportunity)} className="w-28 shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-left">
                   <p className="font-mono text-base font-black text-white">{opportunity.ticker}</p>
-                  <p className={`mt-1 font-mono text-xs font-black ${quote.change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                    {quote.change >= 0 ? "+" : ""}{quote.change.toFixed(1)}%
+                  <p className={`mt-1 font-mono text-xs font-black ${opportunity.change >= 0 ? "text-green-300" : "text-red-300"}`}>
+                    {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(1)}%
                   </p>
                   <p className="mt-1 text-[9px] font-black text-orange-300">HT {Math.round(opportunity.opportunityScore)}</p>
                 </button>
-              );
-            })}
+            ))}
         </div>
       </div>
     </>
