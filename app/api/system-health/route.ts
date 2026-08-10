@@ -25,6 +25,7 @@ import { createClient } from "@supabase/supabase-js";
 const ACTIVE_MAX_SIGNAL_AGE_HOURS = 20 / 60;
 const CLOSED_MAX_SIGNAL_AGE_HOURS = 8;
 const ACTIVE_MAX_PROX_AGE_HOURS = 10 / 60;
+const ACTIVE_MAX_LEDGER_AGE_HOURS = 12 / 60;
 
 type HealthCheck = {
   name: string;
@@ -62,6 +63,18 @@ function isWeekend(now = new Date()) {
     weekday: "short",
   }).format(now);
   return weekday === "Sat" || weekday === "Sun";
+}
+
+function easternDateString(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)?.value;
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
 function finiteAgeLimit(value: number) {
@@ -544,11 +557,14 @@ export async function GET() {
   // did afterward. A missing migration or impossible MFE/MAE arithmetic must be
   // visible here instead of silently producing empty performance history.
   try {
+    const tradingDate = easternDateString();
+    const ledgerExpected = activeMarketSession && displayableCount > 0;
     const { data: ledger, error: ledgerError } = await supabase
       .from("ht_opportunity_ledger")
       .select(
         "ticker,trading_date,first_seen_at,first_seen_price,highest_price_after_signal,lowest_price_after_signal,max_gain_percent,max_drawdown_percent,updated_at",
       )
+      .eq("trading_date", tradingDate)
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -557,8 +573,15 @@ export async function GET() {
     if (!ledger) {
       checks.push({
         name: "opportunity_outcome_ledger",
-        ok: true,
-        message: "Opportunity ledger schema is ready and awaiting its first market-session record.",
+        ok: !ledgerExpected,
+        message: ledgerExpected
+          ? "Opportunity ledger has displayable signals but no record for the active session."
+          : "Opportunity ledger schema is ready and awaiting its next active-session record.",
+        detail: {
+          tradingDate,
+          activeMarketSession,
+          displayableSignals: displayableCount,
+        },
       });
     } else {
       const entry = Number(ledger.first_seen_price);
@@ -568,6 +591,9 @@ export async function GET() {
       const storedMae = Number(ledger.max_drawdown_percent);
       const calculatedMfe = entry > 0 ? ((high - entry) / entry) * 100 : NaN;
       const calculatedMae = entry > 0 ? ((low - entry) / entry) * 100 : NaN;
+      const ledgerAgeHours = hoursSince(ledger.updated_at);
+      const ledgerIsFresh =
+        !ledgerExpected || ledgerAgeHours <= ACTIVE_MAX_LEDGER_AGE_HOURS;
       const validLedgerMath =
         entry > 0 &&
         high >= entry &&
@@ -579,10 +605,12 @@ export async function GET() {
 
       checks.push({
         name: "opportunity_outcome_ledger",
-        ok: validLedgerMath,
-        message: validLedgerMath
-          ? "First-discovery price and post-discovery outcome math are valid."
-          : "Opportunity ledger contains invalid first-price or MFE/MAE arithmetic.",
+        ok: validLedgerMath && ledgerIsFresh,
+        message: !validLedgerMath
+          ? "Opportunity ledger contains invalid first-price or MFE/MAE arithmetic."
+          : !ledgerIsFresh
+            ? "Opportunity ledger is stale during the active market session."
+            : "First-discovery price, write freshness, and post-discovery outcome math are valid.",
         detail: {
           ticker: ledger.ticker,
           tradingDate: ledger.trading_date,
@@ -593,6 +621,10 @@ export async function GET() {
           maxGainPercent: storedMfe,
           maxDrawdownPercent: storedMae,
           updatedAt: ledger.updated_at,
+          ageMinutes: Number.isFinite(ledgerAgeHours)
+            ? Number((ledgerAgeHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: ACTIVE_MAX_LEDGER_AGE_HOURS * 60,
         },
       });
     }

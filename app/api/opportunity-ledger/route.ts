@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { buildCanonicalOpportunityFeed } from "@/lib/canonical-opportunity-feed";
 import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
@@ -187,22 +188,17 @@ function firstThresholdAt(
   return bar ? new Date(bar.timestamp).toISOString() : null;
 }
 
-async function collect(req: Request) {
+async function collect() {
   if (!POLYGON_KEY) throw new Error("Missing POLYGON_API_KEY.");
   const supabase = getSupabase();
   const now = new Date();
   const observedAt = now.toISOString();
   const tradingDate = easternDateString(now);
-  const opportunitiesUrl = new URL(
-    "/api/opportunities?type=momentum&limit=100",
-    req.url,
-  );
-  const response = await fetch(opportunitiesUrl, {
-    cache: "no-store",
-    signal: AbortSignal.timeout(240_000),
+  const feed = await buildCanonicalOpportunityFeed({
+    requestedType: "momentum",
+    limit: 100,
   });
-  if (!response.ok) throw new Error(`Canonical opportunity read failed: ${response.status}`);
-  const displayed = selectDisplayed(await response.json());
+  const displayed = selectDisplayed(feed);
 
   const { data: existingRows, error: existingError } = await supabase
     .from("ht_opportunity_ledger")
@@ -436,11 +432,12 @@ async function readLedger(req: Request) {
 
 export async function GET(req: Request) {
   try {
-    const result = isAuthorized(req) ? await collect(req) : await readLedger(req);
+    const result = isAuthorized(req) ? await collect() : await readLedger(req);
     return NextResponse.json(result, {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });
   } catch (error: unknown) {
+    console.error("[opportunity-ledger] request failed:", error);
     return NextResponse.json(
       { error: getErrorMessage(error, "Opportunity ledger failed") },
       { status: 500 },
