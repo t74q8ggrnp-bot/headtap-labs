@@ -21,9 +21,15 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const limit = Math.min(200, Math.max(1, Number.parseInt(searchParams.get("limit") ?? "100", 10) || 100));
+    // Opt-in only — entry_snapshot is the full candidate payload at entry
+    // time (tradeFramework, explosionAssessment, isContinuationEntry, etc.),
+    // large enough that including it by default would bloat every normal
+    // /trading-bot page load for the sake of an occasional deep-dive.
+    const includeSnapshot = searchParams.get("includeSnapshot") === "1";
     const supabase = getSupabase();
 
-    const baseColumns = "id, ticker, status, entry_price, entry_at, position_notional, target_price, stop_price, high_water_mark, max_hold_until, exit_price, exit_at, exit_reason, pnl, pnl_percent, bot_score";
+    const baseColumns = "id, ticker, status, entry_price, entry_at, position_notional, target_price, stop_price, high_water_mark, max_hold_until, exit_price, exit_at, exit_reason, pnl, pnl_percent, bot_score"
+      + (includeSnapshot ? ", entry_snapshot" : "");
     const analyticsColumns = "bot_logic_version, source_run_id, post_exit_price, post_exit_change_percent, post_exit_checked_at";
 
     type TradeRow = { status: string; pnl: number | null } & Record<string, unknown>;
@@ -44,9 +50,9 @@ export async function GET(req: Request) {
         .order("entry_at", { ascending: false })
         .limit(limit);
       if (baseError) throw baseError;
-      trades = baseOnly as TradeRow[] | null;
+      trades = baseOnly as unknown as TradeRow[] | null;
     } else {
-      trades = withAnalytics as TradeRow[] | null;
+      trades = withAnalytics as unknown as TradeRow[] | null;
     }
 
     const closedTrades = (trades ?? []).filter((t) => t.status === "closed" && t.pnl !== null);
