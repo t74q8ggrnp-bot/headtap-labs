@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CryptoOpportunityFeed } from "@/lib/crypto/contracts";
 
-export function useCryptoOpportunityFeed() {
-  const [feed, setFeed] = useState<CryptoOpportunityFeed | null>(null);
+export function useCryptoOpportunityFeed(
+  initialFeed: CryptoOpportunityFeed | null = null,
+) {
+  const hasInitialFeed = initialFeed !== null;
+  const [feed, setFeed] = useState<CryptoOpportunityFeed | null>(initialFeed);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasInitialFeed);
   const refreshInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -33,13 +36,15 @@ export function useCryptoOpportunityFeed() {
   }, []);
 
   useEffect(() => {
-    const kickoff = window.setTimeout(() => void refresh(), 0);
+    const kickoff = !hasInitialFeed
+      ? window.setTimeout(() => void refresh(), 0)
+      : null;
     const interval = window.setInterval(() => void refresh(), 60_000);
     return () => {
-      window.clearTimeout(kickoff);
+      if (kickoff !== null) window.clearTimeout(kickoff);
       window.clearInterval(interval);
     };
-  }, [refresh]);
+  }, [hasInitialFeed, refresh]);
 
   return { feed, error, loading, refresh };
 }

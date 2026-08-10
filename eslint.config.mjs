@@ -21,7 +21,7 @@ const eslintConfig = defineConfig([
     // hook rules active everywhere else while this page is extracted into
     // smaller hooks/components; changing its orchestration during a release
     // cleanup would alter live market behavior.
-    files: ["app/page.tsx"],
+    files: ["app/HomeClient.tsx"],
     rules: {
       "react-hooks/exhaustive-deps": "off",
       "react-hooks/immutability": "off",

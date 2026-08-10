@@ -1,17 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { normalizeOpportunity, type Opportunity } from "@/lib/opportunity-model";
 
-type OpportunityPayload = {
+export type OpportunityPayload = {
   opportunities?: unknown[];
   momentumRadar?: unknown[];
   momentumContenders?: unknown[];
 };
 
-async function readOpportunityPayload(response: Response) {
-  if (!response.ok) throw new Error(`Opportunity request failed (${response.status})`);
-  const payload = (await response.json()) as OpportunityPayload;
+type InitialOpportunityFeeds = {
+  momentum: OpportunityPayload | null;
+  beforeCrowd: OpportunityPayload | null;
+};
+
+function normalizeOpportunityPayload(payload: OpportunityPayload) {
   return {
     opportunities: (payload.opportunities ?? []).map(normalizeOpportunity),
     momentumRadar: (payload.momentumRadar ?? []).map(normalizeOpportunity),
@@ -21,20 +24,44 @@ async function readOpportunityPayload(response: Response) {
   };
 }
 
+async function readOpportunityPayload(response: Response) {
+  if (!response.ok) throw new Error(`Opportunity request failed (${response.status})`);
+  const payload = (await response.json()) as OpportunityPayload;
+  return normalizeOpportunityPayload(payload);
+}
+
 // Fetched alongside the hero so the runner-ups are already on hand — same
 // canonical ranking, just not the #1 pick. Nobody should be locked into one
 // ticker with no visibility into what else is close behind.
 const BEFORE_CROWD_COUNT = 5;
 
-export function useOpportunityFeed() {
-  const [spotMomentum, setSpotMomentum] = useState<Opportunity | null>(null);
-  const [spotMomentumRunnersUp, setSpotMomentumRunnersUp] = useState<Opportunity[]>([]);
-  const [beforeCrowd, setBeforeCrowd] = useState<Opportunity[]>([]);
+export function useOpportunityFeed(initial: InitialOpportunityFeeds) {
+  const normalizedInitial = useMemo(() => ({
+    momentum: initial.momentum
+      ? normalizeOpportunityPayload(initial.momentum)
+      : null,
+    beforeCrowd: initial.beforeCrowd
+      ? normalizeOpportunityPayload(initial.beforeCrowd)
+      : null,
+  }), [initial.beforeCrowd, initial.momentum]);
+  const needsInitialLoad =
+    initial.momentum === null || initial.beforeCrowd === null;
+  const [spotMomentum, setSpotMomentum] = useState<Opportunity | null>(
+    normalizedInitial.momentum?.opportunities[0] ?? null,
+  );
+  const [spotMomentumRunnersUp, setSpotMomentumRunnersUp] = useState<Opportunity[]>(
+    normalizedInitial.momentum?.momentumContenders ?? [],
+  );
+  const [beforeCrowd, setBeforeCrowd] = useState<Opportunity[]>(
+    normalizedInitial.beforeCrowd?.opportunities.slice(0, BEFORE_CROWD_COUNT) ?? [],
+  );
   // Full ranked list — same endpoint, same scoring engine, same live data
   // as everything else. Used by any surface that needs to show many
   // candidates (e.g. the in-page Scanner feed), not just the top picks.
-  const [fullRankedList, setFullRankedList] = useState<Opportunity[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [fullRankedList, setFullRankedList] = useState<Opportunity[]>(
+    normalizedInitial.momentum?.opportunities ?? [],
+  );
+  const [loading, setLoading] = useState(initial.momentum === null);
   const refreshInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -86,20 +113,21 @@ export function useOpportunityFeed() {
   }, []);
 
   // Canonical decisions are page-critical data. Load them immediately when
-  // the hook mounts rather than waiting for the separate quote-board request
-  // to finish and mutate `stocks`. Refresh on the signal writer's cadence.
+  // the server could not provide first-paint data. When the server already
+  // supplied the canonical snapshot, keep first paint stable and begin the
+  // normal refresh cadence one minute later.
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => {
-      void refresh();
-    }, 0);
+    const initialLoad = needsInitialLoad
+      ? window.setTimeout(() => void refresh(), 0)
+      : null;
     const interval = window.setInterval(() => {
       void refresh();
     }, 60 * 1000);
     return () => {
-      window.clearTimeout(initialLoad);
+      if (initialLoad !== null) window.clearTimeout(initialLoad);
       window.clearInterval(interval);
     };
-  }, [refresh]);
+  }, [needsInitialLoad, refresh]);
 
   return {
     spotMomentum,
