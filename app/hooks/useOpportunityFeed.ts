@@ -28,7 +28,7 @@ async function readOpportunityPayload(response: Response) {
 // Fetched alongside the hero so the runner-ups are already on hand — same
 // canonical ranking, just not the #1 pick. Nobody should be locked into one
 // ticker with no visibility into what else is close behind.
-const MOMENTUM_CONTENDER_COUNT = 6;
+const MOMENTUM_RUNNER_UP_COUNT = 5;
 const BEFORE_CROWD_COUNT = 5;
 const MOMENTUM_CACHE_KEY = "htlabs:canonical-opportunities:momentum:v3";
 const BEFORE_CROWD_CACHE_KEY = "htlabs:canonical-opportunities:before-crowd:v3";
@@ -95,9 +95,9 @@ export function useOpportunityFeed() {
         setSpotMomentum(momentumList[0] ?? null);
         setSpotMomentumRunnersUp(
           mergeOpportunityLists(
-            momentumList.slice(1, 3),
-            momentumRadar.slice(0, 3),
-          ).slice(0, MOMENTUM_CONTENDER_COUNT - 1),
+            momentumList.slice(1),
+            momentumRadar,
+          ).slice(0, MOMENTUM_RUNNER_UP_COUNT),
         );
         // Same rule the server's own type=catalyst path applied (catalystScore
         // >= 20), against a list already ranked the same way — same result.
@@ -157,7 +157,9 @@ export function useOpportunityFeed() {
       const cachedBeforeCrowd = readCachedOpportunities(BEFORE_CROWD_CACHE_KEY);
       if (cachedMomentum) {
         setSpotMomentum(cachedMomentum[0] ?? null);
-        setSpotMomentumRunnersUp(cachedMomentum.slice(1, MOMENTUM_CONTENDER_COUNT));
+        setSpotMomentumRunnersUp(
+          cachedMomentum.slice(1, MOMENTUM_RUNNER_UP_COUNT + 1),
+        );
         setCatalyst(cachedMomentum.find((o) => o.catalystScore >= 20) ?? null);
         setLoading(false);
       }

@@ -34,12 +34,7 @@ export default function MomentumContenders({
           </p>
         </div>
       ) : (
-        <div
-          className="grid flex-1 gap-2"
-          style={{
-            gridTemplateRows: `repeat(${candidates.length}, minmax(0, 1fr))`,
-          }}
-        >
+        <div className="grid content-start gap-2">
           {candidates.map((opportunity, index) => {
             const displayQuote = resolveOpportunityDisplayQuote(
               opportunity,
@@ -49,7 +44,7 @@ export default function MomentumContenders({
               <button
                 key={opportunity.ticker}
                 onClick={() => onSelect(opportunity)}
-                className="flex h-full min-h-[5.5rem] items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-left transition hover:border-violet-400/25 hover:bg-violet-500/[0.04]"
+                className="flex min-h-[5.5rem] items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-left transition hover:border-violet-400/25 hover:bg-violet-500/[0.04]"
               >
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="text-[9px] font-black text-zinc-800 shrink-0">#{index + 2}</span>
