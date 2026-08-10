@@ -23,12 +23,31 @@ export async function GET(req: Request) {
     const limit = Math.min(200, Math.max(1, Number.parseInt(searchParams.get("limit") ?? "100", 10) || 100));
     const supabase = getSupabase();
 
-    const { data: trades, error } = await supabase
+    const baseColumns = "id, ticker, status, entry_price, entry_at, position_notional, target_price, stop_price, high_water_mark, max_hold_until, exit_price, exit_at, exit_reason, pnl, pnl_percent, bot_score";
+    const analyticsColumns = "bot_logic_version, source_run_id, post_exit_price, post_exit_change_percent, post_exit_checked_at";
+
+    type TradeRow = { status: string; pnl: number | null } & Record<string, unknown>;
+    let trades: TradeRow[] | null = null;
+    const { data: withAnalytics, error: withAnalyticsError } = await supabase
       .from("bot_trades")
-      .select("id, ticker, status, entry_price, entry_at, position_notional, target_price, stop_price, high_water_mark, max_hold_until, exit_price, exit_at, exit_reason, pnl, pnl_percent, bot_score")
+      .select(`${baseColumns}, ${analyticsColumns}`)
       .order("entry_at", { ascending: false })
       .limit(limit);
-    if (error) throw error;
+    if (withAnalyticsError) {
+      // Migration 0009 (bot_logic_version / source_run_id / post_exit_*)
+      // may not be applied yet — fall back to the original column set
+      // rather than 500ing the whole endpoint over columns that don't
+      // exist yet.
+      const { data: baseOnly, error: baseError } = await supabase
+        .from("bot_trades")
+        .select(baseColumns)
+        .order("entry_at", { ascending: false })
+        .limit(limit);
+      if (baseError) throw baseError;
+      trades = baseOnly as TradeRow[] | null;
+    } else {
+      trades = withAnalytics as TradeRow[] | null;
+    }
 
     const closedTrades = (trades ?? []).filter((t) => t.status === "closed" && t.pnl !== null);
     const winners = closedTrades.filter((t) => (t.pnl ?? 0) > 0);
