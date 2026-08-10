@@ -81,16 +81,15 @@ export function resolveOpportunityDisplayQuote(
     liveQuote.price > 0 &&
     Number.isFinite(liveQuote.change)
   ) {
-    const change =
-      (opportunity.scanSession === "pre_market" ||
-        opportunity.scanSession === "regular") &&
-      opportunity.sessionOpenPrice &&
-      opportunity.sessionOpenPrice > 0
-        ? ((liveQuote.price - opportunity.sessionOpenPrice) /
-            opportunity.sessionOpenPrice) *
-          100
-        : liveQuote.change;
-    return { price: liveQuote.price, change, isLive: true };
+    // Keep the public move aligned with the canonical opportunity decision:
+    // Polygon's live quote change is measured from the previous close. The
+    // session-open move is a separate ProX/scoring input and must not replace
+    // the full-day percentage shown beside a ranked momentum candidate.
+    return {
+      price: liveQuote.price,
+      change: liveQuote.change,
+      isLive: true,
+    };
   }
   return {
     price: opportunity.price,
