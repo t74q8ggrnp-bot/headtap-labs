@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { CryptoOpportunityFeed } from "@/lib/crypto/contracts";
+import CryptoProxPulse from "@/app/components/crypto/CryptoProxPulse";
 
 type CryptoMomentumPreviewProps = {
   feed: CryptoOpportunityFeed | null;
@@ -8,7 +9,8 @@ type CryptoMomentumPreviewProps = {
 };
 
 const money = (value: number) => {
-  const maximumFractionDigits = value < 0.01 ? 6 : value < 1 ? 4 : 2;
+  const maximumFractionDigits =
+    value < 0.0001 ? 10 : value < 0.01 ? 8 : value < 1 ? 6 : 2;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -107,6 +109,9 @@ export default function CryptoMomentumPreview({
                 </div>
               ))}
             </div>
+            <div className="mt-3">
+              <CryptoProxPulse packet={hero.proxIntelligence} compact />
+            </div>
           </div>
 
           <div className="rounded-2xl border border-white/8 bg-black/25 p-3">
@@ -129,6 +134,11 @@ export default function CryptoMomentumPreview({
                       <p className="font-mono text-[9px] font-bold text-green-400">
                         +{opportunity.change24hPercent.toFixed(1)}% · {opportunity.relativeVolume.toFixed(1)}×
                       </p>
+                      {opportunity.proxIntelligence && (
+                        <p className="mt-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-cyan-700">
+                          ProX {opportunity.proxIntelligence.state}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <p className="font-mono text-xl font-black text-cyan-300">

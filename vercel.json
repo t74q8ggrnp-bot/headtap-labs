@@ -45,6 +45,10 @@
       "schedule": "1-59/2 * * * *"
     },
     {
+      "path": "/api/crypto/prox-sensor",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/trading-bot",
       "schedule": "*/5 8-23 * * 1-5"
     }

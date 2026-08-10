@@ -3,9 +3,11 @@
 import Link from "next/link";
 import type { CryptoOpportunity } from "@/lib/crypto/contracts";
 import { useCryptoOpportunityFeed } from "@/app/hooks/useCryptoOpportunityFeed";
+import CryptoProxPulse from "@/app/components/crypto/CryptoProxPulse";
 
 const money = (value: number) => {
-  const maximumFractionDigits = value < 0.01 ? 6 : value < 1 ? 4 : 2;
+  const maximumFractionDigits =
+    value < 0.0001 ? 10 : value < 0.01 ? 8 : value < 1 ? 6 : 2;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -115,6 +117,9 @@ function Hero({ opportunity }: { opportunity: CryptoOpportunity }) {
             />
             <Metric label="Risk" value={`${opportunity.riskScore}/100`} />
           </div>
+          <div className="mt-4">
+            <CryptoProxPulse packet={opportunity.proxIntelligence} />
+          </div>
         </div>
 
         <div className="rounded-2xl border border-white/8 bg-black/45 p-5">
@@ -195,6 +200,9 @@ function ContenderCard({
       </div>
       <p className="mt-3 text-[10px] font-bold text-zinc-600">
         {opportunity.stage} · {compactMoney(opportunity.dollarVolume24h)} traded
+        {opportunity.proxIntelligence
+          ? ` · ProX ${opportunity.proxIntelligence.state}`
+          : ""}
       </p>
     </article>
   );

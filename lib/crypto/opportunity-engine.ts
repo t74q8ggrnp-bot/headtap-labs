@@ -20,6 +20,9 @@ const rounded = (value: number, precision = 2) => {
   return Math.round(value * factor) / factor;
 };
 
+const pricePrecision = (value: number) =>
+  value < 0.0001 ? 10 : value < 0.01 ? 8 : value < 1 ? 6 : 4;
+
 function liquidityScore(dollarVolume: number) {
   if (dollarVolume <= 0) return 0;
   return clamp((Math.log10(dollarVolume) - 4) * 25);
@@ -122,16 +125,17 @@ export function scoreCryptoOpportunity(
   return {
     productId: snapshot.productId,
     symbol: snapshot.symbol,
-    price: rounded(last, last < 1 ? 6 : 4),
+    price: rounded(last, pricePrecision(last)),
     change24hPercent: rounded(change24h),
-    high24h: rounded(high, high < 1 ? 6 : 4),
-    low24h: rounded(low, low < 1 ? 6 : 4),
+    high24h: rounded(high, pricePrecision(high)),
+    low24h: rounded(low, pricePrecision(low)),
     pullbackFromHighPercent: rounded(pullbackFromHigh),
     rangePositionPercent: rounded(rangePosition),
     volume24h: rounded(volume24h),
     dollarVolume24h: rounded(dollarVolume),
     relativeVolume: rounded(relativeVolume),
     opportunityScore,
+    proxIntelligence: null,
     riskScore: Math.round(riskScore),
     pulseState: pulse,
     eligible,

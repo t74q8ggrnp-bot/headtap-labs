@@ -26,6 +26,8 @@ const ACTIVE_MAX_SIGNAL_AGE_HOURS = 20 / 60;
 const CLOSED_MAX_SIGNAL_AGE_HOURS = 8;
 const ACTIVE_MAX_PROX_AGE_HOURS = 10 / 60;
 const ACTIVE_MAX_LEDGER_AGE_HOURS = 12 / 60;
+const MAX_CRYPTO_PROX_AGE_HOURS = 15 / 60;
+const CRYPTO_OUTCOME_GRACE_MINUTES = 10;
 
 type HealthCheck = {
   name: string;
@@ -795,6 +797,174 @@ export async function GET() {
       name: "opportunity_observation_coverage",
       ok: false,
       message: "Opportunity observation history is unavailable; run migration 0010 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Crypto has no market close. A healthy 24/7 ProX lane must prove the
+  // complete saved set, packet coverage, freshness, and timed-outcome writes.
+  try {
+    const { data: cryptoRun, error: cryptoRunError } = await supabase
+      .from("ht_crypto_prox_collection_runs")
+      .select(
+        "observed_at,observation_minute,expected_observation_count,persisted_observation_count,complete,observed_products,feed_diagnostics,outcomes_updated",
+      )
+      .order("observed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (cryptoRunError) throw cryptoRunError;
+
+    if (!cryptoRun) {
+      checks.push({
+        name: "crypto_prox_observation_pipeline",
+        ok: false,
+        message: "Crypto ProX has no completed 24/7 observation cycle yet.",
+      });
+    } else {
+      const { data: cryptoObservations, error: cryptoObservationError } =
+        await supabase
+          .from("ht_crypto_prox_observations")
+          .select("product_id,symbol,role,rank,prox_state,prox_packet")
+          .eq("observation_minute", cryptoRun.observation_minute);
+      if (cryptoObservationError) throw cryptoObservationError;
+      const overdueCutoff = new Date(
+        Date.now() - CRYPTO_OUTCOME_GRACE_MINUTES * 60_000,
+      ).toISOString();
+      const { count: overdueOutcomeCount, error: overdueOutcomeError } =
+        await supabase
+          .from("ht_crypto_prox_observations")
+          .select("*", { count: "exact", head: true })
+          .is("price_15m", null)
+          .lte("target_15m_at", overdueCutoff);
+      if (overdueOutcomeError) throw overdueOutcomeError;
+
+      type CryptoCoverageRow = {
+        productId?: unknown;
+        symbol?: unknown;
+        role?: unknown;
+        rank?: unknown;
+      };
+      const roleOrder = new Map([
+        ["hero", 0],
+        ["contender", 1],
+        ["radar", 2],
+      ]);
+      const normalizeCryptoRows = (rows: CryptoCoverageRow[]) =>
+        rows.map((row) => ({
+          productId: String(row.productId ?? "").trim(),
+          symbol: String(row.symbol ?? "").trim().toUpperCase(),
+          role: String(row.role ?? ""),
+          rank: Number(row.rank),
+        })).sort((left, right) =>
+          (roleOrder.get(left.role) ?? 99) -
+            (roleOrder.get(right.role) ?? 99) ||
+          left.rank - right.rank ||
+          left.productId.localeCompare(right.productId),
+        );
+      const receiptRows = Array.isArray(cryptoRun.observed_products)
+        ? cryptoRun.observed_products as CryptoCoverageRow[]
+        : [];
+      const actualRows = (cryptoObservations ?? []).map((row) => ({
+        productId: row.product_id,
+        symbol: row.symbol,
+        role: row.role,
+        rank: row.rank,
+      }));
+      const exactCryptoSet =
+        JSON.stringify(normalizeCryptoRows(receiptRows)) ===
+        JSON.stringify(normalizeCryptoRows(actualRows));
+      const expectedCount = Number(cryptoRun.expected_observation_count);
+      const persistedCount = Number(cryptoRun.persisted_observation_count);
+      const actualCount = cryptoObservations?.length ?? 0;
+      const feedDiagnostics = cryptoRun.feed_diagnostics &&
+          typeof cryptoRun.feed_diagnostics === "object" &&
+          !Array.isArray(cryptoRun.feed_diagnostics)
+        ? cryptoRun.feed_diagnostics as Record<string, unknown>
+        : {};
+      const evaluatedProducts = Number(feedDiagnostics.evaluatedProducts);
+      const providerFailures = Number(feedDiagnostics.providerFailures);
+      const proxEvaluatedProducts = Number(
+        feedDiagnostics.proxEvaluatedProducts,
+      );
+      const proxAvailableProducts = Number(
+        feedDiagnostics.proxAvailableProducts,
+      );
+      const proxProviderFailures = Number(
+        feedDiagnostics.proxProviderFailures,
+      );
+      const providerHealthy =
+        evaluatedProducts > 0 &&
+        providerFailures === 0 &&
+        proxEvaluatedProducts > 0 &&
+        proxAvailableProducts === proxEvaluatedProducts &&
+        proxProviderFailures === 0;
+      const cryptoRunAgeHours = hoursSince(cryptoRun.observed_at);
+      const fresh = cryptoRunAgeHours <= MAX_CRYPTO_PROX_AGE_HOURS;
+      const packetCoverage = (cryptoObservations ?? []).every((row) => {
+        const packet = row.prox_packet && typeof row.prox_packet === "object"
+          ? row.prox_packet as { mode?: unknown; packetVersion?: unknown }
+          : null;
+        return Boolean(
+          row.prox_state &&
+          packet?.mode === "shadow" &&
+          packet.packetVersion === "crypto-prox-v1",
+        );
+      });
+      const complete =
+        cryptoRun.complete === true &&
+        expectedCount === persistedCount &&
+        persistedCount === actualCount;
+      const outcomesCurrent = (overdueOutcomeCount ?? 0) === 0;
+
+      checks.push({
+        name: "crypto_prox_observation_pipeline",
+        ok:
+          complete &&
+          providerHealthy &&
+          exactCryptoSet &&
+          packetCoverage &&
+          outcomesCurrent &&
+          fresh,
+        message: !complete
+          ? "The latest Crypto ProX receipt does not match its persisted row count."
+          : !providerHealthy
+            ? "The latest Crypto ProX cycle did not receive complete provider and ProX coverage."
+            : !exactCryptoSet
+              ? "The persisted Crypto ProX products do not match the collection receipt."
+              : !packetCoverage
+                ? "One or more current crypto opportunities is missing a valid shadow ProX packet."
+                : !outcomesCurrent
+                  ? "Crypto ProX has overdue 15-minute outcome observations."
+                  : !fresh
+                    ? "The latest Crypto ProX observation cycle is stale."
+                    : "Crypto ProX is fresh, complete, exact-set verified, and recording timed outcomes.",
+        detail: {
+          observedAt: cryptoRun.observed_at,
+          expectedCount,
+          persistedCount,
+          actualCount,
+          providerHealthy,
+          evaluatedProducts,
+          providerFailures,
+          proxEvaluatedProducts,
+          proxAvailableProducts,
+          proxProviderFailures,
+          exactCryptoSet,
+          packetCoverage,
+          overdue15mOutcomes: overdueOutcomeCount ?? 0,
+          outcomesUpdatedThisCycle: cryptoRun.outcomes_updated,
+          ageMinutes: Number.isFinite(cryptoRunAgeHours)
+            ? Number((cryptoRunAgeHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: MAX_CRYPTO_PROX_AGE_HOURS * 60,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "crypto_prox_observation_pipeline",
+      ok: false,
+      message: "Crypto ProX history is unavailable; run migration 0011 before deploying.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
