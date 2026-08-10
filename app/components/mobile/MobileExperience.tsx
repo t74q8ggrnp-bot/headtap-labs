@@ -5,6 +5,7 @@
 // sources, same handlers, now passed in as props instead of closed over.
 import type { Session } from "@supabase/supabase-js";
 import Image from "next/image";
+import Link from "next/link";
 import type {
   DecisionTraceDisplay as DecisionTraceModel,
   BullBearAnalysis,
@@ -24,6 +25,8 @@ import MobileConvictionsList from "@/app/components/opportunity/MobileConviction
 import MobileWatchlist from "@/app/components/opportunity/MobileWatchlist";
 import MomentumContenders from "@/app/components/opportunity/MomentumContenders";
 import ProxPulse from "@/app/components/opportunity/ProxPulse";
+import CryptoMomentumPreview from "@/app/components/crypto/CryptoMomentumPreview";
+import type { CryptoOpportunityFeed } from "@/lib/crypto/contracts";
 
 type MobileTab = "home" | "convictions" | "scanner" | "watchlist" | "profile";
 
@@ -53,6 +56,9 @@ export type MobileExperienceProps = {
   apiBeforeCrowdPick: APIOpportunity | null;
   btcFramework: TradeFramework | null;
   btcTrace: DecisionTraceModel | null;
+  cryptoFeed: CryptoOpportunityFeed | null;
+  cryptoLoading: boolean;
+  cryptoError: string | null;
   mobileScannerReads: APIOpportunity[];
   openReadTicker: (ticker: string) => void;
   watchlistStocks: Stock[];
@@ -82,7 +88,8 @@ export default function MobileExperience({
   canonicalMobileOpportunities, momentumRunnersUp, mobileCardIndex, setMobileCardIndex, mobileTouchStart,
   setMobileTouchStart, apiOpportunitiesLoading, apiMomentum, smFramework, smTrace,
   bullBearData, isDualEngineConfirmation, watchlist, setSelectedStock, toggleWatchlist,
-  opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace, mobileScannerReads,
+  opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace, cryptoFeed,
+  cryptoLoading, cryptoError, mobileScannerReads,
   openReadTicker, watchlistStocks, session, handleSignOut, savedSetups,
   signalMemoryInsight, authEmail, setAuthEmail, authPassword, setAuthPassword, handleAuth,
   authLoading, authMessage, selectedStock, selectedOpportunity, selectedOpportunityLoading,
@@ -130,7 +137,7 @@ export default function MobileExperience({
           {/* HOME TAB — Before The Crowd + Swipeable conviction cards */}
           {mobileTab === "home" && (() => {
             // Show mobile skeleton on first load — same gate as desktop
-            if (!lastUpdated) return (
+            if (!lastUpdated && cryptoLoading) return (
               <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2 space-y-4 animate-pulse">
                 <div className="rounded-2xl border border-white/8 bg-black overflow-hidden">
                   <div className="px-5 pt-4 pb-0 flex items-center gap-2">
@@ -172,11 +179,6 @@ export default function MobileExperience({
 
             const mobileCards = canonicalMobileOpportunities.slice(0, 8);
             const current = mobileCards[mobileCardIndex];
-            if (!current) return (
-              <div className="flex h-full items-center justify-center">
-                <p className="text-zinc-500 font-bold">Scanning market...</p>
-              </div>
-            );
             return (
               <div
                 className="h-full flex flex-col overflow-y-auto"
@@ -230,14 +232,24 @@ export default function MobileExperience({
                   />
                 )}
 
-                <MobileCardDetail
-                  opportunities={mobileCards}
-                  currentIndex={mobileCardIndex}
-                  watchlist={watchlist}
-                  setCurrentIndex={setMobileCardIndex}
-                  onOpen={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
-                  onWatch={toggleWatchlist}
-                />
+                <div className="mx-4 mb-3 flex-shrink-0">
+                  <CryptoMomentumPreview
+                    feed={cryptoFeed}
+                    loading={cryptoLoading}
+                    error={cryptoError}
+                  />
+                </div>
+
+                {current && (
+                  <MobileCardDetail
+                    opportunities={mobileCards}
+                    currentIndex={mobileCardIndex}
+                    watchlist={watchlist}
+                    setCurrentIndex={setMobileCardIndex}
+                    onOpen={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
+                    onWatch={toggleWatchlist}
+                  />
+                )}
               </div>
             );
           })()}
@@ -526,7 +538,7 @@ export default function MobileExperience({
 
         {/* Bottom Navigation */}
         <div className="flex-shrink-0 border-t border-white/10 bg-black/90 backdrop-blur-2xl pb-safe">
-          <div className="grid grid-cols-5">
+          <div className="grid grid-cols-6">
             {[
               { tab: "home" as const, icon: "🏠", label: "Home" },
               { tab: "convictions" as const, icon: "🔥", label: "Top" },
@@ -543,6 +555,13 @@ export default function MobileExperience({
                 <span className={`text-[9px] font-black uppercase tracking-[0.1em] ${mobileTab === tab ? "text-orange-400" : "text-zinc-600"}`}>{label}</span>
               </button>
             ))}
+            <Link
+              href="/crypto"
+              className="flex flex-col items-center gap-1 py-3 text-cyan-500 transition"
+            >
+              <span className="text-xl">◉</span>
+              <span className="text-[9px] font-black uppercase tracking-[0.1em]">Crypto</span>
+            </Link>
           </div>
         </div>
       </div>

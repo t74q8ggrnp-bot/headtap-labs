@@ -1,11 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import type {
-  CryptoOpportunity,
-  CryptoOpportunityFeed,
-} from "@/lib/crypto/contracts";
+import type { CryptoOpportunity } from "@/lib/crypto/contracts";
+import { useCryptoOpportunityFeed } from "@/app/hooks/useCryptoOpportunityFeed";
 
 const money = (value: number) => {
   const maximumFractionDigits = value < 0.01 ? 6 : value < 1 ? 4 : 2;
@@ -204,34 +201,7 @@ function ContenderCard({
 }
 
 export default function CryptoPage() {
-  const [feed, setFeed] = useState<CryptoOpportunityFeed | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    try {
-      const response = await fetch("/api/crypto/opportunities", {
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`Crypto feed returned ${response.status}.`);
-      const payload = (await response.json()) as CryptoOpportunityFeed;
-      setFeed(payload);
-      setError(null);
-    } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : "Crypto feed unavailable.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const kickoff = window.setTimeout(() => void refresh(), 0);
-    const interval = window.setInterval(() => void refresh(), 60_000);
-    return () => {
-      window.clearTimeout(kickoff);
-      window.clearInterval(interval);
-    };
-  }, [refresh]);
+  const { feed, error, loading, refresh } = useCryptoOpportunityFeed();
 
   return (
     <main className="min-h-screen bg-[#050606] text-white">

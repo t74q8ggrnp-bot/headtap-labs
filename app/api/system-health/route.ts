@@ -637,6 +637,168 @@ export async function GET() {
     });
   }
 
+  // A healthy latest row is not enough to prove that the complete displayed
+  // set was captured. The collection receipt and observation history must
+  // agree on the exact number of server-selected records for both strategies.
+  try {
+    const tradingDate = easternDateString();
+    const { data: collectionRun, error: collectionRunError } = await supabase
+      .from("ht_opportunity_collection_runs")
+      .select(
+        "observed_at,observation_minute,spot_momentum_count,before_crowd_count,expected_observation_count,persisted_observation_count,complete,spot_momentum_tickers,before_crowd_tickers",
+      )
+      .eq("trading_date", tradingDate)
+      .order("observed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (collectionRunError) throw collectionRunError;
+
+    if (!collectionRun) {
+      const coverageExpected = activeMarketSession && displayableCount > 0;
+      checks.push({
+        name: "opportunity_observation_coverage",
+        ok: !coverageExpected,
+        message: coverageExpected
+          ? "No complete opportunity-observation receipt exists for the active session."
+          : "Opportunity observation schema is ready and awaiting its next collection cycle.",
+        detail: { tradingDate, activeMarketSession, displayableCount },
+      });
+    } else {
+      const { data: actualObservations, error: observationReadError } =
+        await supabase
+          .from("ht_opportunity_observations")
+          .select("ticker,strategy,role,rank,source_run_id")
+          .eq("observation_minute", collectionRun.observation_minute)
+          .order("strategy", { ascending: true })
+          .order("rank", { ascending: true });
+      if (observationReadError) throw observationReadError;
+
+      const spotTickers = Array.isArray(collectionRun.spot_momentum_tickers)
+        ? collectionRun.spot_momentum_tickers as Array<{
+            ticker?: unknown;
+            rank?: unknown;
+            role?: unknown;
+            sourceRunId?: unknown;
+          }>
+        : [];
+      const beforeCrowdTickers = Array.isArray(
+        collectionRun.before_crowd_tickers,
+      )
+        ? collectionRun.before_crowd_tickers as Array<{
+            ticker?: unknown;
+            rank?: unknown;
+            role?: unknown;
+            sourceRunId?: unknown;
+          }>
+        : [];
+      const spotCount = Number(collectionRun.spot_momentum_count);
+      const beforeCrowdCount = Number(collectionRun.before_crowd_count);
+      const expectedCount = Number(collectionRun.expected_observation_count);
+      const persistedCount = Number(collectionRun.persisted_observation_count);
+      const actualCount = actualObservations?.length ?? 0;
+      const collectionAgeHours = hoursSince(collectionRun.observed_at);
+      const fresh =
+        !activeMarketSession ||
+        collectionAgeHours <= ACTIVE_MAX_LEDGER_AGE_HOURS;
+      const coverageComplete =
+        collectionRun.complete === true &&
+        expectedCount === persistedCount &&
+        persistedCount === actualCount &&
+        spotCount === spotTickers.length &&
+        beforeCrowdCount === beforeCrowdTickers.length &&
+        expectedCount === spotCount + beforeCrowdCount;
+      type CoverageRow = {
+        ticker?: unknown;
+        rank?: unknown;
+        role?: unknown;
+        sourceRunId?: unknown;
+      };
+      const normalizeCoverageRows = (rows: CoverageRow[]) =>
+        rows.map((row) => ({
+          ticker: String(row.ticker ?? "").trim().toUpperCase(),
+          rank: Number(row.rank),
+          role: String(row.role ?? ""),
+          sourceRunId:
+            row.sourceRunId === null || row.sourceRunId === undefined
+              ? null
+              : String(row.sourceRunId),
+        }));
+      const uniqueAndRanked = (rows: CoverageRow[]) => {
+        const normalized = normalizeCoverageRows(rows);
+        const tickers = normalized.map((row) => row.ticker);
+        const ranks = normalized.map((row) => row.rank);
+        return (
+          tickers.every(Boolean) &&
+          new Set(tickers).size === tickers.length &&
+          ranks.every((rank, index) => rank === index + 1)
+        );
+      };
+      const exactSetShape =
+        uniqueAndRanked(spotTickers) && uniqueAndRanked(beforeCrowdTickers);
+      const actualSpotRows = (actualObservations ?? [])
+        .filter((row) => row.strategy === "spot_momentum")
+        .map((row) => ({
+          ticker: row.ticker,
+          rank: row.rank,
+          role: row.role,
+          sourceRunId: row.source_run_id,
+        }));
+      const actualBeforeCrowdRows = (actualObservations ?? [])
+        .filter((row) => row.strategy === "before_the_crowd")
+        .map((row) => ({
+          ticker: row.ticker,
+          rank: row.rank,
+          role: row.role,
+          sourceRunId: row.source_run_id,
+        }));
+      const exactTickerSetsPersisted =
+        JSON.stringify(normalizeCoverageRows(spotTickers)) ===
+          JSON.stringify(normalizeCoverageRows(actualSpotRows)) &&
+        JSON.stringify(normalizeCoverageRows(beforeCrowdTickers)) ===
+          JSON.stringify(normalizeCoverageRows(actualBeforeCrowdRows));
+
+      checks.push({
+        name: "opportunity_observation_coverage",
+        ok:
+          coverageComplete &&
+          exactSetShape &&
+          exactTickerSetsPersisted &&
+          fresh,
+        message: !coverageComplete
+          ? "The latest collection receipt does not match persisted opportunity observations."
+          : !exactSetShape
+            ? "The latest saved opportunity set has duplicate tickers or non-canonical ranks."
+            : !exactTickerSetsPersisted
+              ? "The saved observation tickers do not exactly match the canonical collection receipt."
+              : !fresh
+                ? "The latest complete opportunity-observation set is stale."
+                : "The exact current strategy sets and their full decision observations were persisted.",
+        detail: {
+          tradingDate,
+          observedAt: collectionRun.observed_at,
+          spotMomentumCount: spotCount,
+          beforeCrowdCount,
+          expectedCount,
+          persistedCount,
+          actualCount,
+          complete: collectionRun.complete,
+          exactTickerSetsPersisted,
+          ageMinutes: Number.isFinite(collectionAgeHours)
+            ? Number((collectionAgeHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: ACTIVE_MAX_LEDGER_AGE_HOURS * 60,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "opportunity_observation_coverage",
+      ok: false,
+      message: "Opportunity observation history is unavailable; run migration 0010 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   const hardFailures = checks.filter((check) => !check.ok);
   const ok = hardFailures.length === 0;
 

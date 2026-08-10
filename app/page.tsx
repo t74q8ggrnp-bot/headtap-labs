@@ -19,6 +19,7 @@ import OpportunityScorePanel from "./components/opportunity/OpportunityScorePane
 import MomentumContenders from "./components/opportunity/MomentumContenders";
 import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileExperience from "./components/mobile/MobileExperience";
+import CryptoMomentumPreview from "./components/crypto/CryptoMomentumPreview";
 import { supabase } from "@/lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
 import type {
@@ -26,6 +27,7 @@ import type {
   MarketStock as Stock,
 } from "@/lib/contracts/market";
 import { useOpportunityFeed } from "./hooks/useOpportunityFeed";
+import { useCryptoOpportunityFeed } from "./hooks/useCryptoOpportunityFeed";
 import {
   getOpportunityPresentation,
   normalizeOpportunity,
@@ -289,6 +291,11 @@ function HomeInner() {
     fullRankedList: apiFullRankedList,
     loading: apiOpportunitiesLoading,
   } = useOpportunityFeed();
+  const {
+    feed: cryptoFeed,
+    error: cryptoError,
+    loading: cryptoLoading,
+  } = useCryptoOpportunityFeed();
 
   // Bull/Bear case state — generated when top conviction ticker changes
   const [bullBearData, setBullBearData] = useState<BullBearAnalysis | null>(null);
@@ -1533,6 +1540,9 @@ function HomeInner() {
                     <Link href="/news" className="transition hover:text-white">
                       News
                     </Link>
+                    <Link href="/crypto" className="text-cyan-400 transition hover:text-white">
+                      Crypto
+                    </Link>
                     <button
                       type="button"
                       onClick={() => document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth" })}
@@ -1807,6 +1817,14 @@ function HomeInner() {
 
 
 
+
+        <section id="crypto-momentum" className="mx-auto hidden max-w-[1488px] px-3 py-3 md:block md:px-6">
+          <CryptoMomentumPreview
+            feed={cryptoFeed}
+            loading={cryptoLoading}
+            error={cryptoError}
+          />
+        </section>
 
         <section id="watchlist" className="mx-auto max-w-7xl px-5 py-5">
           <motion.div
@@ -2282,6 +2300,9 @@ function HomeInner() {
         apiBeforeCrowdPick={apiBeforeCrowdPick}
         btcFramework={btcFramework}
         btcTrace={btcTrace}
+        cryptoFeed={cryptoFeed}
+        cryptoLoading={cryptoLoading}
+        cryptoError={cryptoError}
         mobileScannerReads={apiFullRankedList}
         openReadTicker={openReadTicker}
         watchlistStocks={watchlistStocks}

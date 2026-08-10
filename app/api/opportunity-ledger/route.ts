@@ -12,14 +12,38 @@ const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const UPDATE_CONCURRENCY = 10;
 
 type DisplayRole = "hero" | "contender" | "radar";
+type LedgerStrategy = "spot_momentum" | "before_the_crowd";
 type OpportunitySnapshot = {
   ticker?: unknown;
   price?: unknown;
   displayPrice?: unknown;
   opportunityScore?: unknown;
+  engineVersion?: unknown;
+  change?: unknown;
+  sessionOpenPrice?: unknown;
+  changeFromOpenPercent?: unknown;
+  sessionHighPrice?: unknown;
+  pullbackFromSessionHighPercent?: unknown;
+  scanSession?: unknown;
+  relativeVolume?: unknown;
+  momentumScore?: unknown;
+  crowdScore?: unknown;
+  trapScore?: unknown;
+  catalystScore?: unknown;
+  signalStrength?: unknown;
+  qualityScore?: unknown;
+  tradeQuality?: unknown;
+  breakoutPotentialScore?: unknown;
+  stage?: unknown;
+  riskTags?: unknown;
   visibilityState?: unknown;
   sourceRunId?: unknown;
+  explosionAssessment?: unknown;
+  tradeFramework?: unknown;
   proxIntelligence?: {
+    status?: unknown;
+    supportFlags?: unknown;
+    riskFlags?: unknown;
     pulse?: { state?: unknown } | null;
     scores?: { marketConfirmation?: unknown } | null;
   } | null;
@@ -30,10 +54,13 @@ type DisplayedOpportunity = {
   score: number;
   role: DisplayRole;
   rank: number;
+  strategy: LedgerStrategy;
   visibilityState: string | null;
   sourceRunId: string | null;
+  engineVersion: string | null;
   proxState: string | null;
   proxConfirmation: number | null;
+  decisionSnapshot: Record<string, unknown>;
 };
 type LedgerRow = {
   id: string;
@@ -99,10 +126,57 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function compactDecisionSnapshot(opportunity: OpportunitySnapshot) {
+  const prox = opportunity.proxIntelligence;
+  return {
+    changePercent: finiteNumber(opportunity.change),
+    sessionOpenPrice: finiteNumber(opportunity.sessionOpenPrice),
+    changeFromOpenPercent: finiteNumber(opportunity.changeFromOpenPercent),
+    sessionHighPrice: finiteNumber(opportunity.sessionHighPrice),
+    pullbackFromSessionHighPercent: finiteNumber(
+      opportunity.pullbackFromSessionHighPercent,
+    ),
+    scanSession: opportunity.scanSession
+      ? String(opportunity.scanSession)
+      : null,
+    relativeVolume: finiteNumber(opportunity.relativeVolume),
+    momentumScore: finiteNumber(opportunity.momentumScore),
+    crowdScore: finiteNumber(opportunity.crowdScore),
+    trapScore: finiteNumber(opportunity.trapScore),
+    catalystScore: finiteNumber(opportunity.catalystScore),
+    signalStrength: finiteNumber(opportunity.signalStrength),
+    qualityScore: finiteNumber(opportunity.qualityScore),
+    tradeQuality: finiteNumber(opportunity.tradeQuality),
+    breakoutPotentialScore: finiteNumber(
+      opportunity.breakoutPotentialScore,
+    ),
+    stage: opportunity.stage ? String(opportunity.stage) : null,
+    riskTags: Array.isArray(opportunity.riskTags)
+      ? opportunity.riskTags.map(String)
+      : [],
+    explosionAssessment: opportunity.explosionAssessment ?? null,
+    tradeFramework: opportunity.tradeFramework ?? null,
+    prox: prox
+      ? {
+          status: prox.status ? String(prox.status) : null,
+          pulse: prox.pulse ?? null,
+          scores: prox.scores ?? null,
+          supportFlags: Array.isArray(prox.supportFlags)
+            ? prox.supportFlags.map(String)
+            : [],
+          riskFlags: Array.isArray(prox.riskFlags)
+            ? prox.riskFlags.map(String)
+            : [],
+        }
+      : null,
+  };
+}
+
 function mapDisplayed(
   opportunity: OpportunitySnapshot,
   role: DisplayRole,
   rank: number,
+  strategy: LedgerStrategy,
 ): DisplayedOpportunity | null {
   const ticker = String(opportunity.ticker ?? "").trim().toUpperCase();
   const price =
@@ -114,11 +188,15 @@ function mapDisplayed(
     score: finiteNumber(opportunity.opportunityScore) ?? 0,
     role,
     rank,
+    strategy,
     visibilityState: opportunity.visibilityState
       ? String(opportunity.visibilityState)
       : null,
     sourceRunId: opportunity.sourceRunId
       ? String(opportunity.sourceRunId)
+      : null,
+    engineVersion: opportunity.engineVersion
+      ? String(opportunity.engineVersion)
       : null,
     proxState: opportunity.proxIntelligence?.pulse?.state
       ? String(opportunity.proxIntelligence.pulse.state)
@@ -126,34 +204,48 @@ function mapDisplayed(
     proxConfirmation: finiteNumber(
       opportunity.proxIntelligence?.scores?.marketConfirmation,
     ),
+    decisionSnapshot: compactDecisionSnapshot(opportunity),
   };
 }
 
-function selectDisplayed(payload: unknown): DisplayedOpportunity[] {
+function selectDisplayed(
+  payload: unknown,
+  strategy: LedgerStrategy,
+): DisplayedOpportunity[] {
   const source = payload && typeof payload === "object"
-    ? payload as { opportunities?: unknown; momentumRadar?: unknown }
+    ? payload as {
+        opportunities?: unknown;
+        momentumContenders?: unknown;
+      }
     : {};
   const strict = Array.isArray(source.opportunities)
     ? source.opportunities as OpportunitySnapshot[]
     : [];
-  const radar = Array.isArray(source.momentumRadar)
-    ? source.momentumRadar as OpportunitySnapshot[]
+  const exactMomentumContenders = Array.isArray(source.momentumContenders)
+    ? source.momentumContenders as OpportunitySnapshot[]
     : [];
+  const secondary = strategy === "spot_momentum"
+    ? exactMomentumContenders
+    : strict.slice(1, MOMENTUM_RUNNER_UP_COUNT + 1);
   const ranked = [
     ...(strict[0] ? [{ opportunity: strict[0], role: "hero" as const }] : []),
-    ...strict.slice(1).map((opportunity) => ({
+    ...secondary.map((opportunity) => ({
       opportunity,
-      role: "contender" as const,
-    })),
-    ...radar.map((opportunity) => ({
-      opportunity,
-      role: "radar" as const,
+      role:
+        opportunity.visibilityState === "momentum_radar"
+          ? "radar" as const
+          : "contender" as const,
     })),
   ];
   const seen = new Set<string>();
   const selected: DisplayedOpportunity[] = [];
   for (const { opportunity, role } of ranked) {
-    const mapped = mapDisplayed(opportunity, role, selected.length + 1);
+    const mapped = mapDisplayed(
+      opportunity,
+      role,
+      selected.length + 1,
+      strategy,
+    );
     if (!mapped || seen.has(mapped.ticker)) continue;
     seen.add(mapped.ticker);
     selected.push(mapped);
@@ -205,27 +297,53 @@ async function collect() {
   const supabase = getSupabase();
   const now = new Date();
   const observedAt = now.toISOString();
+  const observationMinute = new Date(
+    Math.floor(now.getTime() / 60_000) * 60_000,
+  ).toISOString();
   const tradingDate = easternDateString(now);
-  const feed = await buildCanonicalOpportunityFeed({
-    requestedType: "momentum",
-    limit: 100,
-  });
-  const displayed = selectDisplayed(feed);
+  const [spotMomentumFeed, beforeCrowdFeed] = await Promise.all([
+    buildCanonicalOpportunityFeed({
+      requestedType: "momentum",
+      limit: 100,
+    }),
+    buildCanonicalOpportunityFeed({
+      requestedType: "before_crowd",
+      limit: 100,
+    }),
+  ]);
+  const displayedByStrategy = {
+    spot_momentum: selectDisplayed(spotMomentumFeed, "spot_momentum"),
+    before_the_crowd: selectDisplayed(
+      beforeCrowdFeed,
+      "before_the_crowd",
+    ),
+  } satisfies Record<LedgerStrategy, DisplayedOpportunity[]>;
+  const displayed = [
+    ...displayedByStrategy.spot_momentum,
+    ...displayedByStrategy.before_the_crowd,
+  ];
 
   const { data: existingRows, error: existingError } = await supabase
     .from("ht_opportunity_ledger")
     .select("*")
     .eq("trading_date", tradingDate)
-    .eq("strategy", "spot_momentum");
+    .in("strategy", ["spot_momentum", "before_the_crowd"]);
   if (existingError) throw new Error(`Ledger read failed: ${existingError.message}`);
   const existingByTicker = new Map(
-    ((existingRows ?? []) as LedgerRow[]).map((row) => [row.ticker, row]),
+    ((existingRows ?? []) as LedgerRow[]).map((row) => [
+      `${row.strategy}:${row.ticker}`,
+      row,
+    ]),
   );
   let inserted = 0;
   let roleTransitions = 0;
+  const observations: Array<Record<string, unknown>> = [];
 
   for (const item of displayed) {
-    const existing = existingByTicker.get(item.ticker);
+    const existing = existingByTicker.get(
+      `${item.strategy}:${item.ticker}`,
+    );
+    let ledgerId: string;
     if (!existing) {
       const roleFields = item.role === "hero"
         ? { hero_first_at: observedAt, hero_first_price: item.price }
@@ -237,7 +355,7 @@ async function collect() {
         .insert({
           trading_date: tradingDate,
           ticker: item.ticker,
-          strategy: "spot_momentum",
+          strategy: item.strategy,
           first_seen_at: observedAt,
           first_seen_price: item.price,
           first_role: item.role,
@@ -265,12 +383,13 @@ async function collect() {
         .select("id")
         .single();
       if (error || !created) throw new Error(`Ledger insert failed for ${item.ticker}: ${error?.message}`);
+      ledgerId = created.id;
       const { error: roleEventError } = await supabase
         .from("ht_opportunity_role_events")
         .insert({
           ledger_id: created.id,
           ticker: item.ticker,
-          strategy: "spot_momentum",
+          strategy: item.strategy,
           role: item.role,
           rank: item.rank,
           price: item.price,
@@ -287,77 +406,162 @@ async function collect() {
         );
       }
       inserted++;
-      continue;
+    } else {
+      ledgerId = existing.id;
+      const roleChanged = existing.latest_role !== item.role;
+      const roleFirstFields: Record<string, string | number> = {};
+      if (item.role === "hero" && !existing.hero_first_at) {
+        roleFirstFields.hero_first_at = observedAt;
+        roleFirstFields.hero_first_price = item.price;
+      }
+      if (item.role === "contender" && !existing.contender_first_at) {
+        roleFirstFields.contender_first_at = observedAt;
+        roleFirstFields.contender_first_price = item.price;
+      }
+      if (item.role === "radar" && !existing.radar_first_at) {
+        roleFirstFields.radar_first_at = observedAt;
+        roleFirstFields.radar_first_price = item.price;
+      }
+      const { error } = await supabase.from("ht_opportunity_ledger").update({
+        latest_seen_at: observedAt,
+        latest_price: item.price,
+        latest_role: item.role,
+        latest_rank: item.rank,
+        latest_score: item.score,
+        latest_visibility_state: item.visibilityState,
+        latest_source_run_id: item.sourceRunId,
+        latest_prox_state: item.proxState,
+        latest_prox_confirmation: item.proxConfirmation,
+        updated_at: observedAt,
+        ...roleFirstFields,
+      }).eq("id", existing.id);
+      if (error) throw new Error(`Ledger update failed for ${item.ticker}: ${error.message}`);
+      if (roleChanged) {
+        const { error: roleEventError } = await supabase
+          .from("ht_opportunity_role_events")
+          .insert({
+            ledger_id: existing.id,
+            ticker: item.ticker,
+            strategy: item.strategy,
+            role: item.role,
+            rank: item.rank,
+            price: item.price,
+            score: item.score,
+            visibility_state: item.visibilityState,
+            source_run_id: item.sourceRunId,
+            prox_state: item.proxState,
+            prox_confirmation: item.proxConfirmation,
+            observed_at: observedAt,
+          });
+        if (roleEventError) {
+          throw new Error(
+            `Role transition failed for ${item.ticker}: ${roleEventError.message}`,
+          );
+        }
+        roleTransitions++;
+      }
     }
 
-    const roleChanged = existing.latest_role !== item.role;
-    const roleFirstFields: Record<string, string | number> = {};
-    if (item.role === "hero" && !existing.hero_first_at) {
-      roleFirstFields.hero_first_at = observedAt;
-      roleFirstFields.hero_first_price = item.price;
+    observations.push({
+      ledger_id: ledgerId,
+      trading_date: tradingDate,
+      ticker: item.ticker,
+      strategy: item.strategy,
+      observed_at: observedAt,
+      observation_minute: observationMinute,
+      role: item.role,
+      rank: item.rank,
+      price: item.price,
+      score: item.score,
+      visibility_state: item.visibilityState,
+      source_run_id: item.sourceRunId,
+      engine_version: item.engineVersion,
+      prox_state: item.proxState,
+      prox_confirmation: item.proxConfirmation,
+      decision_snapshot: item.decisionSnapshot,
+    });
+  }
+
+  if (observations.length > 0) {
+    const { error: observationError } = await supabase
+      .from("ht_opportunity_observations")
+      .upsert(observations, {
+        onConflict: "ledger_id,observation_minute",
+      });
+    if (observationError) {
+      throw new Error(
+        `Opportunity observation write failed: ${observationError.message}`,
+      );
     }
-    if (item.role === "contender" && !existing.contender_first_at) {
-      roleFirstFields.contender_first_at = observedAt;
-      roleFirstFields.contender_first_price = item.price;
-    }
-    if (item.role === "radar" && !existing.radar_first_at) {
-      roleFirstFields.radar_first_at = observedAt;
-      roleFirstFields.radar_first_price = item.price;
-    }
-    const { error } = await supabase.from("ht_opportunity_ledger").update({
-      latest_seen_at: observedAt,
-      latest_price: item.price,
-      latest_role: item.role,
-      latest_rank: item.rank,
-      latest_score: item.score,
-      latest_visibility_state: item.visibilityState,
-      latest_source_run_id: item.sourceRunId,
-      latest_prox_state: item.proxState,
-      latest_prox_confirmation: item.proxConfirmation,
-      updated_at: observedAt,
-      ...roleFirstFields,
-    }).eq("id", existing.id);
-    if (error) throw new Error(`Ledger update failed for ${item.ticker}: ${error.message}`);
-    if (roleChanged) {
-      const { error: roleEventError } = await supabase
-        .from("ht_opportunity_role_events")
-        .insert({
-          ledger_id: existing.id,
-          ticker: item.ticker,
-          strategy: "spot_momentum",
-          role: item.role,
-          rank: item.rank,
-          price: item.price,
-          score: item.score,
-          visibility_state: item.visibilityState,
-          source_run_id: item.sourceRunId,
-          prox_state: item.proxState,
-          prox_confirmation: item.proxConfirmation,
-          observed_at: observedAt,
-        });
-      if (roleEventError) {
-        throw new Error(
-          `Role transition failed for ${item.ticker}: ${roleEventError.message}`,
-        );
-      }
-      roleTransitions++;
-    }
+  }
+
+  const { count: persistedObservationCount, error: observationCountError } =
+    await supabase
+      .from("ht_opportunity_observations")
+      .select("*", { count: "exact", head: true })
+      .eq("observation_minute", observationMinute);
+  if (observationCountError) {
+    throw new Error(
+      `Opportunity observation verification failed: ${observationCountError.message}`,
+    );
+  }
+  const expectedObservationCount = observations.length;
+  const observedCount = persistedObservationCount ?? 0;
+  const { error: collectionRunError } = await supabase
+    .from("ht_opportunity_collection_runs")
+    .upsert({
+      trading_date: tradingDate,
+      observed_at: observedAt,
+      observation_minute: observationMinute,
+      spot_momentum_count: displayedByStrategy.spot_momentum.length,
+      before_crowd_count: displayedByStrategy.before_the_crowd.length,
+      expected_observation_count: expectedObservationCount,
+      persisted_observation_count: observedCount,
+      complete: observedCount === expectedObservationCount,
+      spot_momentum_tickers: displayedByStrategy.spot_momentum.map((item) => ({
+        ticker: item.ticker,
+        role: item.role,
+        rank: item.rank,
+        sourceRunId: item.sourceRunId,
+      })),
+      before_crowd_tickers: displayedByStrategy.before_the_crowd.map((item) => ({
+        ticker: item.ticker,
+        role: item.role,
+        rank: item.rank,
+        sourceRunId: item.sourceRunId,
+      })),
+    }, { onConflict: "observation_minute" });
+  if (collectionRunError) {
+    throw new Error(
+      `Opportunity collection receipt failed: ${collectionRunError.message}`,
+    );
   }
 
   const { data: activeRows, error: activeError } = await supabase
     .from("ht_opportunity_ledger")
     .select("*")
     .eq("trading_date", tradingDate)
-    .eq("strategy", "spot_momentum");
+    .in("strategy", ["spot_momentum", "before_the_crowd"]);
   if (activeError) throw new Error(`Active-ledger read failed: ${activeError.message}`);
   let outcomesUpdated = 0;
   let barsUnavailable = 0;
+  const minuteBarsByTicker = new Map<
+    string,
+    ReturnType<typeof fetchMinuteBars>
+  >();
+  const loadMinuteBarsOnce = (ticker: string) => {
+    const existing = minuteBarsByTicker.get(ticker);
+    if (existing) return existing;
+    const pending = fetchMinuteBars(ticker, tradingDate);
+    minuteBarsByTicker.set(ticker, pending);
+    return pending;
+  };
 
   for (let index = 0; index < (activeRows ?? []).length; index += UPDATE_CONCURRENCY) {
     const batch = (activeRows ?? []).slice(index, index + UPDATE_CONCURRENCY) as LedgerRow[];
     const settled = await Promise.allSettled(batch.map(async (row) => {
       const firstSeenMs = new Date(row.first_seen_at).getTime();
-      const bars = (await fetchMinuteBars(row.ticker, tradingDate))
+      const bars = (await loadMinuteBarsOnce(row.ticker))
         .filter((bar) => bar.timestamp >= firstSeenMs);
       if (bars.length === 0) return false;
       const entry = Number(row.first_seen_price);
@@ -415,9 +619,15 @@ async function collect() {
     success: true,
     tradingDate,
     displayed: displayed.length,
+    displayedByStrategy: {
+      spotMomentum: displayedByStrategy.spot_momentum.length,
+      beforeTheCrowd: displayedByStrategy.before_the_crowd.length,
+    },
     inserted,
     roleTransitions,
     tracked: activeRows?.length ?? 0,
+    observationsExpected: expectedObservationCount,
+    observationsPersisted: observedCount,
     outcomesUpdated,
     barsUnavailable,
     timestamp: observedAt,
@@ -427,6 +637,7 @@ async function collect() {
 async function readLedger(req: Request) {
   const url = new URL(req.url);
   const ticker = url.searchParams.get("ticker")?.trim().toUpperCase();
+  const strategy = url.searchParams.get("strategy")?.trim();
   const date = url.searchParams.get("date") ?? easternDateString();
   const parsedLimit = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
   const limit = Number.isFinite(parsedLimit) ? Math.min(200, Math.max(1, parsedLimit)) : 50;
@@ -437,6 +648,9 @@ async function readLedger(req: Request) {
     .order("first_seen_at", { ascending: true })
     .limit(limit);
   if (ticker) query = query.eq("ticker", ticker);
+  if (strategy === "spot_momentum" || strategy === "before_the_crowd") {
+    query = query.eq("strategy", strategy);
+  }
   const { data, error } = await query;
   if (error) throw error;
   return { outcomes: data ?? [], tradingDate: date, timestamp: new Date().toISOString() };
