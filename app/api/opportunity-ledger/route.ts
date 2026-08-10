@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { buildCanonicalOpportunityFeed } from "@/lib/canonical-opportunity-feed";
 import { getErrorMessage } from "@/lib/error-message";
+import { MOMENTUM_RUNNER_UP_COUNT } from "@/lib/opportunity-model";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -136,18 +137,27 @@ function selectDisplayed(payload: unknown): DisplayedOpportunity[] {
   const radar = Array.isArray(source.momentumRadar)
     ? source.momentumRadar as OpportunitySnapshot[]
     : [];
-  const selected = [
+  const ranked = [
     ...(strict[0] ? [{ opportunity: strict[0], role: "hero" as const }] : []),
-    ...strict.slice(1, 3).map((opportunity) => ({ opportunity, role: "contender" as const })),
-    ...radar.slice(0, 3).map((opportunity) => ({ opportunity, role: "radar" as const })),
+    ...strict.slice(1).map((opportunity) => ({
+      opportunity,
+      role: "contender" as const,
+    })),
+    ...radar.map((opportunity) => ({
+      opportunity,
+      role: "radar" as const,
+    })),
   ];
   const seen = new Set<string>();
-  return selected.flatMap(({ opportunity, role }, index) => {
-    const mapped = mapDisplayed(opportunity, role, index + 1);
-    if (!mapped || seen.has(mapped.ticker)) return [];
+  const selected: DisplayedOpportunity[] = [];
+  for (const { opportunity, role } of ranked) {
+    const mapped = mapDisplayed(opportunity, role, selected.length + 1);
+    if (!mapped || seen.has(mapped.ticker)) continue;
     seen.add(mapped.ticker);
-    return [mapped];
-  });
+    selected.push(mapped);
+    if (selected.length >= MOMENTUM_RUNNER_UP_COUNT + 1) break;
+  }
+  return selected;
 }
 
 async function fetchMinuteBars(ticker: string, tradingDate: string) {

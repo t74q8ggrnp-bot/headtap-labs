@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  MOMENTUM_RUNNER_UP_COUNT,
   mergeOpportunityLists,
   normalizeOpportunity,
   type Opportunity,
@@ -28,7 +29,6 @@ async function readOpportunityPayload(response: Response) {
 // Fetched alongside the hero so the runner-ups are already on hand — same
 // canonical ranking, just not the #1 pick. Nobody should be locked into one
 // ticker with no visibility into what else is close behind.
-const MOMENTUM_RUNNER_UP_COUNT = 5;
 const BEFORE_CROWD_COUNT = 5;
 const MOMENTUM_CACHE_KEY = "htlabs:canonical-opportunities:momentum:v3";
 const BEFORE_CROWD_CACHE_KEY = "htlabs:canonical-opportunities:before-crowd:v3";

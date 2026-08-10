@@ -6,6 +6,11 @@ import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 export type OpportunityStrategy = "spot_momentum" | "before_the_crowd";
 export type OpportunityTier = "scanner" | "watch" | "feature" | "hero";
 
+// One display policy owns both the homepage list and its permanent ledger.
+// This prevents the UI from showing more contenders than the outcome tracker
+// records.
+export const MOMENTUM_RUNNER_UP_COUNT = 5;
+
 export type Opportunity = {
   ticker: string;
   price: number;
