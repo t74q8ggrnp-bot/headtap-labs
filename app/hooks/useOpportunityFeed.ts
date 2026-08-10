@@ -1,20 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  MOMENTUM_RUNNER_UP_COUNT,
-  mergeOpportunityLists,
-  normalizeOpportunity,
-  type Opportunity,
-} from "@/lib/opportunity-model";
+import { normalizeOpportunity, type Opportunity } from "@/lib/opportunity-model";
 
 type OpportunityPayload = {
   opportunities?: unknown[];
   momentumRadar?: unknown[];
-};
-type CachedOpportunityList = {
-  savedAt: number;
-  opportunities: unknown[];
+  momentumContenders?: unknown[];
 };
 
 async function readOpportunityPayload(response: Response) {
@@ -23,6 +15,9 @@ async function readOpportunityPayload(response: Response) {
   return {
     opportunities: (payload.opportunities ?? []).map(normalizeOpportunity),
     momentumRadar: (payload.momentumRadar ?? []).map(normalizeOpportunity),
+    momentumContenders: (payload.momentumContenders ?? []).map(
+      normalizeOpportunity,
+    ),
   };
 }
 
@@ -30,43 +25,10 @@ async function readOpportunityPayload(response: Response) {
 // canonical ranking, just not the #1 pick. Nobody should be locked into one
 // ticker with no visibility into what else is close behind.
 const BEFORE_CROWD_COUNT = 5;
-const MOMENTUM_CACHE_KEY = "htlabs:canonical-opportunities:momentum:v3";
-const BEFORE_CROWD_CACHE_KEY = "htlabs:canonical-opportunities:before-crowd:v3";
-const MAX_CACHED_FEED_AGE_MS = 10 * 60 * 1000;
-
-function readCachedOpportunities(key: string) {
-  if (typeof window === "undefined") return null;
-  try {
-    const cached = JSON.parse(window.localStorage.getItem(key) ?? "null") as CachedOpportunityList | null;
-    if (
-      !cached ||
-      !Array.isArray(cached.opportunities) ||
-      !Number.isFinite(cached.savedAt) ||
-      Date.now() - cached.savedAt > MAX_CACHED_FEED_AGE_MS
-    ) {
-      return null;
-    }
-    return cached.opportunities.map(normalizeOpportunity);
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedOpportunities(key: string, opportunities: Opportunity[]) {
-  try {
-    window.localStorage.setItem(
-      key,
-      JSON.stringify({ savedAt: Date.now(), opportunities }),
-    );
-  } catch {
-    // Storage can be unavailable in private or locked-down browser contexts.
-  }
-}
 
 export function useOpportunityFeed() {
   const [spotMomentum, setSpotMomentum] = useState<Opportunity | null>(null);
   const [spotMomentumRunnersUp, setSpotMomentumRunnersUp] = useState<Opportunity[]>([]);
-  const [catalyst, setCatalyst] = useState<Opportunity | null>(null);
   const [beforeCrowd, setBeforeCrowd] = useState<Opportunity[]>([]);
   // Full ranked list — same endpoint, same scoring engine, same live data
   // as everything else. Used by any surface that needs to show many
@@ -91,27 +53,18 @@ export function useOpportunityFeed() {
         "/api/opportunities?type=before_crowd&limit=100",
       );
 
-      const momentumTask = momentumRequest.then(readOpportunityPayload).then(({ opportunities: momentumList, momentumRadar }) => {
+      const momentumTask = momentumRequest.then(readOpportunityPayload).then(({ opportunities: momentumList, momentumContenders }) => {
         setSpotMomentum(momentumList[0] ?? null);
-        setSpotMomentumRunnersUp(
-          mergeOpportunityLists(
-            momentumList.slice(1),
-            momentumRadar,
-          ).slice(0, MOMENTUM_RUNNER_UP_COUNT),
-        );
-        // Same rule the server's own type=catalyst path applied (catalystScore
-        // >= 20), against a list already ranked the same way — same result.
-        setCatalyst(momentumList.find((o) => o.catalystScore >= 20) ?? null);
+        setSpotMomentumRunnersUp(momentumContenders);
+        setFullRankedList(momentumList);
         setLoading(false);
-        writeCachedOpportunities(MOMENTUM_CACHE_KEY, momentumList);
-        return { momentumList, momentumRadar };
+        return momentumList;
       });
 
       // Start both strategies together, but do not hold Spot Momentum hostage
       // to the slower Before-the-Crowd evaluation.
       const beforeCrowdTask = beforeCrowdRequest.then(readOpportunityPayload).then(({ opportunities: beforeCrowdList }) => {
         setBeforeCrowd(beforeCrowdList.slice(0, BEFORE_CROWD_COUNT));
-        writeCachedOpportunities(BEFORE_CROWD_CACHE_KEY, beforeCrowdList);
         return beforeCrowdList;
       });
 
@@ -126,22 +79,6 @@ export function useOpportunityFeed() {
         console.warn("Before-the-Crowd opportunities fetch failed:", beforeCrowdResult.reason);
       }
 
-      const momentumList =
-        momentumResult.status === "fulfilled"
-          ? momentumResult.value.momentumList
-          : readCachedOpportunities(MOMENTUM_CACHE_KEY) ?? [];
-      const momentumRadar =
-        momentumResult.status === "fulfilled"
-          ? momentumResult.value.momentumRadar
-          : [];
-      const beforeCrowdList =
-        beforeCrowdResult.status === "fulfilled"
-          ? beforeCrowdResult.value
-          : readCachedOpportunities(BEFORE_CROWD_CACHE_KEY) ?? [];
-      setFullRankedList(
-        mergeOpportunityLists(momentumList, momentumRadar, beforeCrowdList)
-          .sort((a, b) => b.opportunityScore - a.opportunityScore),
-      );
     } finally {
       refreshInFlight.current = false;
       setLoading(false);
@@ -153,25 +90,6 @@ export function useOpportunityFeed() {
   // to finish and mutate `stocks`. Refresh on the signal writer's cadence.
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
-      const cachedMomentum = readCachedOpportunities(MOMENTUM_CACHE_KEY);
-      const cachedBeforeCrowd = readCachedOpportunities(BEFORE_CROWD_CACHE_KEY);
-      if (cachedMomentum) {
-        setSpotMomentum(cachedMomentum[0] ?? null);
-        setSpotMomentumRunnersUp(
-          cachedMomentum.slice(1, MOMENTUM_RUNNER_UP_COUNT + 1),
-        );
-        setCatalyst(cachedMomentum.find((o) => o.catalystScore >= 20) ?? null);
-        setLoading(false);
-      }
-      if (cachedBeforeCrowd) {
-        setBeforeCrowd(cachedBeforeCrowd.slice(0, BEFORE_CROWD_COUNT));
-      }
-      if (cachedMomentum || cachedBeforeCrowd) {
-        setFullRankedList(
-          mergeOpportunityLists(cachedMomentum ?? [], cachedBeforeCrowd ?? [])
-            .sort((a, b) => b.opportunityScore - a.opportunityScore),
-        );
-      }
       void refresh();
     }, 0);
     const interval = window.setInterval(() => {
@@ -186,7 +104,6 @@ export function useOpportunityFeed() {
   return {
     spotMomentum,
     spotMomentumRunnersUp,
-    catalyst,
     beforeCrowd,
     fullRankedList,
     loading,

@@ -266,17 +266,6 @@ export function opportunityToStock(opportunity: Opportunity): OpportunityStock {
   };
 }
 
-export function selectDistinctBeforeCrowd(
-  opportunities: Opportunity[],
-  spotMomentumTicker?: string,
-) {
-  return (
-    opportunities.find((opportunity) => opportunity.ticker !== spotMomentumTicker) ??
-    opportunities[0] ??
-    null
-  );
-}
-
 export function mergeOpportunityLists(...lists: unknown[][]) {
   const merged = new Map<string, Opportunity>();
   for (const raw of lists.flat()) {

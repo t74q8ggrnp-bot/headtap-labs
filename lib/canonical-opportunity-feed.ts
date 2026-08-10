@@ -17,6 +17,7 @@ import {
   attachOpportunityDisplayQuote,
   loadOpportunityDisplayQuotes,
 } from "@/lib/opportunity-display-quotes";
+import { MOMENTUM_RUNNER_UP_COUNT } from "@/lib/opportunity-model";
 
 const CONCURRENCY = 20;
 const RUN_ROW_PAGE_SIZE = 1_000;
@@ -209,11 +210,23 @@ export async function buildCanonicalOpportunityFeed({
       : [];
 
   const visibleOpportunities = eligible.slice(0, limit);
+  const momentumContenders =
+    strategy === "spot_momentum"
+      ? [...visibleOpportunities.slice(1), ...momentumRadar]
+          .filter(
+            (candidate, index, candidates) =>
+              candidates.findIndex(
+                (other) => other.ticker === candidate.ticker,
+              ) === index,
+          )
+          .slice(0, MOMENTUM_RUNNER_UP_COUNT)
+      : [];
   const visibleContinuationCandidates = continuationCandidates;
   const displayQuotes = await loadOpportunityDisplayQuotes(
     [
       ...visibleOpportunities,
       ...momentumRadar,
+      ...momentumContenders,
       ...(includeContinuation ? visibleContinuationCandidates : []),
     ].map((candidate) => candidate.ticker),
   );
@@ -245,6 +258,7 @@ export async function buildCanonicalOpportunityFeed({
       momentumRadar: momentumRadar.length,
     },
     momentumRadar: momentumRadar.map(withDisplayQuote),
+    momentumContenders: momentumContenders.map(withDisplayQuote),
     ...(debug
       ? {
           rejectedSample: ranked

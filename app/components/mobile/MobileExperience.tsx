@@ -54,7 +54,6 @@ export type MobileExperienceProps = {
   btcFramework: TradeFramework | null;
   btcTrace: DecisionTraceModel | null;
   mobileScannerReads: APIOpportunity[];
-  getOtherReadState: (o: APIOpportunity) => { label: string; tone: string };
   openReadTicker: (ticker: string) => void;
   watchlistStocks: Stock[];
   session: Session | null;
@@ -84,7 +83,7 @@ export default function MobileExperience({
   setMobileTouchStart, apiOpportunitiesLoading, apiMomentum, smFramework, smTrace,
   bullBearData, isDualEngineConfirmation, watchlist, setSelectedStock, toggleWatchlist,
   opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace, mobileScannerReads,
-  getOtherReadState, openReadTicker, watchlistStocks, session, handleSignOut, savedSetups,
+  openReadTicker, watchlistStocks, session, handleSignOut, savedSetups,
   signalMemoryInsight, authEmail, setAuthEmail, authPassword, setAuthPassword, handleAuth,
   authLoading, authMessage, selectedStock, selectedOpportunity, selectedOpportunityLoading,
   selectedOpportunityPresentation, selectedOpportunityError, selectedOpportunityFramework,
@@ -280,14 +279,7 @@ export default function MobileExperience({
               ) : (
                 <div className="space-y-2">
                   {mobileScannerReads.map((o) => {
-                    const { label, tone } = getOtherReadState(o);
-                    const emoji =
-                      (o.catalystScore ?? 0) >= 20 ? "⚡" :
-                      o.isBeforeCrowd ? "👀" :
-                      (o.relativeVolume ?? 0) >= 5 && o.change >= 5 ? "🔥" :
-                      o.change >= 15 ? "🚀" :
-                      o.opportunityScore >= 90 ? "🎯" :
-                      "🔎";
+                    const backendState = o.stage || o.freshnessLabel;
                     return (
                       <button
                         key={o.ticker}
@@ -295,10 +287,10 @@ export default function MobileExperience({
                         className="w-full flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-left"
                       >
                         <div className="flex items-center gap-3">
-                          <span className="text-xl">{emoji}</span>
+                          <span className="text-xl">🔎</span>
                           <div>
                             <p className="font-mono text-base font-black text-white">{o.ticker}</p>
-                            <p className={`text-[10px] font-semibold ${tone}`}>{label}</p>
+                            <p className="text-[10px] font-semibold text-zinc-400">{backendState}</p>
                           </div>
                         </div>
                         <div className="text-right">
