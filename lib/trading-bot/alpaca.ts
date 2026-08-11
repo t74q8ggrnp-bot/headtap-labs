@@ -91,7 +91,7 @@ export async function placeSellQty(ticker: string, qty: string) {
   });
 }
 
-export type AlpacaOrder = { id: string; status: string; filled_avg_price: string | null };
+export type AlpacaOrder = { id: string; status: string; filled_avg_price: string | null; filled_qty: string | null };
 
 export async function getOrder(orderId: string): Promise<AlpacaOrder> {
   return alpacaFetch(`/v2/orders/${orderId}`);
@@ -99,9 +99,15 @@ export async function getOrder(orderId: string): Promise<AlpacaOrder> {
 
 // Best-effort cleanup for an order that never confirmed filled within the
 // poll window (see pollForFill) — clears it so a retry next cycle doesn't
-// collide with a stale pending order. Swallow failures: if it already filled
-// or already got cancelled/expired on Alpaca's side, DELETE just 404s, which
-// isn't this caller's problem to handle.
+// collide with a stale pending order. Swallow failures here (a 404 just
+// means it's already filled/cancelled/expired on Alpaca's side) — but the
+// caller MUST re-check the order's real status after calling this, via
+// getOrder, rather than assume the cancel means the order never filled.
+// Confirmed live: an order can fill in the gap between the last poll
+// attempt and this cancel call — the cancel then either 404s (too late,
+// already filled) or "succeeds" on Alpaca's side while the fill still
+// posts moments later. Either way, a real position exists on Alpaca that
+// this function alone gives the caller no way to detect.
 export async function cancelOrder(orderId: string): Promise<void> {
   try {
     await alpacaFetch(`/v2/orders/${orderId}`, { method: "DELETE" });

@@ -144,20 +144,52 @@ function isRegularMarketSession(now = new Date()) {
 // because a row marked closed never gets checked again. Returning whether it
 // actually filled (instead of silently substituting a fallback price and
 // assuming success) lets the caller refuse to lie about order state.
-async function pollForFill(orderId: string): Promise<{ filled: true; price: number } | { filled: false; price: null }> {
+//
+// Confirmed live, the more serious version of this same problem: MSGY and
+// 11 other tickers exist as real, currently-held Alpaca positions with zero
+// row in bot_trades — the original buy orders filled in the gap between the
+// last poll attempt and the subsequent cancelOrder call below, which either
+// 404s (too late, already filled) or "succeeds" while the fill still posts
+// moments later. The old code treated "poll gave up" as "never happened"
+// and cancelOrder swallowed every outcome, so nothing ever caught the real
+// fill. This now does one final getOrder check AFTER attempting the cancel,
+// specifically to catch that race — only after that check still shows no
+// fill does this return filled:false.
+async function pollForFill(orderId: string): Promise<{ filled: true; price: number; qty: number | null } | { filled: false; price: null; qty: null }> {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const order = await getOrder(orderId);
       const filledPrice = Number(order?.filled_avg_price);
       if (order?.status === "filled" && Number.isFinite(filledPrice) && filledPrice > 0) {
-        return { filled: true, price: filledPrice };
+        const filledQty = Number(order?.filled_qty);
+        return { filled: true, price: filledPrice, qty: Number.isFinite(filledQty) && filledQty > 0 ? filledQty : null };
       }
     } catch (err) {
       console.error(`[trading-bot] order status poll failed for ${orderId}:`, err);
     }
     if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  return { filled: false, price: null };
+  await cancelOrder(orderId);
+  // The order may have filled in the exact gap between the last poll above
+  // and this cancel call — cancelOrder swallows that outcome entirely (see
+  // its own comment), so this is the only remaining chance to catch it
+  // before the caller assumes nothing happened and walks away.
+  try {
+    const finalCheck = await getOrder(orderId);
+    const finalPrice = Number(finalCheck?.filled_avg_price);
+    if (
+      (finalCheck?.status === "filled" || finalCheck?.status === "partially_filled") &&
+      Number.isFinite(finalPrice) &&
+      finalPrice > 0
+    ) {
+      const finalQty = Number(finalCheck?.filled_qty);
+      console.error(`[trading-bot] order ${orderId} filled in the poll/cancel race window — recording it instead of discarding it`);
+      return { filled: true, price: finalPrice, qty: Number.isFinite(finalQty) && finalQty > 0 ? finalQty : null };
+    }
+  } catch (err) {
+    console.error(`[trading-bot] final post-cancel order check failed for ${orderId}:`, err);
+  }
+  return { filled: false, price: null, qty: null };
 }
 
 // Some assets Alpaca lists reject notional (dollar-amount) orders outright —
@@ -704,7 +736,7 @@ export async function GET(req: Request) {
           const order = await placeSellQty(trade.ticker, position.qty);
           const fillResult = order?.id
             ? await pollForFill(order.id)
-            : ({ filled: false, price: null } as const);
+            : ({ filled: false, price: null, qty: null } as const);
 
           if (!fillResult.filled) {
             // Do NOT mark this closed — it isn't. Likely cause: the order
@@ -712,8 +744,9 @@ export async function GET(req: Request) {
             // and simply won't fill until the next session. Leaving status
             // "open" means the next cycle re-checks it and retries the exit,
             // instead of the database claiming a sale that never happened
-            // while the real position sits unmanaged.
-            if (order?.id) await cancelOrder(order.id);
+            // while the real position sits unmanaged. (pollForFill already
+            // attempted cancelOrder and did a final post-cancel check itself
+            // — reaching here means that already confirmed no fill happened.)
             diagnostics.unfilled++;
             console.error(`[trading-bot] sell for ${trade.ticker} did not fill (order ${order?.id ?? "none"}) — left open for retry`);
             continue;
@@ -860,16 +893,17 @@ export async function GET(req: Request) {
           }
 
           const { order, qty } = await placeBuyOrder(candidate.ticker, positionNotional, candidate.price);
-          const fillResult = order?.id ? await pollForFill(order.id) : ({ filled: false, price: null } as const);
+          const fillResult = order?.id ? await pollForFill(order.id) : ({ filled: false, price: null, qty: null } as const);
 
           if (!fillResult.filled) {
             // Same principle as the exit side: don't record a position that
             // isn't real. Most likely cause outside regular hours (no
-            // extended_hours flag) is the order just never fills — cancel it
-            // and let the next cycle try again with a fresh top candidate,
-            // rather than inserting an "open" row for a position that was
-            // never actually bought.
-            if (order?.id) await cancelOrder(order.id);
+            // extended_hours flag) is the order just never fills — let the
+            // next cycle try again with a fresh top candidate, rather than
+            // inserting an "open" row for a position that was never actually
+            // bought. (pollForFill already attempted cancelOrder and did a
+            // final post-cancel check itself — reaching here means that
+            // already confirmed no fill happened.)
             diagnostics.unfilled++;
             console.error(`[trading-bot] buy for ${candidate.ticker} did not fill (order ${order?.id ?? "none"}) — skipped`);
             await finalizeCycle({
@@ -898,9 +932,15 @@ export async function GET(req: Request) {
             entry_order_id: order?.id ?? null,
             entry_price: entryPrice,
             entry_at: now.toISOString(),
-            // Whole-share fallback (see placeBuyOrder) buys qty*price, not
-            // the original notional target — record what was actually spent.
-            position_notional: qty !== null ? Math.round(qty * entryPrice * 100) / 100 : positionNotional,
+            // Alpaca's own filled_qty (now available from pollForFill) is
+            // ground truth for exactly what was bought, for both notional
+            // and whole-share-fallback orders — falls back to the
+            // whole-share qty, then the originally requested notional, only
+            // if Alpaca didn't report a filled_qty for some reason.
+            position_notional: (() => {
+              const actualQty = fillResult.qty ?? qty;
+              return actualQty !== null ? Math.round(actualQty * entryPrice * 100) / 100 : positionNotional;
+            })(),
             // Informational only now — the actual sell decision is the
             // trailing stop below, not this fixed number. Kept so the
             // viewer can still show "what HT Labs originally modeled."
