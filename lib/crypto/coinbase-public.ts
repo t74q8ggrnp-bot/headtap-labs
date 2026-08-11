@@ -2,6 +2,7 @@ import "server-only";
 
 import { unstable_cache } from "next/cache";
 import type {
+  CryptoDiscoveryPrice,
   CryptoOpportunity,
   CryptoOpportunityFeed,
   CryptoProxPacket,
@@ -15,6 +16,10 @@ import {
   type CryptoMinuteCandle,
   type CryptoTopOfBook,
 } from "@/lib/crypto/prox";
+import {
+  buildCryptoShadowDiscovery,
+  loadCryptoDiscoverySources,
+} from "@/lib/crypto/multi-venue-discovery";
 
 const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
 const PROVIDER_BATCH_SIZE = 8;
@@ -277,7 +282,13 @@ function selectProducts(
   };
 }
 
-async function buildUncachedCryptoOpportunityFeed(): Promise<CryptoOpportunityFeed> {
+export type CryptoOpportunityFeedState = {
+  feed: CryptoOpportunityFeed;
+  discoveryPrices: CryptoDiscoveryPrice[];
+};
+
+async function buildUncachedCryptoOpportunityFeedState(): Promise<CryptoOpportunityFeedState> {
+  const discoverySourcesPromise = loadCryptoDiscoverySources();
   const [products, volumes] = await Promise.all([
     fetchCoinbase<CoinbaseProduct[]>("/products", 300),
     fetchCoinbase<CoinbaseVolume[]>("/products/volume-summary", 60),
@@ -331,39 +342,65 @@ async function buildUncachedCryptoOpportunityFeed(): Promise<CryptoOpportunityFe
   const radar = evaluated
     .filter((item) => item.radarEligible)
     .slice(0, 6);
+  const now = new Date();
+  const shadowDiscovery = buildCryptoShadowDiscovery({
+    coinbaseOpportunities: baseEvaluated,
+    sources: await discoverySourcesPromise,
+    now,
+  });
 
   return {
-    success: true,
-    lane: "crypto_momentum",
-    status: "observation_only",
-    provider: "coinbase_exchange_public",
-    methodologyVersion: "crypto-momentum-v2-prox-shadow",
-    hero: eligible[0] ?? null,
-    contenders: eligible.slice(1, 6),
-    radar,
-    diagnostics: {
-      availableUsdProducts: availableCount,
-      shortlistedProducts: selected.length,
-      evaluatedProducts: evaluated.length,
-      eligibleProducts: eligible.length,
-      radarProducts: radar.length,
-      providerFailures,
-      proxEvaluatedProducts: prox.evaluatedProducts,
-      proxAvailableProducts: prox.packets.size,
-      proxProviderFailures: prox.providerFailures,
+    feed: {
+      success: true,
+      lane: "crypto_momentum",
+      status: "observation_only",
+      provider: "coinbase_exchange_public",
+      methodologyVersion: "crypto-momentum-v2-prox-shadow",
+      hero: eligible[0] ?? null,
+      contenders: eligible.slice(1, 6),
+      radar,
+      shadowDiscovery: shadowDiscovery.packet,
+      diagnostics: {
+        availableUsdProducts: availableCount,
+        shortlistedProducts: selected.length,
+        evaluatedProducts: evaluated.length,
+        eligibleProducts: eligible.length,
+        radarProducts: radar.length,
+        providerFailures,
+        proxEvaluatedProducts: prox.evaluatedProducts,
+        proxAvailableProducts: prox.packets.size,
+        proxProviderFailures: prox.providerFailures,
+        shadowDiscoveryAssets:
+          shadowDiscovery.packet.diagnostics.observedAssets,
+        shadowDiscoveryCandidates:
+          shadowDiscovery.packet.diagnostics.candidateAssets,
+        shadowDiscoveryHealthyVenues:
+          shadowDiscovery.packet.diagnostics.healthyVenues,
+        shadowDiscoveryProviderFailures:
+          shadowDiscovery.packet.diagnostics.providerFailures,
+      },
+      timestamp: now.toISOString(),
     },
-    timestamp: new Date().toISOString(),
+    discoveryPrices: shadowDiscovery.prices,
   };
 }
 
-export const buildCryptoOpportunityFeed = unstable_cache(
-  buildUncachedCryptoOpportunityFeed,
-  ["ht-crypto-opportunity-feed-v2-prox-shadow-sparse-bars"],
+const buildCachedCryptoOpportunityFeedState = unstable_cache(
+  buildUncachedCryptoOpportunityFeedState,
+  ["ht-crypto-opportunity-feed-v4-multivenue-shadow-quote-coverage"],
   {
     revalidate: 60,
     tags: ["ht-crypto-opportunities"],
   },
 );
+
+export async function buildCryptoOpportunityFeedState() {
+  return buildCachedCryptoOpportunityFeedState();
+}
+
+export async function buildCryptoOpportunityFeed() {
+  return (await buildCachedCryptoOpportunityFeedState()).feed;
+}
 
 export async function loadCoinbaseCurrentPrices(productIds: string[]) {
   const uniqueProductIds = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];

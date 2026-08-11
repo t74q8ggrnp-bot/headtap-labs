@@ -36,7 +36,7 @@ export default function CryptoMomentumPreview({
               24/7 Crypto Momentum
             </p>
             <p className="mt-0.5 text-[9px] font-semibold text-zinc-600">
-              Coinbase USD markets · observation only
+              One Coinbase score · multi-venue shadow discovery
             </p>
           </div>
         </div>

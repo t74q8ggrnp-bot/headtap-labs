@@ -1,5 +1,81 @@
 export type CryptoPulseState = "expanding" | "stable" | "weakening";
 
+export type CryptoDiscoveryVenue = "coinbase" | "kraken" | "crypto_com";
+
+export type CryptoDiscoveryWindow = "rolling_24h" | "utc_session";
+
+export type CryptoDiscoveryCandidate = {
+  assetId: string;
+  symbol: string;
+  rank: number;
+  entryPriceUsd: number;
+  observedMovePercent: number;
+  dollarVolume: number;
+  venueCount: number;
+  venues: CryptoDiscoveryVenue[];
+  quoteCurrencies: string[];
+  confirmingVenues: number;
+  crossVenueDispersionPercent: number;
+  proposedOpportunityScore: number;
+  attention: {
+    source: "coingecko_trending";
+    rank: number;
+    coinId: string;
+  } | null;
+  supportFlags: string[];
+  riskFlags: string[];
+  scoreBreakdown: {
+    momentum: number;
+    liquidity: number;
+    crossVenue: number;
+    venueBreadth: number;
+    attention: number;
+  };
+  markets: Array<{
+    venue: CryptoDiscoveryVenue;
+    productId: string;
+    quoteCurrency: string;
+    sourceWindow: CryptoDiscoveryWindow;
+    priceUsd: number;
+    observedMovePercent: number;
+    dollarVolume: number;
+    spreadPercent: number | null;
+    tradeCount: number | null;
+  }>;
+};
+
+export type CryptoShadowDiscovery = {
+  version: "crypto-multivenue-discovery-v1";
+  mode: "shadow";
+  authority: "none";
+  generatedAt: string;
+  candidates: CryptoDiscoveryCandidate[];
+  diagnostics: {
+    configuredVenues: number;
+    healthyVenues: number;
+    venueMarkets: Record<CryptoDiscoveryVenue, number>;
+    quoteMarkets: Record<string, number>;
+    supportedPairs: number;
+    observedAssets: number;
+    candidateAssets: number;
+    attentionSourceHealthy: boolean;
+    attentionItems: number;
+    providerFailures: number;
+    providerStatus: Array<{
+      venue: CryptoDiscoveryVenue;
+      ok: boolean;
+      marketCount: number;
+      message: string;
+    }>;
+  };
+};
+
+export type CryptoDiscoveryPrice = {
+  assetId: string;
+  symbol: string;
+  priceUsd: number;
+};
+
 export type CryptoProxState =
   | "expanding"
   | "stable"
@@ -84,6 +160,7 @@ export type CryptoOpportunityFeed = {
   hero: CryptoOpportunity | null;
   contenders: CryptoOpportunity[];
   radar: CryptoOpportunity[];
+  shadowDiscovery: CryptoShadowDiscovery;
   diagnostics: {
     availableUsdProducts: number;
     shortlistedProducts: number;
@@ -94,6 +171,10 @@ export type CryptoOpportunityFeed = {
     proxEvaluatedProducts: number;
     proxAvailableProducts: number;
     proxProviderFailures: number;
+    shadowDiscoveryAssets: number;
+    shadowDiscoveryCandidates: number;
+    shadowDiscoveryHealthyVenues: number;
+    shadowDiscoveryProviderFailures: number;
   };
   timestamp: string;
 };

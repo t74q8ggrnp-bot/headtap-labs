@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  buildCryptoOpportunityFeed,
+  buildCryptoOpportunityFeedState,
   loadCoinbaseCurrentPrices,
 } from "@/lib/crypto/coinbase-public";
 import type {
+  CryptoDiscoveryCandidate,
+  CryptoDiscoveryPrice,
   CryptoOpportunity,
   CryptoOpportunityFeed,
 } from "@/lib/crypto/contracts";
@@ -26,6 +28,11 @@ type PendingOutcomeRow = {
   id: string;
   product_id: string;
   entry_price: number;
+};
+type PendingDiscoveryOutcomeRow = {
+  id: string;
+  asset_id: string;
+  entry_price_usd: number;
 };
 
 function getSupabase() {
@@ -169,6 +176,203 @@ async function persistOutcomePrices(
   return { outcomesUpdated, outcomesUnavailable };
 }
 
+async function loadDueDiscoveryOutcomes(
+  supabase: ReturnType<typeof getSupabase>,
+  nowIso: string,
+) {
+  const horizons = [
+    { horizon: "15m" as const, target: "target_15m_at", price: "price_15m_usd" },
+    { horizon: "1h" as const, target: "target_1h_at", price: "price_1h_usd" },
+    { horizon: "4h" as const, target: "target_4h_at", price: "price_4h_usd" },
+    { horizon: "24h" as const, target: "target_24h_at", price: "price_24h_usd" },
+  ];
+  const results = await Promise.all(
+    horizons.map(async ({ horizon, target, price }) => {
+      const { data, error } = await supabase
+        .from("ht_crypto_discovery_observations")
+        .select("id,asset_id,entry_price_usd")
+        .is(price, null)
+        .lte(target, nowIso)
+        .order(target, { ascending: true })
+        .limit(OUTCOME_QUERY_LIMIT);
+      if (error) throw error;
+      return {
+        horizon,
+        rows: (data ?? []) as PendingDiscoveryOutcomeRow[],
+      };
+    }),
+  );
+
+  const dueById = new Map<
+    string,
+    { row: PendingDiscoveryOutcomeRow; horizons: Set<OutcomeHorizon> }
+  >();
+  for (const result of results) {
+    for (const row of result.rows) {
+      const existing = dueById.get(row.id) ?? {
+        row,
+        horizons: new Set<OutcomeHorizon>(),
+      };
+      existing.horizons.add(result.horizon);
+      dueById.set(row.id, existing);
+    }
+  }
+  return dueById;
+}
+
+async function persistDiscoveryOutcomePrices(
+  supabase: ReturnType<typeof getSupabase>,
+  dueById: Awaited<ReturnType<typeof loadDueDiscoveryOutcomes>>,
+  discoveryPrices: CryptoDiscoveryPrice[],
+  observedAt: string,
+) {
+  const currentPrices = new Map(
+    discoveryPrices.map((price) => [price.assetId, price.priceUsd]),
+  );
+  let outcomesUpdated = 0;
+  let outcomesUnavailable = 0;
+
+  for (const { row, horizons } of dueById.values()) {
+    const currentPrice = currentPrices.get(row.asset_id);
+    const entryPrice = Number(row.entry_price_usd);
+    if (
+      !currentPrice ||
+      currentPrice <= 0 ||
+      !Number.isFinite(entryPrice) ||
+      entryPrice <= 0
+    ) {
+      outcomesUnavailable++;
+      continue;
+    }
+    const returnPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+    const update: Record<string, unknown> = { updated_at: observedAt };
+    for (const horizon of horizons) {
+      update[`price_${horizon}_usd`] = currentPrice;
+      update[`return_${horizon}_percent`] = returnPercent;
+      outcomesUpdated++;
+    }
+    const { error } = await supabase
+      .from("ht_crypto_discovery_observations")
+      .update(update)
+      .eq("id", row.id);
+    if (error) throw error;
+  }
+
+  return { outcomesUpdated, outcomesUnavailable };
+}
+
+function discoveryObservationRow(
+  candidate: CryptoDiscoveryCandidate,
+  observedAt: string,
+  observationMinute: string,
+  now: Date,
+) {
+  return {
+    asset_id: candidate.assetId,
+    symbol: candidate.symbol,
+    observed_at: observedAt,
+    observation_minute: observationMinute,
+    rank: candidate.rank,
+    entry_price_usd: candidate.entryPriceUsd,
+    proposed_opportunity_score: candidate.proposedOpportunityScore,
+    observed_move_percent: candidate.observedMovePercent,
+    dollar_volume: candidate.dollarVolume,
+    venue_count: candidate.venueCount,
+    methodology_version: "crypto-multivenue-discovery-v1",
+    discovery_packet: candidate,
+    target_15m_at: addMinutes(now, 15),
+    target_1h_at: addMinutes(now, 60),
+    target_4h_at: addMinutes(now, 240),
+    target_24h_at: addMinutes(now, 1_440),
+    updated_at: observedAt,
+  };
+}
+
+async function persistShadowDiscovery({
+  supabase,
+  feed,
+  discoveryPrices,
+  observedAt,
+  observationMinute,
+  now,
+}: {
+  supabase: ReturnType<typeof getSupabase>;
+  feed: CryptoOpportunityFeed;
+  discoveryPrices: CryptoDiscoveryPrice[];
+  observedAt: string;
+  observationMinute: string;
+  now: Date;
+}) {
+  try {
+    const candidates = feed.shadowDiscovery.candidates;
+    const rows = candidates.map((candidate) =>
+      discoveryObservationRow(candidate, observedAt, observationMinute, now)
+    );
+    if (rows.length > 0) {
+      const { error } = await supabase
+        .from("ht_crypto_discovery_observations")
+        .upsert(rows, {
+          onConflict: "asset_id,observation_minute",
+          ignoreDuplicates: true,
+        });
+      if (error) throw error;
+    }
+    const { count, error: countError } = await supabase
+      .from("ht_crypto_discovery_observations")
+      .select("*", { count: "exact", head: true })
+      .eq("observation_minute", observationMinute);
+    if (countError) throw countError;
+    const persisted = count ?? 0;
+    const dueOutcomes = await loadDueDiscoveryOutcomes(supabase, observedAt);
+    const outcomeResult = await persistDiscoveryOutcomePrices(
+      supabase,
+      dueOutcomes,
+      discoveryPrices,
+      observedAt,
+    );
+    const { error: receiptError } = await supabase
+      .from("ht_crypto_discovery_runs")
+      .upsert({
+        observed_at: observedAt,
+        observation_minute: observationMinute,
+        expected_candidate_count: rows.length,
+        persisted_candidate_count: persisted,
+        complete: persisted === rows.length,
+        observed_assets: candidates.map((candidate) => ({
+          assetId: candidate.assetId,
+          symbol: candidate.symbol,
+          rank: candidate.rank,
+        })),
+        source_diagnostics: feed.shadowDiscovery.diagnostics,
+        outcomes_updated: outcomeResult.outcomesUpdated,
+        outcomes_unavailable: outcomeResult.outcomesUnavailable,
+        updated_at: observedAt,
+      }, {
+        onConflict: "observation_minute",
+      });
+    if (receiptError) throw receiptError;
+    return {
+      schemaReady: true,
+      complete: persisted === rows.length,
+      expected: rows.length,
+      persisted,
+      outcomesUpdated: outcomeResult.outcomesUpdated,
+      outcomesUnavailable: outcomeResult.outcomesUnavailable,
+      error: null,
+    };
+  } catch (error: unknown) {
+    return {
+      schemaReady: false,
+      complete: false,
+      expected: feed.shadowDiscovery.candidates.length,
+      persisted: 0,
+      outcomesUpdated: 0,
+      outcomesUnavailable: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 async function collect() {
   const supabase = getSupabase();
   const now = new Date();
@@ -176,7 +380,8 @@ async function collect() {
   const observationMinute = new Date(
     Math.floor(now.getTime() / 60_000) * 60_000,
   ).toISOString();
-  const feed = await buildCryptoOpportunityFeed();
+  const feedState = await buildCryptoOpportunityFeedState();
+  const feed = feedState.feed;
   const observed = selectObserved(feed);
   const observationRows = observed.map(({ opportunity, role, rank }) => ({
     product_id: opportunity.productId,
@@ -227,6 +432,14 @@ async function collect() {
     dueOutcomes,
     observedAt,
   );
+  const discoveryResult = await persistShadowDiscovery({
+    supabase,
+    feed,
+    discoveryPrices: feedState.discoveryPrices,
+    observedAt,
+    observationMinute,
+    now,
+  });
 
   const { error: receiptError } = await supabase
     .from("ht_crypto_prox_collection_runs")
@@ -261,6 +474,7 @@ async function collect() {
     proxPackets: observationRows.filter((row) => row.prox_packet).length,
     outcomesUpdated: outcomeResult.outcomesUpdated,
     outcomesUnavailable: outcomeResult.outcomesUnavailable,
+    shadowDiscovery: discoveryResult,
     timestamp: observedAt,
   };
 }

@@ -969,6 +969,165 @@ export async function GET() {
     });
   }
 
+  // The multi-venue lane is deliberately shadow-only. Health proves that the
+  // broader source set is readable and that every proposed candidate is saved
+  // exactly, without granting it authority over the public crypto ranking.
+  try {
+    const { data: discoveryRun, error: discoveryRunError } = await supabase
+      .from("ht_crypto_discovery_runs")
+      .select(
+        "observed_at,observation_minute,expected_candidate_count,persisted_candidate_count,complete,observed_assets,source_diagnostics,outcomes_updated,outcomes_unavailable",
+      )
+      .order("observed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (discoveryRunError) throw discoveryRunError;
+
+    if (!discoveryRun) {
+      checks.push({
+        name: "crypto_multivenue_shadow_discovery",
+        ok: false,
+        message: "Multi-venue crypto discovery has no completed shadow cycle yet.",
+      });
+    } else {
+      const { data: discoveryObservations, error: discoveryObservationError } =
+        await supabase
+          .from("ht_crypto_discovery_observations")
+          .select("asset_id,symbol,rank,discovery_packet")
+          .eq("observation_minute", discoveryRun.observation_minute);
+      if (discoveryObservationError) throw discoveryObservationError;
+      const overdueCutoff = new Date(
+        Date.now() - CRYPTO_OUTCOME_GRACE_MINUTES * 60_000,
+      ).toISOString();
+      const { count: overdueOutcomeCount, error: overdueOutcomeError } =
+        await supabase
+          .from("ht_crypto_discovery_observations")
+          .select("*", { count: "exact", head: true })
+          .is("price_15m_usd", null)
+          .lte("target_15m_at", overdueCutoff);
+      if (overdueOutcomeError) throw overdueOutcomeError;
+
+      type DiscoveryCoverageRow = {
+        assetId?: unknown;
+        symbol?: unknown;
+        rank?: unknown;
+      };
+      const normalizeDiscoveryRows = (rows: DiscoveryCoverageRow[]) =>
+        rows.map((row) => ({
+          assetId: String(row.assetId ?? "").trim(),
+          symbol: String(row.symbol ?? "").trim().toUpperCase(),
+          rank: Number(row.rank),
+        })).sort((left, right) =>
+          left.rank - right.rank || left.assetId.localeCompare(right.assetId)
+        );
+      const receiptRows = Array.isArray(discoveryRun.observed_assets)
+        ? discoveryRun.observed_assets as DiscoveryCoverageRow[]
+        : [];
+      const actualRows = (discoveryObservations ?? []).map((row) => ({
+        assetId: row.asset_id,
+        symbol: row.symbol,
+        rank: row.rank,
+      }));
+      const exactCandidateSet =
+        JSON.stringify(normalizeDiscoveryRows(receiptRows)) ===
+        JSON.stringify(normalizeDiscoveryRows(actualRows));
+      const expectedCount = Number(discoveryRun.expected_candidate_count);
+      const persistedCount = Number(discoveryRun.persisted_candidate_count);
+      const actualCount = discoveryObservations?.length ?? 0;
+      const diagnostics = discoveryRun.source_diagnostics &&
+          typeof discoveryRun.source_diagnostics === "object" &&
+          !Array.isArray(discoveryRun.source_diagnostics)
+        ? discoveryRun.source_diagnostics as Record<string, unknown>
+        : {};
+      const configuredVenues = Number(diagnostics.configuredVenues);
+      const healthyVenues = Number(diagnostics.healthyVenues);
+      const supportedPairs = Number(diagnostics.supportedPairs);
+      const observedAssets = Number(diagnostics.observedAssets);
+      const candidateAssets = Number(diagnostics.candidateAssets);
+      const providerFailures = Number(diagnostics.providerFailures);
+      const attentionSourceHealthy = diagnostics.attentionSourceHealthy === true;
+      const sourceCoverageHealthy =
+        configuredVenues === 3 &&
+        healthyVenues >= 2 &&
+        supportedPairs > 0 &&
+        observedAssets > 0;
+      const packetCoverage = (discoveryObservations ?? []).every((row) => {
+        const packet = row.discovery_packet &&
+            typeof row.discovery_packet === "object"
+          ? row.discovery_packet as { assetId?: unknown; rank?: unknown }
+          : null;
+        return Boolean(
+          packet &&
+          String(packet.assetId ?? "") === row.asset_id &&
+          Number(packet.rank) === Number(row.rank),
+        );
+      });
+      const complete =
+        discoveryRun.complete === true &&
+        expectedCount === persistedCount &&
+        persistedCount === actualCount &&
+        candidateAssets === expectedCount;
+      const discoveryAgeHours = hoursSince(discoveryRun.observed_at);
+      const fresh = discoveryAgeHours <= MAX_CRYPTO_PROX_AGE_HOURS;
+      const outcomesCurrent = (overdueOutcomeCount ?? 0) === 0;
+
+      checks.push({
+        name: "crypto_multivenue_shadow_discovery",
+        ok:
+          complete &&
+          sourceCoverageHealthy &&
+          exactCandidateSet &&
+          packetCoverage &&
+          outcomesCurrent &&
+          fresh,
+        message: !complete
+          ? "The latest multi-venue discovery receipt does not match its persisted candidate count."
+          : !sourceCoverageHealthy
+            ? "Multi-venue discovery did not receive enough healthy market coverage."
+            : !exactCandidateSet
+              ? "The persisted discovery candidates do not match the collection receipt."
+              : !packetCoverage
+                ? "One or more discovery candidates is missing its shadow decision packet."
+                : !outcomesCurrent
+                  ? "Multi-venue discovery has overdue 15-minute outcomes."
+                  : !fresh
+                    ? "Multi-venue crypto discovery is stale."
+                    : "Multi-venue crypto discovery is fresh, shadow-only, exact-set verified, and recording outcomes.",
+        detail: {
+          authority: "none",
+          observedAt: discoveryRun.observed_at,
+          expectedCount,
+          persistedCount,
+          actualCount,
+          configuredVenues,
+          healthyVenues,
+          supportedPairs,
+          observedAssets,
+          candidateAssets,
+          providerFailures,
+          attentionSourceHealthy,
+          sourceCoverageHealthy,
+          exactCandidateSet,
+          packetCoverage,
+          overdue15mOutcomes: overdueOutcomeCount ?? 0,
+          outcomesUpdatedThisCycle: discoveryRun.outcomes_updated,
+          outcomesUnavailableThisCycle: discoveryRun.outcomes_unavailable,
+          ageMinutes: Number.isFinite(discoveryAgeHours)
+            ? Number((discoveryAgeHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: MAX_CRYPTO_PROX_AGE_HOURS * 60,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "crypto_multivenue_shadow_discovery",
+      ok: false,
+      message: "Multi-venue crypto discovery history is unavailable; run migration 0012 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   const hardFailures = checks.filter((check) => !check.ok);
   const ok = hardFailures.length === 0;
 

@@ -226,7 +226,7 @@ export default function CryptoPage() {
               </span>
             </div>
             <p className="mt-1 text-[10px] font-semibold text-zinc-600">
-              24/7 public Coinbase USD market data · no execution authority
+              One public Coinbase score · multi-venue discovery remains shadow-only
             </p>
           </div>
           <nav className="flex items-center gap-4 text-xs font-black text-zinc-500">
@@ -260,7 +260,7 @@ export default function CryptoPage() {
           <>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2 px-1">
               <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-700">
-                {feed.diagnostics.evaluatedProducts} assets evaluated · {feed.diagnostics.eligibleProducts} eligible
+                {feed.diagnostics.evaluatedProducts} scored · {feed.diagnostics.eligibleProducts} eligible · {feed.diagnostics.shadowDiscoveryAssets} assets watched across {feed.diagnostics.shadowDiscoveryHealthyVenues} venues
               </p>
               <p className="text-[9px] font-semibold text-zinc-700">
                 Updated {new Date(feed.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
