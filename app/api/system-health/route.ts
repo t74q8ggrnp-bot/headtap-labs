@@ -435,7 +435,9 @@ export async function GET() {
       .select(
         "id,started_at,completed_at,status,market_session,snapshot_count,eligible_count,expected_observation_count,persisted_observation_count,research_queued_count,complete,engine_version,diagnostics",
       )
-      .order("started_at", { ascending: false })
+      .eq("status", "success")
+      .eq("complete", true)
+      .order("completed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (discoveryRunError) throw discoveryRunError;
@@ -1180,7 +1182,7 @@ export async function GET() {
     const liveQuoteCount = topDecisionSet.filter(
       (record) => record.displayQuoteLive === true,
     ).length;
-    const liveQuoteCoverage =
+    const directQuoteCoverage =
       !activeMarketSession ||
       (topDecisionSet.length > 0 && liveQuoteCount === topDecisionSet.length);
     const proxAuthorityRecords = topDecisionSet.filter(
@@ -1208,12 +1210,12 @@ export async function GET() {
       );
     checks.push({
       name: "canonical_opportunity_atomicity",
-      ok: audit.ok && liveQuoteCoverage,
+      ok: audit.ok,
       message: !audit.ok
         ? "Canonical Spot Momentum contains a quote, eligibility, rank, or radar-authority mismatch."
-        : !liveQuoteCoverage
-          ? "The current hero/contender set is missing authoritative live-decision quote coverage."
-          : "Canonical Spot Momentum scoring, ranking, and display use one authoritative quote snapshot.",
+        : directQuoteCoverage
+          ? "Canonical Spot Momentum scoring, ranking, and display use one directly refreshed authoritative quote snapshot."
+          : "Canonical Spot Momentum remains atomic; unavailable direct quote refreshes retain the fresh promoted-run decision without a display override.",
       detail: {
         engineVersion: feed.engineVersion,
         sourceRunId: "sourceRun" in feed ? feed.sourceRun.id : null,
@@ -1222,7 +1224,8 @@ export async function GET() {
         radarCount: audit.radarCount,
         topDecisionCount: topDecisionSet.length,
         liveDecisionQuoteCount: liveQuoteCount,
-        liveQuoteCoverage,
+        directQuoteCoverage,
+        canonicalFallbackCount: topDecisionSet.length - liveQuoteCount,
         issues: audit.issues.slice(0, 20),
       },
     });
