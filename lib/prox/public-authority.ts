@@ -1,5 +1,5 @@
 export const PROX_PUBLIC_AUTHORITY_VERSION =
-  "prox-public-market-authority-v1";
+  "prox-public-market-authority-v2";
 
 export const PROX_PUBLIC_AUTHORITY_CONTRACT = {
   version: PROX_PUBLIC_AUTHORITY_VERSION,
@@ -12,6 +12,7 @@ export const PROX_PUBLIC_AUTHORITY_CONTRACT = {
   maximumSupportAdjustment: 12,
   maximumOrdinaryPenalty: -12,
   confirmedPeakFailure: "canonical_eligibility_block" as const,
+  deepSessionRecovery: "canonical_entry_withheld_until_reclaim" as const,
 } as const;
 
 type ProxAuthorityPulse = {
@@ -24,14 +25,17 @@ type ProxAuthorityPulse = {
   acceleration5m: number | null;
   volumeAcceleration: number | null;
   priceVsVwap: number | null;
+  averageBarRangePercent: number | null;
 };
 
 export type ProxPublicAuthorityDecision = {
   authorityVersion: typeof PROX_PUBLIC_AUTHORITY_VERSION;
   marketConfirmation: number | null;
+  structuralRecoveryThresholdPercent: number;
   livePeakFailureEvidence: number;
   observedPeakPullbackPercent: number;
   peakFailureConfirmed: boolean;
+  deepSessionRecoveryWithheld: boolean;
   supportsContinuation: boolean;
   rankAdjustment: number;
 };
@@ -40,6 +44,7 @@ export function evaluateProxPublicAuthority(input: {
   activeMarketSession: boolean;
   marketConfirmation: number | null;
   sessionPeakPullbackPercent: number | null;
+  activeSessionChangePercent: number | null;
   pulse: ProxAuthorityPulse | null | undefined;
 }): ProxPublicAuthorityDecision {
   const pulse = input.pulse;
@@ -65,15 +70,30 @@ export function evaluateProxPublicAuthority(input: {
           pulse.peakFailureThresholdPercent &&
           livePeakFailureEvidence >= 2)),
   );
+  const structuralRecoveryThresholdPercent = Math.max(
+    20,
+    Math.min(35, (pulse?.averageBarRangePercent ?? 0) * 4),
+  );
+  const deepSessionRecoveryWithheld = Boolean(
+    pulse?.fresh === true &&
+      !peakFailureConfirmed &&
+      (input.sessionPeakPullbackPercent ?? 0) >=
+        structuralRecoveryThresholdPercent &&
+      input.activeSessionChangePercent !== null &&
+      input.activeSessionChangePercent <= -5,
+  );
   const supportsContinuation = Boolean(
     pulse?.fresh === true &&
       !peakFailureConfirmed &&
+      !deepSessionRecoveryWithheld &&
       marketConfirmation !== null &&
       marketConfirmation >= 55 &&
       (pulse.state === "expanding" || pulse.state === "stable"),
   );
   const rankAdjustment = peakFailureConfirmed
     ? -Math.min(30, 15 + Math.round(observedPeakPullbackPercent))
+    : deepSessionRecoveryWithheld
+      ? PROX_PUBLIC_AUTHORITY_CONTRACT.maximumOrdinaryPenalty
     : marketConfirmation === null
       ? input.activeMarketSession
         ? -8
@@ -94,9 +114,11 @@ export function evaluateProxPublicAuthority(input: {
   return {
     authorityVersion: PROX_PUBLIC_AUTHORITY_VERSION,
     marketConfirmation,
+    structuralRecoveryThresholdPercent,
     livePeakFailureEvidence,
     observedPeakPullbackPercent,
     peakFailureConfirmed,
+    deepSessionRecoveryWithheld,
     supportsContinuation,
     rankAdjustment,
   };

@@ -1199,6 +1199,8 @@ export async function GET() {
             PROX_PUBLIC_AUTHORITY_CONTRACT.eventEvidence &&
           record.proxIntelligence.authority.transitionEvidence ===
             PROX_PUBLIC_AUTHORITY_CONTRACT.transitionEvidence &&
+          record.proxIntelligence.authority.deepSessionRecovery ===
+            PROX_PUBLIC_AUTHORITY_CONTRACT.deepSessionRecovery &&
           record.proxIntelligence.authority.execution === "none" &&
           record.proxIntelligence.authority.liveTrading === "disabled" &&
           record.scoreContext.proxAuthorityVersion ===
@@ -1244,6 +1246,8 @@ export async function GET() {
           PROX_PUBLIC_AUTHORITY_CONTRACT.maximumOrdinaryPenalty,
         confirmedPeakFailure:
           PROX_PUBLIC_AUTHORITY_CONTRACT.confirmedPeakFailure,
+        deepSessionRecovery:
+          PROX_PUBLIC_AUTHORITY_CONTRACT.deepSessionRecovery,
         execution: PROX_PUBLIC_AUTHORITY_CONTRACT.execution,
         liveTrading: PROX_PUBLIC_AUTHORITY_CONTRACT.liveTrading,
       },

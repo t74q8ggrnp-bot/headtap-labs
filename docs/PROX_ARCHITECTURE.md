@@ -92,7 +92,7 @@ no extra cost.
 
 ## Update — bounded public market authority
 
-Pro X now produces `prox-intelligence-v4-public-authority-contract` packets that combine the
+Pro X now produces `prox-intelligence-v5-session-recovery-contract` packets that combine the
 latest verified event, source credibility, deterministic ticker match,
 evidence depth, freshness, contradictions, and the live market pulse. Each
 packet includes a factor trace and an explicit, versioned authority contract.
@@ -104,6 +104,13 @@ historical transition evidence remain explanation/research-only and cannot
 change the public score. Pro X has no order, sizing, exit, or live-trading
 authority. The paper bot can record the separate hypothetical execution
 opinion with `executed_influence = false`, but cannot act on it.
+
+A short-window rebound cannot erase severe full-session damage. When a ticker
+is both deeply below its session high and at least 5% below the current-day
+open, Pro X withholds canonical entry qualification until a real session
+reclaim. The ticker may remain visible on the explicitly no-entry Momentum
+Radar. Ordinary pullbacks and runners only slightly below the open are not
+classified as burnt out by this rule.
 
 Migration `0005_prox_intelligence_bridge.sql` adds append-only market-feature
 history, immutable versioned intelligence packets, and paper-bot shadow

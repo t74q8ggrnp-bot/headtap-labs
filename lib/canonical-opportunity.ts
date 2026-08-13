@@ -15,7 +15,7 @@ import { evaluateProxPublicAuthority } from "@/lib/prox/public-authority";
 export { getCanonicalMomentumMagnitude } from "@/lib/canonical-momentum";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v12-full-day-momentum-authority";
+  "opportunities-v13-prox-session-recovery";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -25,6 +25,8 @@ const MAX_PAPER_CONTINUATION_DOWNSIDE_PERCENT = 30;
 const MIN_PAPER_CONTINUATION_ENTRY_QUALITY = 20;
 const PRICE_HISTORY_DISCONTINUITY_PREFIX =
   "Live price is inconsistent with recent adjusted history";
+const PROX_SESSION_RECLAIM_REQUIRED =
+  "ProX requires a current-session reclaim after severe post-peak structure damage.";
 
 export type OpportunityStrategy = "spot_momentum" | "before_the_crowd";
 
@@ -474,7 +476,8 @@ function isMoveExplainedPriceDiscontinuity(
 function isEntryTimingOnlyRejection(reason: string) {
   return (
     reason.startsWith("R:R ") ||
-    reason === "Reward magnitude is negligible."
+    reason === "Reward magnitude is negligible." ||
+    reason === PROX_SESSION_RECLAIM_REQUIRED
   );
 }
 
@@ -500,6 +503,7 @@ export function evaluateCanonicalOpportunity(
     marketConfirmation:
       proxIntelligence?.scores.marketConfirmation ?? null,
     sessionPeakPullbackPercent: sessionPeakPullback,
+    activeSessionChangePercent: activeSessionChange,
     pulse,
   });
   const peakFailureConfirmed = proxAuthority.peakFailureConfirmed;
@@ -556,6 +560,9 @@ export function evaluateCanonicalOpportunity(
       rejectionReasons.push(
         "Ticker did not qualify for Spot Momentum retrieval.",
       );
+    }
+    if (proxAuthority.deepSessionRecoveryWithheld) {
+      rejectionReasons.push(PROX_SESSION_RECLAIM_REQUIRED);
     }
     if (sessionReclaim && (activeSessionChange ?? 0) < 5) {
       rejectionReasons.push(
@@ -735,6 +742,9 @@ export function evaluateCanonicalOpportunity(
   else if (extremeMomentum) riskTags.push("Extreme Momentum");
   if (sessionReclaim) riskTags.push("Reclaiming Prior Close");
   if (peakFailureConfirmed) riskTags.push("Post-Peak Weakness");
+  if (proxAuthority.deepSessionRecoveryWithheld) {
+    riskTags.push("Session Reclaim Required");
+  }
   if ((framework.extensionRisk ?? 0) >= 75) {
     riskTags.push("Extended — Chasing Risk");
   }
@@ -902,6 +912,10 @@ export function evaluateCanonicalOpportunity(
       proxMarketAdjustment,
       proxSupportsContinuation,
       proxAuthorityVersion: proxAuthority.authorityVersion,
+      proxDeepSessionRecoveryWithheld:
+        proxAuthority.deepSessionRecoveryWithheld,
+      proxStructuralRecoveryThresholdPercent:
+        proxAuthority.structuralRecoveryThresholdPercent,
       momentumFusion: "previous_close_anchor_session_context_v2",
       peakFailureConfirmed,
       sessionPeakPullbackPercent:

@@ -11,7 +11,7 @@ import {
 import { PROX_PUBLIC_AUTHORITY_CONTRACT } from "@/lib/prox/public-authority";
 
 export const PROX_INTELLIGENCE_VERSION =
-  "prox-intelligence-v4-public-authority-contract";
+  "prox-intelligence-v5-session-recovery-contract";
 export const PROX_PACKET_MODE = "bounded_public_market" as const;
 
 const EVENT_LOOKBACK_HOURS = 72;
