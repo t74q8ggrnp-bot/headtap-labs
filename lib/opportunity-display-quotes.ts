@@ -3,20 +3,20 @@ import "server-only";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotDisplayPrice,
+  resolveSnapshotTimestampMs,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
+import type { OpportunityDecisionQuote } from "@/lib/opportunity-decision-quote";
 
-export type OpportunityDisplayQuote = {
-  price: number;
-  change: number;
-  asOf: string;
-};
+export type OpportunityDisplayQuote = OpportunityDecisionQuote;
 
 type OpportunityWithDisplayFields = {
   ticker?: unknown;
   price?: unknown;
   change?: unknown;
   displayChange?: unknown;
+  decisionQuoteLive?: unknown;
+  decisionQuoteAsOf?: unknown;
 };
 
 const finiteNumber = (value: unknown): number | null => {
@@ -25,9 +25,9 @@ const finiteNumber = (value: unknown): number | null => {
 };
 
 /**
- * Load presentation quotes on the server. These values never participate in
- * ranking or scoring; they only bring the already-selected canonical record's
- * displayed price and previous-close move up to date.
+ * Load one server-owned market quote snapshot. Canonical feeds apply these
+ * quotes before scoring and reuse the identical map for display; ticker detail
+ * follows the same path. Rows without a real market timestamp fail closed.
  */
 export async function loadOpportunityDisplayQuotes(
   symbols: string[],
@@ -39,7 +39,6 @@ export async function loadOpportunityDisplayQuotes(
   const quotes = new Map<string, OpportunityDisplayQuote>();
   if (!apiKey || uniqueSymbols.length === 0) return quotes;
 
-  const asOf = new Date().toISOString();
   for (let index = 0; index < uniqueSymbols.length; index += 100) {
     const batch = uniqueSymbols.slice(index, index + 100);
     const url =
@@ -61,6 +60,9 @@ export async function loadOpportunityDisplayQuotes(
         const price = resolveSnapshotDisplayPrice(row);
         const change = resolveSnapshotChangePercent(row, price);
         if (!ticker || price <= 0 || !Number.isFinite(change)) continue;
+        const marketTimestamp = resolveSnapshotTimestampMs(row);
+        if (marketTimestamp === null) continue;
+        const asOf = new Date(marketTimestamp).toISOString();
         quotes.set(ticker, { price, change, asOf });
       }
     } catch {
@@ -90,12 +92,20 @@ export function attachOpportunityDisplayQuote<
     finiteNumber(opportunity.displayChange) ??
     finiteNumber(opportunity.change) ??
     0;
+  const decisionQuoteLive = opportunity.decisionQuoteLive === true;
+  const quoteWasRejectedForDecision =
+    opportunity.decisionQuoteLive === false;
+  const authoritativeQuote = quoteWasRejectedForDecision ? undefined : quote;
+  const decisionQuoteAsOf =
+    typeof opportunity.decisionQuoteAsOf === "string"
+      ? opportunity.decisionQuoteAsOf
+      : null;
 
   return {
     ...opportunity,
-    displayPrice: quote?.price ?? canonicalPrice,
-    displayChange: quote?.change ?? canonicalChange,
-    displayQuoteLive: Boolean(quote),
-    displayQuoteAsOf: quote?.asOf ?? null,
+    displayPrice: authoritativeQuote?.price ?? canonicalPrice,
+    displayChange: authoritativeQuote?.change ?? canonicalChange,
+    displayQuoteLive: Boolean(authoritativeQuote) || decisionQuoteLive,
+    displayQuoteAsOf: authoritativeQuote?.asOf ?? decisionQuoteAsOf,
   };
 }

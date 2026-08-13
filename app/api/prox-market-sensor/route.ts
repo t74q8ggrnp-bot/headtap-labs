@@ -1,9 +1,10 @@
 // app/api/prox-market-sensor/route.ts
 //
 // Pro X Phase 3 (partial) — market-feature snapshots for tickers with a
-// recent Pro X event or the latest promoted canonical opportunity run.
-// This covers both directions: event -> monitor price and price move ->
-// investigate the pulse, without granting execution authority.
+// recent Pro X event, an independent direct-market discovery, or the latest
+// promoted canonical opportunity run. This covers both directions: event ->
+// monitor price and price anomaly -> investigate the pulse, without granting
+// execution authority.
 //
 // REST-polled 1-minute bars via Polygon's aggs endpoint — verified live
 // against the current plan (minute/second aggs return 200; last-trade and
@@ -31,7 +32,9 @@ const CANONICAL_SENSOR_LIMIT = 60;
 const CANONICAL_QUALITY_LANE_LIMIT = 30;
 const CANONICAL_MOMENTUM_LANE_LIMIT = 20;
 const CANONICAL_VOLUME_LANE_LIMIT = 10;
-const MAX_SENSOR_TICKERS = 100;
+const EVENT_SENSOR_LIMIT = 30;
+const DIRECT_DISCOVERY_SENSOR_LIMIT = 40;
+const MAX_SENSOR_TICKERS = 130;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -126,6 +129,29 @@ async function fetchCanonicalOpportunityTickers(
     .filter(Boolean)
     .filter((ticker, index, tickers) => tickers.indexOf(ticker) === index)
     .slice(0, CANONICAL_SENSOR_LIMIT);
+}
+
+async function fetchDirectDiscoveryTickers(
+  supabase: ReturnType<typeof getSupabase>,
+): Promise<{ tickers: string[]; unavailable: string | null }> {
+  const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("prox_research_queue")
+    .select("ticker,research_priority,last_detected_at,status")
+    .in("status", ["queued", "observing"])
+    .gte("last_detected_at", since)
+    .order("research_priority", { ascending: false })
+    .order("last_detected_at", { ascending: false })
+    .limit(DIRECT_DISCOVERY_SENSOR_LIMIT);
+  if (error) {
+    return { tickers: [], unavailable: error.message };
+  }
+  return {
+    tickers: (data ?? [])
+      .map((row) => String(row.ticker ?? "").toUpperCase().trim())
+      .filter(Boolean),
+    unavailable: null,
+  };
 }
 
 type Bar = { o: number; h: number; l: number; c: number; v: number; vw: number; t: number };
@@ -283,6 +309,9 @@ export async function GET(req: Request) {
     tickersConsidered: 0,
     eventTickers: 0,
     canonicalTickers: 0,
+    directDiscoveryTickers: 0,
+    directDiscoveryObserved: 0,
+    directDiscoveryUnavailable: null as string | null,
     computed: 0,
     historyPersisted: 0,
     historyUnavailable: null as string | null,
@@ -305,16 +334,24 @@ export async function GET(req: Request) {
     diagnostics.peakRetentionSchemaReady = peakRetentionSchemaReady;
     diagnostics.peakRetentionHistorySchemaReady =
       peakRetentionHistorySchemaReady;
-    const [eventTickers, canonicalTickers] = await Promise.all([
+    const [eventTickers, canonicalTickers, directDiscovery] = await Promise.all([
       fetchRecentEventTickers(supabase),
       fetchCanonicalOpportunityTickers(supabase),
+      fetchDirectDiscoveryTickers(supabase),
     ]);
     diagnostics.eventTickers = eventTickers.length;
     diagnostics.canonicalTickers = canonicalTickers.length;
+    diagnostics.directDiscoveryTickers = directDiscovery.tickers.length;
+    diagnostics.directDiscoveryUnavailable = directDiscovery.unavailable;
     const tickers = [
-      ...new Set([...canonicalTickers, ...eventTickers]),
+      ...new Set([
+        ...eventTickers.slice(0, EVENT_SENSOR_LIMIT),
+        ...directDiscovery.tickers,
+        ...canonicalTickers,
+      ]),
     ].slice(0, MAX_SENSOR_TICKERS);
     diagnostics.tickersConsidered = tickers.length;
+    const computedTickers = new Set<string>();
 
     for (let i = 0; i < tickers.length; i += CONCURRENCY) {
       const batch = tickers.slice(i, i + CONCURRENCY);
@@ -347,6 +384,7 @@ export async function GET(req: Request) {
           continue;
         }
         diagnostics.computed++;
+        computedTickers.add(features.ticker);
 
         // The latest-snapshot table powers fast reads. The append-only
         // history powers Pro X memory and later calibration. Until migration
@@ -370,6 +408,24 @@ export async function GET(req: Request) {
             diagnostics.historyPersisted++;
           }
         }
+      }
+    }
+
+    const directDiscoveryObserved = directDiscovery.tickers.filter((ticker) =>
+      computedTickers.has(ticker),
+    );
+    diagnostics.directDiscoveryObserved = directDiscoveryObserved.length;
+    if (directDiscoveryObserved.length > 0) {
+      const { error: queueUpdateError } = await supabase
+        .from("prox_research_queue")
+        .update({
+          status: "observing",
+          updated_at: new Date().toISOString(),
+        })
+        .in("ticker", directDiscoveryObserved)
+        .eq("status", "queued");
+      if (queueUpdateError) {
+        diagnostics.directDiscoveryUnavailable = queueUpdateError.message;
       }
     }
 

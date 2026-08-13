@@ -52,6 +52,9 @@ export function useOpportunityFeed(initial: InitialOpportunityFeeds) {
   const [spotMomentumRunnersUp, setSpotMomentumRunnersUp] = useState<Opportunity[]>(
     normalizedInitial.momentum?.momentumContenders ?? [],
   );
+  const [spotMomentumRadar, setSpotMomentumRadar] = useState<Opportunity[]>(
+    normalizedInitial.momentum?.momentumRadar ?? [],
+  );
   const [beforeCrowd, setBeforeCrowd] = useState<Opportunity[]>(
     normalizedInitial.beforeCrowd?.opportunities.slice(0, BEFORE_CROWD_COUNT) ?? [],
   );
@@ -80,9 +83,10 @@ export function useOpportunityFeed(initial: InitialOpportunityFeeds) {
         "/api/opportunities?type=before_crowd&limit=100",
       );
 
-      const momentumTask = momentumRequest.then(readOpportunityPayload).then(({ opportunities: momentumList, momentumContenders }) => {
+      const momentumTask = momentumRequest.then(readOpportunityPayload).then(({ opportunities: momentumList, momentumContenders, momentumRadar }) => {
         setSpotMomentum(momentumList[0] ?? null);
         setSpotMomentumRunnersUp(momentumContenders);
+        setSpotMomentumRadar(momentumRadar);
         setFullRankedList(momentumList);
         setLoading(false);
         return momentumList;
@@ -132,6 +136,7 @@ export function useOpportunityFeed(initial: InitialOpportunityFeeds) {
   return {
     spotMomentum,
     spotMomentumRunnersUp,
+    spotMomentumRadar,
     beforeCrowd,
     fullRankedList,
     loading,

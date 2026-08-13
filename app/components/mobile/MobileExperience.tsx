@@ -39,6 +39,7 @@ export type MobileExperienceProps = {
   lastUpdated: Date | null;
   canonicalMobileOpportunities: APIOpportunity[];
   momentumRunnersUp: APIOpportunity[];
+  momentumRadar: APIOpportunity[];
   mobileCardIndex: number;
   setMobileCardIndex: (value: number | ((index: number) => number)) => void;
   mobileTouchStart: number | null;
@@ -85,7 +86,7 @@ export type MobileExperienceProps = {
 
 export default function MobileExperience({
   ticker, setTicker, handleTickerSearch, mobileTab, setMobileTab, lastUpdated,
-  canonicalMobileOpportunities, momentumRunnersUp, mobileCardIndex, setMobileCardIndex, mobileTouchStart,
+  canonicalMobileOpportunities, momentumRunnersUp, momentumRadar, mobileCardIndex, setMobileCardIndex, mobileTouchStart,
   setMobileTouchStart, apiOpportunitiesLoading, apiMomentum, smFramework, smTrace,
   bullBearData, isDualEngineConfirmation, watchlist, setSelectedStock, toggleWatchlist,
   opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace, cryptoFeed,
@@ -213,6 +214,7 @@ export default function MobileExperience({
                 <div className="mx-4 mb-3 flex-shrink-0 overflow-hidden rounded-2xl border border-violet-400/15 bg-black">
                   <MomentumContenders
                     candidates={momentumRunnersUp}
+                    radarCandidates={momentumRadar}
                     onSelect={(opportunity) =>
                       setSelectedStock(opportunityToStock(opportunity))
                     }

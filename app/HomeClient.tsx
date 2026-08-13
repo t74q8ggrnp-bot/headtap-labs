@@ -299,6 +299,7 @@ export default function HomeClient({
   const {
     spotMomentum: apiMomentum,
     spotMomentumRunnersUp: apiMomentumRunnersUp,
+    spotMomentumRadar: apiMomentumRadar,
     beforeCrowd: apiBeforeCrowdList,
     fullRankedList: apiFullRankedList,
     loading: apiOpportunitiesLoading,
@@ -1733,6 +1734,7 @@ export default function HomeClient({
                             {/* ══ RIGHT — Other Contenders — same canonical ranking, next in line ══ */}
                             <MomentumContenders
                               candidates={apiMomentumRunnersUp}
+                              radarCandidates={apiMomentumRadar}
                               onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
                             />
                           </div>
@@ -2298,6 +2300,7 @@ export default function HomeClient({
         lastUpdated={canonicalLastUpdated}
         canonicalMobileOpportunities={canonicalMobileOpportunities}
         momentumRunnersUp={apiMomentumRunnersUp}
+        momentumRadar={apiMomentumRadar}
         mobileCardIndex={mobileCardIndex}
         setMobileCardIndex={setMobileCardIndex}
         mobileTouchStart={mobileTouchStart}

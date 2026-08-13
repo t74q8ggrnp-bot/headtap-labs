@@ -1,8 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProxCatalystCategory, ProxVerificationState } from "@/lib/prox/types";
+import {
+  PROX_TRANSITION_LEARNING_CASE_VERSION,
+  getProxTransitionCohortKeys,
+  proxTransitionCalibrationFromStorage,
+  proxTransitionProfileFromStorage,
+  selectProxTransitionComparisonEvidence,
+  type ProxTransitionComparisonEvidence,
+} from "@/lib/prox/transition-calibration";
+import { PROX_PUBLIC_AUTHORITY_CONTRACT } from "@/lib/prox/public-authority";
 
-export const PROX_INTELLIGENCE_VERSION = "prox-intelligence-v2-peak-retention";
-export const PROX_PACKET_MODE = "shadow" as const;
+export const PROX_INTELLIGENCE_VERSION =
+  "prox-intelligence-v4-public-authority-contract";
+export const PROX_PACKET_MODE = "bounded_public_market" as const;
 
 const EVENT_LOOKBACK_HOURS = 72;
 const PULSE_FRESH_MINUTES = 6;
@@ -49,6 +59,7 @@ export type ProxIntelligencePacket = {
   snapshotKey: string;
   packetVersion: typeof PROX_INTELLIGENCE_VERSION;
   mode: typeof PROX_PACKET_MODE;
+  authority: typeof PROX_PUBLIC_AUTHORITY_CONTRACT;
   ticker: string;
   asOf: string;
   status: ProxPacketStatus;
@@ -85,6 +96,7 @@ export type ProxIntelligencePacket = {
     peakFailureConfirmed: boolean;
     state: "expanding" | "stable" | "weakening" | "stale";
   } | null;
+  transitionEvidence: ProxTransitionComparisonEvidence | null;
   scores: {
     evidenceConfidence: number;
     catalystStrength: number;
@@ -96,7 +108,7 @@ export type ProxIntelligencePacket = {
   supportFlags: string[];
   riskFlags: string[];
   botPolicy: {
-    authority: "shadow_only";
+    authority: "observation_only";
     wouldVeto: boolean;
     wouldReduceSize: boolean;
     rankAdjustment: number;
@@ -199,11 +211,13 @@ function buildUnavailablePacket(
     snapshotKey: `${PROX_INTELLIGENCE_VERSION}:${ticker}:unavailable`,
     packetVersion: PROX_INTELLIGENCE_VERSION,
     mode: PROX_PACKET_MODE,
+    authority: PROX_PUBLIC_AUTHORITY_CONTRACT,
     ticker,
     asOf,
     status: "unavailable",
     event: null,
     pulse: null,
+    transitionEvidence: null,
     scores: {
       evidenceConfidence: 0,
       catalystStrength: 0,
@@ -215,7 +229,7 @@ function buildUnavailablePacket(
     supportFlags: [],
     riskFlags: ["prox_unavailable"],
     botPolicy: {
-      authority: "shadow_only",
+      authority: "observation_only",
       wouldVeto: false,
       wouldReduceSize: false,
       rankAdjustment: 0,
@@ -241,9 +255,19 @@ function buildPacket(args: {
   source: SourceRow | null;
   evidenceCount: number;
   market: MarketFeatureRow | null;
+  transitionEvidence: ProxTransitionComparisonEvidence | null;
 }): ProxIntelligencePacket {
-  const { ticker, asOf, nowMs, link, event, source, evidenceCount, market } =
-    args;
+  const {
+    ticker,
+    asOf,
+    nowMs,
+    link,
+    event,
+    source,
+    evidenceCount,
+    market,
+    transitionEvidence,
+  } = args;
   const eventId = stringValue(event?.id);
   const filedAt = stringValue(event?.filed_at);
   const ageMinutes = isoAgeMinutes(filedAt, nowMs);
@@ -389,6 +413,20 @@ function buildPacket(args: {
         : "post_peak_weakness",
     );
   }
+  if (
+    transitionEvidence &&
+    transitionEvidence.evidenceState !== "insufficient"
+  ) {
+    if (
+      transitionEvidence.continuationRate >= 0.5 &&
+      transitionEvidence.failureRate < 0.25
+    ) {
+      supportFlags.push("historical_transition_support");
+    }
+    if (transitionEvidence.failureRate >= 0.4) {
+      riskFlags.push("historical_transition_risk");
+    }
+  }
 
   const wouldVeto =
     recentEvent &&
@@ -413,7 +451,7 @@ function buildPacket(args: {
     ...(wouldVeto ? ["Verified defensive or contradictory evidence would veto a new paper entry."] : []),
     ...(wouldReduceSize ? ["Pulse or evidence risk would reduce paper position size."] : []),
     ...(!wouldVeto && !wouldReduceSize && recentEvent
-      ? ["No Pro X defensive action indicated in shadow mode."]
+      ? ["No Pro X defensive execution opinion is indicated."]
       : []),
     ...(!recentEvent ? ["No recent Pro X event; absence of evidence does not penalize the canonical decision."] : []),
   ];
@@ -446,6 +484,7 @@ function buildPacket(args: {
     snapshotKey,
     packetVersion: PROX_INTELLIGENCE_VERSION,
     mode: PROX_PACKET_MODE,
+    authority: PROX_PUBLIC_AUTHORITY_CONTRACT,
     ticker,
     asOf,
     status,
@@ -488,6 +527,7 @@ function buildPacket(args: {
           state: pulseState,
         }
       : null,
+    transitionEvidence,
     scores: {
       evidenceConfidence: round(evidenceConfidence),
       catalystStrength: round(catalystStrength),
@@ -499,7 +539,7 @@ function buildPacket(args: {
     supportFlags,
     riskFlags,
     botPolicy: {
-      authority: "shadow_only",
+      authority: "observation_only",
       wouldVeto,
       wouldReduceSize,
       rankAdjustment,
@@ -530,13 +570,95 @@ function buildPacket(args: {
         reason: "Verified contradictions and explicit contradiction records.",
       },
       {
+        factor: "canonical_transition_evidence",
+        value: transitionEvidence?.evidenceState ?? "unavailable",
+        impact:
+          transitionEvidence &&
+          transitionEvidence.evidenceState !== "insufficient" &&
+          transitionEvidence.continuationRate >= 0.5 &&
+          transitionEvidence.failureRate < 0.25
+            ? "supportive"
+            : transitionEvidence &&
+                transitionEvidence.evidenceState !== "insufficient" &&
+                transitionEvidence.failureRate >= 0.4
+              ? "defensive"
+              : "neutral",
+        reason:
+          transitionEvidence?.summary ??
+          "No comparable finalized canonical transition cohort is available yet.",
+      },
+      {
         factor: "execution_authority",
-        value: "shadow_only",
+        value: "none",
         impact: "neutral",
-        reason: "Pro X is observed and recorded but cannot alter orders in this version.",
+        reason: "Pro X has no order or live-trading authority.",
       },
     ],
   };
+}
+
+async function loadProxTransitionEvidence(
+  supabase: SupabaseClient,
+  tickers: string[],
+) {
+  const evidence = new Map<string, ProxTransitionComparisonEvidence>();
+  if (tickers.length === 0) return evidence;
+  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: caseData, error: caseError } = await supabase
+    .from("prox_strategy_learning_cases")
+    .select(
+      "ticker,first_seen_at,market_session,price_bucket,relative_volume_bucket,momentum_bucket,crowd_bucket,trap_bucket,score_bucket",
+    )
+    .eq("methodology_version", PROX_TRANSITION_LEARNING_CASE_VERSION)
+    .in("ticker", tickers)
+    .gte("first_seen_at", since)
+    .order("first_seen_at", { ascending: false })
+    .limit(5000);
+  // Migration 0016 is additive. Intelligence packets remain available without
+  // historical comparison until its schema and first calibration cycle exist.
+  if (caseError) return evidence;
+  const latestCaseByTicker = new Map<string, Record<string, unknown>>();
+  for (const row of (caseData ?? []) as Array<Record<string, unknown>>) {
+    const ticker = stringValue(row.ticker)?.toUpperCase();
+    if (ticker && !latestCaseByTicker.has(ticker)) {
+      latestCaseByTicker.set(ticker, row);
+    }
+  }
+  const keys = [
+    ...new Set(
+      [...latestCaseByTicker.values()].flatMap((row) =>
+        getProxTransitionCohortKeys(
+          proxTransitionProfileFromStorage(row),
+        ),
+      ),
+    ),
+  ];
+  const calibrationByKey = new Map<
+    string,
+    ReturnType<typeof proxTransitionCalibrationFromStorage>
+  >();
+  for (let index = 0; index < keys.length; index += 80) {
+    const { data, error } = await supabase
+      .from("prox_transition_pattern_calibrations")
+      .select("*")
+      .in("cohort_key", keys.slice(index, index + 80));
+    if (error) return new Map();
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      const calibration = proxTransitionCalibrationFromStorage(row);
+      calibrationByKey.set(calibration.cohortKey, calibration);
+    }
+  }
+  for (const [ticker, row] of latestCaseByTicker) {
+    const profile = proxTransitionProfileFromStorage(row);
+    const comparison = selectProxTransitionComparisonEvidence(
+      profile,
+      getProxTransitionCohortKeys(profile)
+        .map((key) => calibrationByKey.get(key))
+        .filter((value): value is NonNullable<typeof value> => Boolean(value)),
+    );
+    if (comparison) evidence.set(ticker, comparison);
+  }
+  return evidence;
 }
 
 export async function loadProxIntelligencePackets(
@@ -655,6 +777,10 @@ export async function loadProxIntelligencePackets(
         if (ticker) marketByTicker.set(ticker, row);
       }
     }
+    const transitionEvidenceByTicker = await loadProxTransitionEvidence(
+      supabase,
+      tickers,
+    );
 
     return new Map(
       tickers.map((ticker) => {
@@ -675,6 +801,8 @@ export async function loadProxIntelligencePackets(
               ? evidenceCountByEvent.get(eventId) ?? 0
               : 0,
             market: marketByTicker.get(ticker) ?? null,
+            transitionEvidence:
+              transitionEvidenceByTicker.get(ticker) ?? null,
           }),
         ];
       }),

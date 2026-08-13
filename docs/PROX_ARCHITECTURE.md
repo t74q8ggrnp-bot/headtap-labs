@@ -71,18 +71,17 @@ neither exists yet — but REST-polled minute bars are usable right now, at
 no extra cost.
 
 - **`app/api/prox-market-sensor/route.ts`** (Phase 3, partial): for tickers
-  with a Pro X event in the last 48 hours, pulls the last 30 one-minute
+  with a Pro X event, a direct-market research anomaly, or current canonical
+  relevance, pulls the last 30 one-minute
   bars from Polygon and computes real features — 1-min velocity, 5-min
   acceleration, volume acceleration, VWAP relationship, dollar volume —
   into `prox_market_features` (one upserted row per ticker, latest
   snapshot only, not a full history yet). Runs every 2 minutes, tighter
-  than the 5-minute canonical cron, per the acceptance criteria. This is
-  the "event appeared → monitor affected ticker" direction only; "price
-  moved → investigate external cause" needs scanning the broad market,
-  not just event-linked tickers, and isn't attempted this pass. It also
-  does not generate "investigation events" or make any decision — it only
-  computes and stores features. That line is deliberate: turning a feature
-  into a decision is exactly the boundary Phase 6 owns.
+  than the 5-minute canonical cron, per the acceptance criteria. It does not
+  make a canonical decision — it only computes and stores features. Broad
+  price-first discovery is supplied by the independent route documented
+  below. Turning a feature into a published decision remains the canonical
+  engine's boundary.
 - **Former-name resolution** (Phase 4, partial), added to
   `prox-sec-connector`: SEC's own submissions API
   (`data.sec.gov/submissions/CIK....json`) publishes each company's
@@ -91,18 +90,20 @@ no extra cost.
   names don't change, no reason to refetch). Makes "corporate name changes
   don't break event history" real instead of a schema placeholder.
 
-## Update — shadow intelligence bridge
+## Update — bounded public market authority
 
-Pro X now produces `prox-intelligence-v1-shadow` packets that combine the
+Pro X now produces `prox-intelligence-v4-public-authority-contract` packets that combine the
 latest verified event, source credibility, deterministic ticker match,
 evidence depth, freshness, contradictions, and the live market pulse. Each
-packet includes a factor trace and a hypothetical bot policy (`wouldVeto`,
-`wouldReduceSize`, and `rankAdjustment`).
+packet includes a factor trace and an explicit, versioned authority contract.
 
-The packet is attached to canonical opportunity records for transport and UI
-explanation only. It does not change canonical eligibility, scoring, tier,
-position sizing, exits, or orders. The paper bot records the attached opinion
-with `executed_influence = false`.
+The live minute-bar market pulse has bounded public authority: it may adjust
+the one canonical HT score from -12 to +12, and confirmed multi-factor
+post-peak deterioration blocks canonical eligibility. Event intelligence and
+historical transition evidence remain explanation/research-only and cannot
+change the public score. Pro X has no order, sizing, exit, or live-trading
+authority. The paper bot can record the separate hypothetical execution
+opinion with `executed_influence = false`, but cannot act on it.
 
 Migration `0005_prox_intelligence_bridge.sql` adds append-only market-feature
 history, immutable versioned intelligence packets, and paper-bot shadow
@@ -113,10 +114,123 @@ Cron materialization and the existing Pro X collectors accept only Vercel's
 real `CRON_SECRET` authorization; the former hardcoded query fallback was
 removed.
 
+## Update — independent direct-market discovery
+
+Migration `0013_prox_direct_market_discovery.sql` and
+`app/api/prox-market-discovery/route.ts` add the reverse discovery direction
+without weakening the canonical boundary:
+
+- Pro X polls Polygon's full U.S. stock snapshot directly on its own schedule;
+  it does not receive a preselected ticker list from Spot Momentum.
+- Raw full-day, active-session, cumulative-volume, liquidity, session-high,
+  and corporate-action context is stored in append-only observations. Raw and
+  normalized movement are kept separately so split artifacts cannot become
+  learned momentum.
+- A versioned, internal research-priority queue tells the existing minute-bar
+  sensor which independently discovered tickers need deeper observation. That
+  priority is scheduling metadata, **not a second HT score**, and is never
+  rendered to users.
+- Directly discovered tickers can materialize a `market_only` Pro X packet in
+  shadow mode. They receive no canonical eligibility, score, tier, UI rank,
+  sizing, execution, or order authority.
+- `/api/system-health` validates a fresh direct-discovery run and exact
+  observation coverage during the active stock-data session.
+
+The first research patterns include quiet cumulative participation (the
+MSGY-style signal that short-window acceleration alone misses), session
+reclaims, live liquidity surges, price/volume expansion, corporate-action
+dislocations, and post-peak deterioration. These observations create honest
+memory for later outcome calibration; they do not self-promote into the
+product.
+
+## Update — Outcome Memory and measured pattern calibration
+
+Migration `0014_prox_outcome_memory.sql` and
+`app/api/prox-outcome-memory/route.ts` turn direct observations into permanent
+research episodes:
+
+- The first Pro X discovery price and evidence are immutable for each
+  ticker/session date. Later cycles update the episode; they never replace the
+  original entry with a more convenient price.
+- Polygon's full snapshot measures 5m, 15m, 30m, 1h, 4h, session-close,
+  next-session, and 24h outcomes. The episode also stores sampled MFE, MAE,
+  time-to-peak, and measurement quality.
+- A split after discovery quarantines the episode instead of allowing an
+  unadjusted price discontinuity to become fake learned performance.
+- Deterministic labels distinguish early continuation, quiet-participation
+  breakouts, reclaim continuation, late chases, post-peak failures, heavy
+  downside participation, corporate-action distortion, and inconclusive
+  paths.
+- Only completed, calibratable episodes enter versioned pattern aggregates.
+  Fewer than 30 samples is explicitly `insufficient`; 30–99 is `emerging`;
+  100+ is `calibrated`.
+
+This remains internal evidence. There is still one public HT score, and no
+calibration row can alter canonical ranking or any order without a future,
+explicitly tested promotion phase.
+
+## Update — canonical strategy-transition memory
+
+Migration `0015_prox_canonical_transition_memory.sql`,
+`lib/prox/transition-memory.ts`, and the existing Outcome Memory schedule add
+an explicitly separate case library for tickers that move from Before The
+Crowd into Spot Momentum:
+
+- The earliest canonical observation, price, role, rank, score, source run,
+  engine version, and decision snapshot are preserved for both strategies.
+- Transition time and return are calculated from those immutable observations.
+  Outcome MFE, MAE, and time-to-peak stay anchored to the earlier Before The
+  Crowd discovery, while the same high is also measured from the later Spot
+  Momentum confirmation price.
+- Existing observation history is backfilled automatically. Later Outcome
+  Memory cycles materialize new transitions and refresh their outcome path.
+- Every cycle writes a coverage receipt so silently dropped transition cases
+  fail system health instead of disappearing from the research record.
+- These rows are identified as `canonical_transition_case`. They are never
+  rewritten as direct Pro X discoveries, never publish another score, and
+  never carry execution authority. Calibration remains disabled until a later
+  sample-size and promotion policy is explicitly approved.
+
+The audited PLAG path is the reference case: Before The Crowd at $0.60,
+Spot Momentum at $0.97 exactly 65 minutes later, and a $6.35 observed session
+high. Deterministic tests preserve the corresponding +61.667% transition,
++958.333% early-entry MFE, and +554.639% post-confirmation MFE.
+
+## Update — transition-pattern comparison brain
+
+Migration `0016_prox_transition_pattern_calibration.sql`,
+`app/api/prox-transition-calibration/route.ts`, and
+`lib/prox/transition-calibration.ts` turn canonical memory into honest
+historical comparison evidence:
+
+- The learning denominator is every finalized Before The Crowd case, including
+  candidates that never graduated. Pro X cannot inflate its success rate by
+  studying winners alone.
+- Each case preserves its early market session, price, relative-volume,
+  momentum, crowd, trap, and opportunity-score buckets alongside graduation,
+  MFE, MAE, time-to-peak, and whether HT missed a later 100% explosion.
+- Versioned cohorts are computed at four specificity levels. Comparison backs
+  off from an exact profile to broader session/behavior cohorts when the exact
+  sample is too small; it never invents an exact-confidence percentage.
+- Evidence remains `insufficient` below 30 finalized cases, `emerging` from
+  30–99, and `calibrated` at 100+. Graduation, explosion, continuation,
+  failure, and missed-explosion rates are all derived from the same complete
+  denominator.
+- Pro X intelligence packets now carry the best available transition evidence
+  and a factor-trace explanation. The public single-ticker inspection route is
+  `/api/prox-transition-calibration?ticker=PLAG`.
+- The packet's existing scores and shadow bot policy do not use these rates.
+  There is still one canonical HT score and no Pro X execution authority.
+- `/api/system-health` independently verifies source-case coverage, cohort
+  persistence, sample thresholds, and every stored count/rate calculation.
+
+The calibration route runs after canonical observation and transition-memory
+cycles, precomputing compact cohorts so live Pro X packet reads remain fast.
+
 ## The remaining roadmap
 
-The rest of Phase 3 (true WebSocket streaming, the reverse "price moved"
-direction, halt status, float turnover) and all of Phases 4's remaining
+The rest of Phase 3 (true WebSocket streaming, halt status, float turnover)
+and all of Phases 4's remaining
 scope (subsidiaries, executives, drug names, AI-assisted disambiguation for
 ambiguous cases), 5 (richer contradiction/rumor/recycled-news scoring), 6
 (measured promotion beyond the current shadow-only bridge), 7 (Supabase

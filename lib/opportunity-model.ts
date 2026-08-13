@@ -7,9 +7,10 @@ export type OpportunityStrategy = "spot_momentum" | "before_the_crowd";
 export type OpportunityTier = "scanner" | "watch" | "feature" | "hero";
 
 // One display policy owns both the homepage list and its permanent ledger.
-// This prevents the UI from showing more contenders than the outcome tracker
-// records.
+// Qualified contenders and no-entry radar observations have separate quotas
+// so one can never silently impersonate the other.
 export const MOMENTUM_RUNNER_UP_COUNT = 5;
+export const MOMENTUM_RADAR_COUNT = 5;
 
 export type Opportunity = {
   ticker: string;
@@ -59,6 +60,7 @@ export type Opportunity = {
   eligibility?: { eligible: boolean; reasons: string[] };
   displayEligibility?: { eligible: boolean; reasons: string[] };
   momentumRadarEligible?: boolean;
+  visibilityState?: string;
   engineVersion?: string;
   sourceRunId?: string;
   _convictionTier?: string;
@@ -244,6 +246,9 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
     eligibility: { eligible, reasons: eligibilityReasons },
     displayEligibility: { eligible, reasons: eligibilityReasons },
     momentumRadarEligible: Boolean(source.momentumRadarEligible),
+    visibilityState: source.visibilityState
+      ? String(source.visibilityState)
+      : undefined,
     engineVersion: source.engineVersion as string | undefined,
     sourceRunId: source.sourceRunId as string | undefined,
   };

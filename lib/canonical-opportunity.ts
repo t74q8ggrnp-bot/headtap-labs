@@ -2,9 +2,20 @@ import type { TradeFrameworkResult } from "@/lib/canonical-trade-framework";
 import { getBreakoutPotential } from "@/lib/breakout-potential";
 import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 import { isSupportedType } from "@/lib/security-type-policy";
+import {
+  enforceSpotMomentumAuthority,
+  preserveDisplayHardFailures,
+} from "@/lib/spot-momentum-authority";
+import {
+  getCanonicalMomentumMagnitude,
+  getSpotMomentumStrategyScore,
+} from "@/lib/canonical-momentum";
+import { evaluateProxPublicAuthority } from "@/lib/prox/public-authority";
+
+export { getCanonicalMomentumMagnitude } from "@/lib/canonical-momentum";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v9-fused-session-momentum";
+  "opportunities-v12-full-day-momentum-authority";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -70,6 +81,8 @@ export type OpportunityCandidate = {
   retrievedForCatalyst: boolean;
   retrievedForReclaim: boolean;
   securityType: string | null;
+  decisionQuoteLive?: boolean;
+  decisionQuoteAsOf?: string | null;
 };
 
 export type ExplosionAssessment = {
@@ -169,14 +182,10 @@ export function isSessionReclaim(candidate: OpportunityCandidate) {
 }
 
 export function getMomentumReferenceChange(candidate: OpportunityCandidate) {
-  // Public movement and structural levels stay anchored to the previous
-  // close, matching how the market describes today's move. A verified reclaim
-  // is the exception because its thesis is explicitly measured from today's
-  // open. Active-session movement is fused into scoring separately instead of
-  // replacing the full-day move.
-  if (isSessionReclaim(candidate)) {
-    return candidate.changeFromOpenPercent ?? candidate.change;
-  }
+  // Public movement, structure, and continuation eligibility always remain
+  // anchored to the previous close. Movement from today's open is supporting
+  // context only; it must never turn a negative full-day stock into a positive
+  // Spot Momentum decision.
   return candidate.change;
 }
 
@@ -190,18 +199,6 @@ function getActiveSessionChange(candidate: OpportunityCandidate) {
   return hasCurrentSessionReference
     ? candidate.changeFromOpenPercent
     : null;
-}
-
-function getFusedMomentumMagnitude(candidate: OpportunityCandidate) {
-  const fullDayCore = clamp(Math.max(0, candidate.change) * 3);
-  const activeSessionChange = getActiveSessionChange(candidate);
-  if (activeSessionChange === null) {
-    return fullDayCore;
-  }
-  const activeSessionCore = clamp(Math.max(0, activeSessionChange) * 3);
-  return isSessionReclaim(candidate)
-    ? activeSessionCore
-    : Math.round(fullDayCore * 0.45 + activeSessionCore * 0.55);
 }
 
 export function chooseOpportunityStrategy(
@@ -491,41 +488,23 @@ export function evaluateCanonicalOpportunity(
   const sessionReclaim = isSessionReclaim(candidate);
   const momentumReferenceChange = getMomentumReferenceChange(candidate);
   const activeSessionChange = getActiveSessionChange(candidate);
-  const fusedMomentum = getFusedMomentumMagnitude(candidate);
+  const canonicalMomentumMagnitude =
+    getCanonicalMomentumMagnitude(candidate);
   const rawConfirmedRunner = isConfirmedContinuationRunner(candidate, strategy);
   const pulse = proxIntelligence?.pulse;
   const sessionPeakPullback = candidate.pullbackFromSessionHighPercent;
-  const livePeakFailureEvidence = [
-    (pulse?.velocity1m ?? 0) <= -0.75,
-    (pulse?.acceleration5m ?? 0) <= -1.5,
-    (pulse?.priceVsVwap ?? 0) <= -0.75,
-    (pulse?.volumeAcceleration ?? 0) >= 1.1 &&
-      (pulse?.velocity1m ?? 0) < 0,
-  ].filter(Boolean).length;
-  const peakFailureConfirmed = Boolean(
-    pulse?.fresh === true &&
-      (pulse.peakFailureConfirmed ||
-        ((sessionPeakPullback ?? 0) >=
-          pulse.peakFailureThresholdPercent &&
-          livePeakFailureEvidence >= 2)),
-  );
   const recentPeakPullback =
     pulse?.pullbackFromWindowHighPercent ?? null;
-  const observedPeakPullback = Math.max(
-    sessionPeakPullback ?? 0,
-    recentPeakPullback ?? 0,
-  );
-  const proxMarketConfirmation =
-    pulse?.fresh === true
-      ? proxIntelligence?.scores.marketConfirmation ?? null
-      : null;
-  const proxSupportsContinuation = Boolean(
-    pulse?.fresh === true &&
-      !peakFailureConfirmed &&
-      proxMarketConfirmation !== null &&
-      proxMarketConfirmation >= 55 &&
-      (pulse.state === "expanding" || pulse.state === "stable"),
-  );
+  const proxAuthority = evaluateProxPublicAuthority({
+    activeMarketSession: isActiveMarketSession(),
+    marketConfirmation:
+      proxIntelligence?.scores.marketConfirmation ?? null,
+    sessionPeakPullbackPercent: sessionPeakPullback,
+    pulse,
+  });
+  const peakFailureConfirmed = proxAuthority.peakFailureConfirmed;
+  const proxMarketConfirmation = proxAuthority.marketConfirmation;
+  const proxSupportsContinuation = proxAuthority.supportsContinuation;
   const confirmedRunner = rawConfirmedRunner && !peakFailureConfirmed;
   const extremeMomentum = isExtremeMomentum(candidate, strategy);
   // Price discovery already avoids creating an R:R hard failure when upside
@@ -564,24 +543,26 @@ export function evaluateCanonicalOpportunity(
   }
 
   if (strategy === "spot_momentum") {
+    rejectionReasons.splice(
+      0,
+      rejectionReasons.length,
+      ...enforceSpotMomentumAuthority({
+        rejectionReasons,
+        fullDayChangePercent: candidate.change,
+        peakFailureConfirmed,
+      }),
+    );
     if (!candidate.retrievedForSm && !candidate.retrievedForCatalyst) {
       rejectionReasons.push(
         "Ticker did not qualify for Spot Momentum retrieval.",
       );
     }
-    if (sessionReclaim && momentumReferenceChange < 5) {
+    if (sessionReclaim && (activeSessionChange ?? 0) < 5) {
       rejectionReasons.push(
         "Session Reclaim requires at least a 5% verified move from the current-day open.",
       );
-    } else if (
-      momentumReferenceChange <= 0 &&
-      (activeSessionChange ?? 0) <= 0
-    ) {
-      rejectionReasons.push(
-        "Spot Momentum requires positive full-day or active-session movement.",
-      );
     }
-    if (!extremeMomentum && !sessionReclaim) {
+    if (!extremeMomentum) {
       if (candidate.crowdScore >= 65 && !proxSupportsContinuation) {
         rejectionReasons.push(
           `Crowd saturation (${Math.round(candidate.crowdScore)}) lacks fresh ProX continuation confirmation.`,
@@ -633,26 +614,15 @@ export function evaluateCanonicalOpportunity(
       framework.hardFailures[0],
       momentumReferenceChange,
     );
-  const sessionReclaimVisibilityOverride =
-    strategy === "spot_momentum" &&
-    sessionReclaim &&
-    rejectionReasons.length > 0 &&
-    rejectionReasons.every(
-      (reason) =>
-        reason === "Reward magnitude is negligible." ||
-        reason.startsWith("R:R "),
-    );
-  const displayRejectionReasons = priceDiscoveryVisibilityOverride
-    ? rejectionReasons.filter(
-        (reason) =>
-          !isMoveExplainedPriceDiscontinuity(
-            reason,
-            momentumReferenceChange,
-          ),
-      )
-    : sessionReclaimVisibilityOverride
-      ? []
-    : [...rejectionReasons];
+  const removablePriceDiscontinuity = priceDiscoveryVisibilityOverride
+    ? rejectionReasons.find((reason) =>
+        isMoveExplainedPriceDiscontinuity(reason, momentumReferenceChange),
+      ) ?? null
+    : null;
+  const displayRejectionReasons = preserveDisplayHardFailures(
+    rejectionReasons,
+    removablePriceDiscontinuity,
+  );
   const displayEligible = displayRejectionReasons.length === 0;
   const momentumRadarEligible = Boolean(
     strategy === "spot_momentum" &&
@@ -704,7 +674,7 @@ export function evaluateCanonicalOpportunity(
           ),
         );
   const qualityScore = Math.round(strength * 0.65 + tradeQuality * 0.35);
-  const magnitudeCore = fusedMomentum;
+  const magnitudeCore = canonicalMomentumMagnitude;
   const baseStrategyScore =
     strategy === "spot_momentum"
       ? Math.round(
@@ -725,32 +695,30 @@ export function evaluateCanonicalOpportunity(
           : candidate.change <= 0 && activeSessionChange > 0
             ? -3
             : 0;
-  const proxMarketAdjustment =
-    peakFailureConfirmed
-      ? -Math.min(30, 15 + Math.round(observedPeakPullback))
-      : proxMarketConfirmation === null
-      ? isActiveMarketSession()
-        ? -8
-        : 0
-      : proxMarketConfirmation >= 75
-        ? Math.min(12, 7 + Math.round((proxMarketConfirmation - 75) / 5))
-        : proxMarketConfirmation >= 65
-          ? 5
-          : proxMarketConfirmation < 35
-            ? -12
-            : proxMarketConfirmation < 45
-              ? -6
-          : 0;
-  const strategyScore = Math.round(
-    clamp(baseStrategyScore + sessionAlignmentAdjustment + proxMarketAdjustment),
-  );
+  const proxMarketAdjustment = proxAuthority.rankAdjustment;
+  const strategyScore =
+    strategy === "spot_momentum"
+      ? getSpotMomentumStrategyScore({
+          change: candidate.change,
+          breakoutScore: breakout.score,
+          qualityScore,
+          sessionAlignmentAdjustment,
+          proxMarketAdjustment,
+        })
+      : Math.round(
+          clamp(
+            baseStrategyScore +
+              sessionAlignmentAdjustment +
+              proxMarketAdjustment,
+          ),
+        );
   const heroPulseConfirmed =
     !isActiveMarketSession() ||
     (proxIntelligence?.pulse?.fresh === true &&
       proxMarketConfirmation !== null &&
       proxMarketConfirmation >= 55 &&
       !peakFailureConfirmed);
-  const tier = momentumRadarEligible || sessionReclaimVisibilityOverride || peakFailureConfirmed
+  const tier = momentumRadarEligible || peakFailureConfirmed
     ? "watch"
     : displayEligible &&
     strategyScore >= 80 &&
@@ -827,7 +795,7 @@ export function evaluateCanonicalOpportunity(
       ? `${candidate.ticker} remains on the momentum radar, but ProX currently sees a failed continuation rather than a strong chase entry.`
       : momentumRadarEligible
       ? `${candidate.ticker} is a verified momentum leader with live ProX confirmation. HT is keeping it visible on the radar while withholding entry qualification at the current price.`
-      : sessionReclaim
+      : sessionReclaim && displayEligible
       ? `${candidate.ticker} has a verified session reclaim. HT combined the current-session move, full-session context, volume, risk${proxIntelligence?.pulse?.fresh ? ", and live ProX pulse" : ""} into this single Spot Momentum decision.`
       : explosionAssessment.state === "price_discovery"
       ? priceDiscoveryVisibilityOverride
@@ -855,8 +823,6 @@ export function evaluateCanonicalOpportunity(
       ? "Price is below its recent peak and the live tape confirms deterioration through acceleration, VWAP, time, or selling-volume evidence. HT will wait for a real reclaim before restoring conviction."
       : momentumRadarEligible
       ? "Momentum and volume are real, but the conventional structure does not provide at least 1:1 modeled risk/reward here. This is a no-chase radar read, not an entry-ready call."
-      : sessionReclaimVisibilityOverride
-      ? "The rebound is verified, but the conventional trade framework remains weak; HT is showing it as a research watch, not a trade-ready conviction."
       : priceDiscoveryVisibilityOverride
       ? "Live momentum is confirmed, but the completed daily history cannot provide a reliable upside, downside, or resistance framework for this move."
       : displayRejectionReasons[0]) ||
@@ -867,7 +833,7 @@ export function evaluateCanonicalOpportunity(
       ? "Post-Peak Weakness"
       : momentumRadarEligible
       ? "Momentum Leader — No Chase"
-      : sessionReclaim
+      : sessionReclaim && displayEligible
       ? candidate.scanSession === "pre_market"
         ? "Pre-Market Reclaim"
         : "Intraday Reclaim"
@@ -920,7 +886,7 @@ export function evaluateCanonicalOpportunity(
       ? "verified_price_discovery"
       : momentumRadarEligible
         ? "momentum_radar"
-      : sessionReclaim
+      : sessionReclaim && displayEligible
         ? "session_reclaim"
       : eligible
         ? "canonical"
@@ -935,7 +901,8 @@ export function evaluateCanonicalOpportunity(
       sessionAlignmentAdjustment,
       proxMarketAdjustment,
       proxSupportsContinuation,
-      momentumFusion: "full_day_active_session_v1",
+      proxAuthorityVersion: proxAuthority.authorityVersion,
+      momentumFusion: "previous_close_anchor_session_context_v2",
       peakFailureConfirmed,
       sessionPeakPullbackPercent:
         sessionPeakPullback,

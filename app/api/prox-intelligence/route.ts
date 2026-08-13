@@ -5,12 +5,14 @@ import {
   loadProxIntelligencePackets,
   persistProxIntelligencePackets,
 } from "@/lib/prox/intelligence";
+import { PROX_PUBLIC_AUTHORITY_CONTRACT } from "@/lib/prox/public-authority";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const MATERIALIZE_LIMIT = 300;
+const MATERIALIZE_LANE_LIMIT = 150;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,16 +40,32 @@ async function getRecentProxTickers(
   supabase: ReturnType<typeof getSupabase>,
 ) {
   const since = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabase
-    .from("prox_event_tickers")
-    .select("ticker,created_at")
-    .gte("created_at", since)
-    .order("created_at", { ascending: false })
-    .limit(MATERIALIZE_LIMIT);
-  if (error) throw error;
+  const directSince = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const [eventResult, directResult] = await Promise.all([
+    supabase
+      .from("prox_event_tickers")
+      .select("ticker,created_at")
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(MATERIALIZE_LANE_LIMIT),
+    supabase
+      .from("prox_research_queue")
+      .select("ticker,last_detected_at,research_priority,status")
+      .in("status", ["queued", "observing"])
+      .gte("last_detected_at", directSince)
+      .order("research_priority", { ascending: false })
+      .limit(MATERIALIZE_LANE_LIMIT),
+  ]);
+  if (eventResult.error) throw eventResult.error;
+  // Migration 0013 is additive. Until it is applied, the established SEC
+  // intelligence materializer continues operating from event tickers.
+  const rows = [
+    ...(eventResult.data ?? []),
+    ...(directResult.error ? [] : directResult.data ?? []),
+  ];
   return [
     ...new Set(
-      (data ?? [])
+      rows
         .map((row) =>
           typeof row.ticker === "string"
             ? row.ticker.toUpperCase().trim()
@@ -55,7 +73,7 @@ async function getRecentProxTickers(
         )
         .filter(Boolean),
     ),
-  ];
+  ].slice(0, MATERIALIZE_LIMIT);
 }
 
 export async function GET(req: Request) {
@@ -74,7 +92,7 @@ export async function GET(req: Request) {
         ticker,
         packet: packets.get(ticker) ?? null,
         packetVersion: PROX_INTELLIGENCE_VERSION,
-        authority: "shadow_only",
+        authority: PROX_PUBLIC_AUTHORITY_CONTRACT,
         timestamp: new Date().toISOString(),
       });
     }
@@ -92,7 +110,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       success: persistence.unavailableReason === null,
       packetVersion: PROX_INTELLIGENCE_VERSION,
-      authority: "shadow_only",
+      authority: PROX_PUBLIC_AUTHORITY_CONTRACT,
       diagnostics: {
         tickersConsidered: tickers.length,
         active: packets.filter((packet) => packet.status === "active").length,
@@ -121,7 +139,7 @@ export async function GET(req: Request) {
             ? error.message
             : "Pro X intelligence materialization failed.",
         packetVersion: PROX_INTELLIGENCE_VERSION,
-        authority: "shadow_only",
+        authority: PROX_PUBLIC_AUTHORITY_CONTRACT,
       },
       { status: 500 },
     );

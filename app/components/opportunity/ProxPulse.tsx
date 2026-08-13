@@ -20,7 +20,9 @@ export default function ProxPulse({ packet }: ProxPulseProps) {
             ProX Pulse
           </p>
           <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.12em] text-zinc-600">
-            Shadow intelligence · no execution authority
+            {pulse
+              ? "Bounded live-tape authority · no execution"
+              : "Research intelligence · no execution"}
           </p>
         </div>
         <span

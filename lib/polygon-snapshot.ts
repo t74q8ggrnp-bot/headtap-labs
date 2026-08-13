@@ -5,7 +5,7 @@ const positiveNumber = (value: unknown) => {
 
 export type PolygonSnapshotRow = {
   ticker?: unknown;
-  day?: { o?: unknown; h?: unknown; c?: unknown; v?: unknown };
+  day?: { o?: unknown; h?: unknown; l?: unknown; c?: unknown; v?: unknown };
   min?: { av?: unknown; c?: unknown; t?: unknown };
   prevDay?: { c?: unknown; v?: unknown };
   lastTrade?: { p?: unknown; t?: unknown };
@@ -51,6 +51,16 @@ const timestampMs = (value: unknown) => {
   return parsed;
 };
 
+export function resolveSnapshotTimestampMs(
+  row: PolygonSnapshotRow,
+): number | null {
+  const timestamps = [
+    timestampMs(row?.min?.t),
+    timestampMs(row?.lastTrade?.t),
+  ].filter((value): value is number => value !== null);
+  return timestamps.length > 0 ? Math.max(...timestamps) : null;
+}
+
 /**
  * Polygon snapshot payloads can contain an old lastTrade while the aggregate
  * day/minute bars are current. Prefer aggregate closes and only trust
@@ -75,11 +85,10 @@ export function resolveSnapshotPrice(row: PolygonSnapshotRow): number {
 }
 
 /**
- * Display-only price resolution can be more current than the canonical scan
- * price without changing ranking or trading decisions. Trust Polygon's latest
- * minute/trade only when it carries a recent timestamp and remains reasonably
- * consistent with the regular-session reference; otherwise retain the stable
- * aggregate close used by the canonical engine.
+ * Resolve the current price used by both canonical evaluation and display.
+ * Trust Polygon's latest minute/trade only when it carries a recent timestamp
+ * and remains reasonably consistent with the regular-session reference;
+ * otherwise retain the stable aggregate close.
  */
 export function resolveSnapshotDisplayPrice(
   row: PolygonSnapshotRow,

@@ -2,18 +2,20 @@ import type { Opportunity } from "@/lib/opportunity-model";
 
 type MomentumContendersProps = {
   candidates: Opportunity[];
+  radarCandidates?: Opportunity[];
   onSelect: (opportunity: Opportunity) => void;
 };
 
 export default function MomentumContenders({
   candidates,
+  radarCandidates = [],
   onSelect,
 }: MomentumContendersProps) {
   return (
     <div className="flex h-full min-h-full flex-col bg-white/[0.01] p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700">
-          Contenders + Momentum Radar
+          Qualified Contenders
         </p>
         {candidates.length > 0 && (
           <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">
@@ -70,6 +72,44 @@ export default function MomentumContenders({
               </div>
               </button>
           ))}
+        </div>
+      )}
+      {radarCandidates.length > 0 && (
+        <div className="mt-4 border-t border-amber-400/10 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-[8px] font-black uppercase tracking-[0.22em] text-amber-300/70">
+              Momentum Radar · Entry Withheld
+            </p>
+            <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">
+              Observation only
+            </p>
+          </div>
+          <div className="grid content-start gap-2">
+            {radarCandidates.map((opportunity) => (
+              <button
+                key={`radar-${opportunity.ticker}`}
+                onClick={() => onSelect(opportunity)}
+                className="flex min-h-[4.5rem] items-center justify-between gap-3 rounded-xl border border-amber-400/10 bg-amber-500/[0.025] px-4 py-3 text-left transition hover:border-amber-400/25"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-mono text-sm font-black text-white">
+                      {opportunity.ticker}
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] font-black text-amber-300">
+                      +{opportunity.change.toFixed(1)}%
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[8px] font-bold text-zinc-600">
+                    {opportunity.relativeVolume.toFixed(1)}× vol · No qualifying entry
+                  </p>
+                </div>
+                <p className="shrink-0 text-[8px] font-black uppercase tracking-[0.12em] text-amber-300/70">
+                  Radar
+                </p>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

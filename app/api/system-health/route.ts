@@ -21,10 +21,23 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { buildCanonicalOpportunityFeed } from "@/lib/canonical-opportunity-feed";
+import { auditCanonicalSpotMomentumFeed } from "@/lib/canonical-feed-integrity";
+import {
+  PROX_PUBLIC_AUTHORITY_CONTRACT,
+  PROX_PUBLIC_AUTHORITY_VERSION,
+} from "@/lib/prox/public-authority";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const ACTIVE_MAX_SIGNAL_AGE_HOURS = 20 / 60;
 const CLOSED_MAX_SIGNAL_AGE_HOURS = 8;
 const ACTIVE_MAX_PROX_AGE_HOURS = 10 / 60;
+const ACTIVE_MAX_DIRECT_DISCOVERY_AGE_HOURS = 12 / 60;
+const ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS = 12 / 60;
+const ACTIVE_MAX_TRANSITION_MEMORY_AGE_HOURS = 12 / 60;
+const ACTIVE_MAX_TRANSITION_CALIBRATION_AGE_HOURS = 22 / 60;
 const ACTIVE_MAX_LEDGER_AGE_HOURS = 12 / 60;
 const MAX_CRYPTO_PROX_AGE_HOURS = 15 / 60;
 const CRYPTO_OUTCOME_GRACE_MINUTES = 10;
@@ -413,6 +426,600 @@ export async function GET() {
     });
   }
 
+  // Pro X now has an independent full-market Polygon observer. It remains
+  // shadow/research-only, but its receipt must prove both freshness and exact
+  // persistence coverage while the stock market data session is active.
+  try {
+    const { data: discoveryRun, error: discoveryRunError } = await supabase
+      .from("prox_market_discovery_runs")
+      .select(
+        "id,started_at,completed_at,status,market_session,snapshot_count,eligible_count,expected_observation_count,persisted_observation_count,research_queued_count,complete,engine_version,diagnostics",
+      )
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (discoveryRunError) throw discoveryRunError;
+
+    if (!discoveryRun) {
+      checks.push({
+        name: "prox_direct_market_discovery",
+        ok: !activeMarketSession,
+        message: activeMarketSession
+          ? "Pro X direct market discovery has no completed active-session run."
+          : "Pro X direct market discovery schema is ready and awaiting its next active session.",
+        detail: { activeMarketSession },
+      });
+    } else {
+      const { count: actualObservationCount, error: countError } =
+        await supabase
+          .from("prox_market_discovery_observations")
+          .select("*", { count: "exact", head: true })
+          .eq("run_id", discoveryRun.id);
+      if (countError) throw countError;
+
+      const ageHours = hoursSince(
+        discoveryRun.completed_at ?? discoveryRun.started_at,
+      );
+      const expectedCount = Number(
+        discoveryRun.expected_observation_count,
+      );
+      const persistedCount = Number(
+        discoveryRun.persisted_observation_count,
+      );
+      const actualCount = actualObservationCount ?? 0;
+      const coverageComplete =
+        discoveryRun.status === "success" &&
+        discoveryRun.complete === true &&
+        Number(discoveryRun.snapshot_count) > 0 &&
+        expectedCount === persistedCount &&
+        persistedCount === actualCount;
+      const fresh =
+        !activeMarketSession ||
+        ageHours <= ACTIVE_MAX_DIRECT_DISCOVERY_AGE_HOURS;
+
+      checks.push({
+        name: "prox_direct_market_discovery",
+        ok: coverageComplete && fresh,
+        message: !coverageComplete
+          ? "Pro X direct Polygon discovery failed its coverage receipt."
+          : !fresh
+            ? "Pro X direct Polygon discovery is stale during the active market-data session."
+            : activeMarketSession
+              ? "Pro X direct Polygon discovery is fresh and independently persisted."
+              : "Latest Pro X direct Polygon discovery is retained outside the active session.",
+        detail: {
+          runId: discoveryRun.id,
+          engineVersion: discoveryRun.engine_version,
+          marketSession: discoveryRun.market_session,
+          snapshotCount: Number(discoveryRun.snapshot_count),
+          eligibleCount: Number(discoveryRun.eligible_count),
+          expectedCount,
+          persistedCount,
+          actualCount,
+          researchQueuedCount: Number(discoveryRun.research_queued_count),
+          completedAt: discoveryRun.completed_at,
+          ageMinutes: Number.isFinite(ageHours)
+            ? Number((ageHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: activeMarketSession
+            ? ACTIVE_MAX_DIRECT_DISCOVERY_AGE_HOURS * 60
+            : null,
+          mode:
+            discoveryRun.diagnostics &&
+            typeof discoveryRun.diagnostics === "object" &&
+            "mode" in discoveryRun.diagnostics
+              ? discoveryRun.diagnostics.mode
+              : null,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_direct_market_discovery",
+      ok: false,
+      message:
+        "Pro X direct Polygon discovery is unavailable; run migration 0013 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Outcome Memory must preserve the original entry, account for every due
+  // horizon, and keep MFE/MAE arithmetic honest. Its labels and calibration
+  // remain shadow-only and cannot publish another opportunity score.
+  try {
+    const { data: outcomeRun, error: outcomeRunError } = await supabase
+      .from("prox_outcome_memory_runs")
+      .select(
+        "id,observed_at,completed_at,status,market_session,snapshot_count,active_episode_count,updated_episode_count,due_outcome_count,persisted_outcome_count,unavailable_outcome_count,calibration_count,complete,methodology_version,diagnostics",
+      )
+      .order("observed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (outcomeRunError) throw outcomeRunError;
+
+    const { data: latestEpisode, error: latestEpisodeError } = await supabase
+      .from("prox_research_episodes")
+      .select(
+        "ticker,started_at,entry_price,sampled_high_price,sampled_low_price,max_gain_percent,max_drawdown_percent,time_to_peak_minutes,outcome_label,status,measurement_quality,updated_at",
+      )
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestEpisodeError) throw latestEpisodeError;
+
+    if (!outcomeRun) {
+      checks.push({
+        name: "prox_outcome_memory",
+        ok: !activeMarketSession,
+        message: activeMarketSession
+          ? "Pro X Outcome Memory has no completed active-session cycle."
+          : "Pro X Outcome Memory schema is ready and awaiting its next active session.",
+        detail: { activeMarketSession, latestEpisode: latestEpisode ?? null },
+      });
+    } else {
+      const runAgeHours = hoursSince(
+        outcomeRun.completed_at ?? outcomeRun.observed_at,
+      );
+      const activeEpisodeCount = Number(outcomeRun.active_episode_count);
+      const dueOutcomeCount = Number(outcomeRun.due_outcome_count);
+      const persistedOutcomeCount = Number(
+        outcomeRun.persisted_outcome_count,
+      );
+      const unavailableOutcomeCount = Number(
+        outcomeRun.unavailable_outcome_count,
+      );
+      const coverageComplete =
+        outcomeRun.status === "success" &&
+        outcomeRun.complete === true &&
+        dueOutcomeCount ===
+          persistedOutcomeCount + unavailableOutcomeCount &&
+        (activeEpisodeCount === 0 || Number(outcomeRun.snapshot_count) > 0);
+      const fresh =
+        !activeMarketSession ||
+        runAgeHours <= ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS;
+
+      let episodeMathValid = true;
+      let episodeDetail: Record<string, unknown> | null = null;
+      if (latestEpisode) {
+        const entry = Number(latestEpisode.entry_price);
+        const high = Number(latestEpisode.sampled_high_price);
+        const low = Number(latestEpisode.sampled_low_price);
+        const storedGain = Number(latestEpisode.max_gain_percent);
+        const storedDrawdown = Number(latestEpisode.max_drawdown_percent);
+        const calculatedGain =
+          entry > 0 ? ((high - entry) / entry) * 100 : NaN;
+        const calculatedDrawdown =
+          entry > 0 ? ((low - entry) / entry) * 100 : NaN;
+        episodeMathValid =
+          entry > 0 &&
+          high >= entry &&
+          low <= entry &&
+          Number.isFinite(calculatedGain) &&
+          Number.isFinite(calculatedDrawdown) &&
+          Math.abs(storedGain - calculatedGain) <= 0.05 &&
+          Math.abs(storedDrawdown - calculatedDrawdown) <= 0.05 &&
+          Number(latestEpisode.time_to_peak_minutes) >= 0;
+        episodeDetail = {
+          ticker: latestEpisode.ticker,
+          startedAt: latestEpisode.started_at,
+          entryPrice: entry,
+          sampledHighPrice: high,
+          sampledLowPrice: low,
+          maxGainPercent: storedGain,
+          maxDrawdownPercent: storedDrawdown,
+          timeToPeakMinutes: latestEpisode.time_to_peak_minutes,
+          label: latestEpisode.outcome_label,
+          status: latestEpisode.status,
+          measurementQuality: latestEpisode.measurement_quality,
+          arithmeticValid: episodeMathValid,
+        };
+      }
+
+      checks.push({
+        name: "prox_outcome_memory",
+        ok: coverageComplete && fresh && episodeMathValid,
+        message: !coverageComplete
+          ? "Pro X Outcome Memory failed its due-horizon coverage receipt."
+          : !fresh
+            ? "Pro X Outcome Memory is stale during the active market-data session."
+            : !episodeMathValid
+              ? "Pro X Outcome Memory contains invalid entry, MFE, or MAE arithmetic."
+              : activeMarketSession
+                ? "Pro X Outcome Memory is fresh, complete, and arithmetically valid."
+                : "Latest Pro X Outcome Memory cycle is retained outside the active session.",
+        detail: {
+          runId: outcomeRun.id,
+          methodologyVersion: outcomeRun.methodology_version,
+          marketSession: outcomeRun.market_session,
+          activeEpisodeCount,
+          updatedEpisodeCount: Number(outcomeRun.updated_episode_count),
+          dueOutcomeCount,
+          persistedOutcomeCount,
+          unavailableOutcomeCount,
+          calibrationCount: Number(outcomeRun.calibration_count),
+          completedAt: outcomeRun.completed_at,
+          ageMinutes: Number.isFinite(runAgeHours)
+            ? Number((runAgeHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: activeMarketSession
+            ? ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS * 60
+            : null,
+          episode: episodeDetail,
+          authority:
+            outcomeRun.diagnostics &&
+            typeof outcomeRun.diagnostics === "object" &&
+            "authority" in outcomeRun.diagnostics
+              ? outcomeRun.diagnostics.authority
+              : null,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_outcome_memory",
+      ok: false,
+      message:
+        "Pro X Outcome Memory is unavailable; run migration 0014 after migration 0013.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Canonical Transition Memory must preserve the real Before The Crowd entry,
+  // the later Spot Momentum promotion, and the outcome from the earlier entry.
+  // It is evidence for Pro X research only, never another public score.
+  try {
+    const { data: transitionRun, error: transitionRunError } = await supabase
+      .from("prox_strategy_transition_runs")
+      .select(
+        "id,observed_at,trading_date,methodology_version,source_pair_count,persisted_case_count,complete,case_tickers,diagnostics,error_message",
+      )
+      .order("observed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (transitionRunError) throw transitionRunError;
+
+    const { data: latestTransition, error: latestTransitionError } =
+      await supabase
+        .from("prox_strategy_transition_cases")
+        .select(
+          "ticker,trading_date,source_kind,before_crowd_first_at,before_crowd_first_price,spot_first_at,spot_first_price,transition_minutes,transition_return_percent,highest_price_after_early,highest_price_at,lowest_price_after_early,lowest_price_at,max_gain_from_early_percent,max_drawdown_from_early_percent,max_gain_from_spot_percent,time_from_early_to_peak_minutes,case_label,status,calibratable,updated_at",
+        )
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (latestTransitionError) throw latestTransitionError;
+
+    if (!transitionRun) {
+      checks.push({
+        name: "prox_canonical_transition_memory",
+        ok: false,
+        message:
+          "Canonical Transition Memory has no coverage receipt; run migration 0015.",
+      });
+    } else {
+      const runAgeHours = hoursSince(transitionRun.observed_at);
+      const sourcePairCount = Number(transitionRun.source_pair_count);
+      const persistedCaseCount = Number(transitionRun.persisted_case_count);
+      const coverageValid =
+        transitionRun.complete === true &&
+        sourcePairCount === persistedCaseCount;
+      const fresh =
+        !activeMarketSession ||
+        runAgeHours <= ACTIVE_MAX_TRANSITION_MEMORY_AGE_HOURS;
+
+      let arithmeticValid = sourcePairCount === 0 && !latestTransition;
+      let transitionDetail: Record<string, unknown> | null = null;
+      if (latestTransition) {
+        const beforeAt = new Date(
+          latestTransition.before_crowd_first_at,
+        ).getTime();
+        const spotAt = new Date(latestTransition.spot_first_at).getTime();
+        const beforePrice = Number(
+          latestTransition.before_crowd_first_price,
+        );
+        const spotPrice = Number(latestTransition.spot_first_price);
+        const high = Number(latestTransition.highest_price_after_early);
+        const low = Number(latestTransition.lowest_price_after_early);
+        const calculatedMinutes = (spotAt - beforeAt) / 60_000;
+        const calculatedTransitionReturn =
+          ((spotPrice - beforePrice) / beforePrice) * 100;
+        const calculatedEarlyGain =
+          ((high - beforePrice) / beforePrice) * 100;
+        const calculatedEarlyDrawdown =
+          ((low - beforePrice) / beforePrice) * 100;
+        const calculatedSpotGain = ((high - spotPrice) / spotPrice) * 100;
+        arithmeticValid =
+          latestTransition.source_kind === "canonical_transition_case" &&
+          latestTransition.calibratable === false &&
+          beforePrice > 0 &&
+          spotPrice > 0 &&
+          spotAt > beforeAt &&
+          high >= beforePrice &&
+          low > 0 &&
+          low <= beforePrice &&
+          Math.abs(
+            Number(latestTransition.transition_minutes) - calculatedMinutes,
+          ) <= 0.11 &&
+          Math.abs(
+            Number(latestTransition.transition_return_percent) -
+              calculatedTransitionReturn,
+          ) <= 0.05 &&
+          Math.abs(
+            Number(latestTransition.max_gain_from_early_percent) -
+              calculatedEarlyGain,
+          ) <= 0.05 &&
+          Math.abs(
+            Number(latestTransition.max_drawdown_from_early_percent) -
+              calculatedEarlyDrawdown,
+          ) <= 0.05 &&
+          Math.abs(
+            Number(latestTransition.max_gain_from_spot_percent) -
+              calculatedSpotGain,
+          ) <= 0.05 &&
+          Number(latestTransition.time_from_early_to_peak_minutes) >= 0;
+        transitionDetail = {
+          ticker: latestTransition.ticker,
+          tradingDate: latestTransition.trading_date,
+          beforeCrowdFirstAt: latestTransition.before_crowd_first_at,
+          beforeCrowdFirstPrice: beforePrice,
+          spotFirstAt: latestTransition.spot_first_at,
+          spotFirstPrice: spotPrice,
+          transitionMinutes: Number(latestTransition.transition_minutes),
+          transitionReturnPercent: Number(
+            latestTransition.transition_return_percent,
+          ),
+          highestPriceAfterEarly: high,
+          maxGainFromEarlyPercent: Number(
+            latestTransition.max_gain_from_early_percent,
+          ),
+          maxGainFromSpotPercent: Number(
+            latestTransition.max_gain_from_spot_percent,
+          ),
+          maxDrawdownFromEarlyPercent: Number(
+            latestTransition.max_drawdown_from_early_percent,
+          ),
+          label: latestTransition.case_label,
+          status: latestTransition.status,
+          arithmeticValid,
+        };
+      }
+
+      checks.push({
+        name: "prox_canonical_transition_memory",
+        ok: coverageValid && fresh && arithmeticValid,
+        message: !coverageValid
+          ? "Canonical Transition Memory failed its source-pair coverage receipt."
+          : !fresh
+            ? "Canonical Transition Memory is stale during the active market-data session."
+            : !arithmeticValid
+              ? "Canonical Transition Memory contains invalid transition or outcome arithmetic."
+              : sourcePairCount === 0
+                ? "Canonical Transition Memory is healthy; no graduated cases exist in the latest receipt."
+                : "Canonical Transition Memory is fresh, complete, and arithmetically valid.",
+        detail: {
+          runId: transitionRun.id,
+          tradingDate: transitionRun.trading_date,
+          methodologyVersion: transitionRun.methodology_version,
+          sourcePairCount,
+          persistedCaseCount,
+          completed: transitionRun.complete,
+          observedAt: transitionRun.observed_at,
+          ageMinutes: Number.isFinite(runAgeHours)
+            ? Number((runAgeHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: activeMarketSession
+            ? ACTIVE_MAX_TRANSITION_MEMORY_AGE_HOURS * 60
+            : null,
+          transition: transitionDetail,
+          authority:
+            transitionRun.diagnostics &&
+            typeof transitionRun.diagnostics === "object" &&
+            "authority" in transitionRun.diagnostics
+              ? transitionRun.diagnostics.authority
+              : null,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_canonical_transition_memory",
+      ok: false,
+      message:
+        "Canonical Transition Memory is unavailable; run migration 0015 after migrations 0010 and 0014.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Transition Calibration must include every finalized Before The Crowd case,
+  // not only winners that graduated. Cohort rates remain shadow evidence and
+  // cannot modify the one canonical HT score.
+  try {
+    const { data: calibrationRun, error: calibrationRunError } = await supabase
+      .from("prox_transition_calibration_runs")
+      .select(
+        "id,observed_at,completed_at,trading_date,methodology_version,source_case_count,mature_case_count,expected_cohort_count,persisted_cohort_count,emerging_cohort_count,calibrated_cohort_count,complete,diagnostics,error_message",
+      )
+      .order("observed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (calibrationRunError) throw calibrationRunError;
+
+    if (!calibrationRun) {
+      checks.push({
+        name: "prox_transition_pattern_calibration",
+        ok: false,
+        message:
+          "Pro X Transition Calibration has no coverage receipt; run migration 0016 and deploy its scheduled route.",
+      });
+    } else {
+      const [sourceResult, matureResult, cohortResult, latestResult] =
+        await Promise.all([
+          supabase
+            .from("prox_strategy_learning_cases")
+            .select("*", { count: "exact", head: true })
+            .eq("methodology_version", "prox-transition-learning-case-v1"),
+          supabase
+            .from("prox_strategy_learning_cases")
+            .select("*", { count: "exact", head: true })
+            .eq("methodology_version", "prox-transition-learning-case-v1")
+            .eq("status", "complete")
+            .eq("calibratable", true),
+          supabase
+            .from("prox_transition_pattern_calibrations")
+            .select("*", { count: "exact", head: true })
+            .eq("methodology_version", "prox-transition-calibration-v1"),
+          supabase
+            .from("prox_transition_pattern_calibrations")
+            .select(
+              "cohort_key,cohort_level,sample_size,graduated_count,graduation_rate,explosion_count,explosion_rate,continuation_count,continuation_rate,failure_count,failure_rate,missed_explosion_count,missed_explosion_rate,median_max_gain_percent,median_max_drawdown_percent,median_time_to_peak_minutes,median_transition_minutes,evidence_state,authority,computed_at",
+            )
+            .eq("methodology_version", "prox-transition-calibration-v1")
+            .order("sample_size", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+      if (sourceResult.error) throw sourceResult.error;
+      if (matureResult.error) throw matureResult.error;
+      if (cohortResult.error) throw cohortResult.error;
+      if (latestResult.error) throw latestResult.error;
+
+      const sourceCaseCount = Number(calibrationRun.source_case_count);
+      const matureCaseCount = Number(calibrationRun.mature_case_count);
+      const expectedCohortCount = Number(
+        calibrationRun.expected_cohort_count,
+      );
+      const persistedCohortCount = Number(
+        calibrationRun.persisted_cohort_count,
+      );
+      const actualSourceCount = sourceResult.count ?? 0;
+      const actualMatureCount = matureResult.count ?? 0;
+      const actualCohortCount = cohortResult.count ?? 0;
+      const coverageValid =
+        calibrationRun.complete === true &&
+        sourceCaseCount === actualSourceCount &&
+        matureCaseCount === actualMatureCount &&
+        expectedCohortCount === persistedCohortCount &&
+        persistedCohortCount === actualCohortCount;
+      const ageHours = hoursSince(
+        calibrationRun.completed_at ?? calibrationRun.observed_at,
+      );
+      const fresh =
+        !activeMarketSession ||
+        ageHours <= ACTIVE_MAX_TRANSITION_CALIBRATION_AGE_HOURS;
+
+      const latest = latestResult.data;
+      let arithmeticValid = expectedCohortCount === 0 && !latest;
+      let cohortDetail: Record<string, unknown> | null = null;
+      if (latest) {
+        const sampleSize = Number(latest.sample_size);
+        const countRatePairs = [
+          [latest.graduated_count, latest.graduation_rate],
+          [latest.explosion_count, latest.explosion_rate],
+          [latest.continuation_count, latest.continuation_rate],
+          [latest.failure_count, latest.failure_rate],
+          [latest.missed_explosion_count, latest.missed_explosion_rate],
+        ].map(([count, rate]) => [Number(count), Number(rate)] as const);
+        const expectedEvidenceState =
+          sampleSize >= 100
+            ? "calibrated"
+            : sampleSize >= 30
+              ? "emerging"
+              : "insufficient";
+        arithmeticValid =
+          sampleSize > 0 &&
+          latest.authority === "shadow_research_only" &&
+          latest.evidence_state === expectedEvidenceState &&
+          countRatePairs.every(
+            ([count, rate]) =>
+              count >= 0 &&
+              count <= sampleSize &&
+              rate >= 0 &&
+              rate <= 1 &&
+              Math.abs(rate - count / sampleSize) <= 0.001,
+          ) &&
+          Number(latest.missed_explosion_count) <=
+            Number(latest.explosion_count) &&
+          Number(latest.median_time_to_peak_minutes) >= 0 &&
+          (latest.median_transition_minutes === null ||
+            Number(latest.median_transition_minutes) > 0);
+        cohortDetail = {
+          cohortKey: latest.cohort_key,
+          cohortLevel: latest.cohort_level,
+          sampleSize,
+          graduationRate: Number(latest.graduation_rate),
+          explosionRate: Number(latest.explosion_rate),
+          continuationRate: Number(latest.continuation_rate),
+          failureRate: Number(latest.failure_rate),
+          missedExplosionRate: Number(latest.missed_explosion_rate),
+          medianMaxGainPercent: Number(latest.median_max_gain_percent),
+          medianMaxDrawdownPercent: Number(
+            latest.median_max_drawdown_percent,
+          ),
+          medianTimeToPeakMinutes: Number(
+            latest.median_time_to_peak_minutes,
+          ),
+          evidenceState: latest.evidence_state,
+          arithmeticValid,
+        };
+      }
+
+      checks.push({
+        name: "prox_transition_pattern_calibration",
+        ok: coverageValid && fresh && arithmeticValid,
+        message: !coverageValid
+          ? "Pro X Transition Calibration failed its learning-case or cohort coverage receipt."
+          : !fresh
+            ? "Pro X Transition Calibration is stale during the active market-data session."
+            : !arithmeticValid
+              ? "Pro X Transition Calibration contains invalid rates, thresholds, or cohort arithmetic."
+              : expectedCohortCount === 0
+                ? "Pro X Transition Calibration is healthy and awaiting finalized learning cases."
+                : "Pro X Transition Calibration is fresh, denominator-complete, and arithmetically valid.",
+        detail: {
+          runId: calibrationRun.id,
+          tradingDate: calibrationRun.trading_date,
+          methodologyVersion: calibrationRun.methodology_version,
+          sourceCaseCount,
+          actualSourceCount,
+          matureCaseCount,
+          actualMatureCount,
+          expectedCohortCount,
+          persistedCohortCount,
+          actualCohortCount,
+          emergingCohortCount: Number(
+            calibrationRun.emerging_cohort_count,
+          ),
+          calibratedCohortCount: Number(
+            calibrationRun.calibrated_cohort_count,
+          ),
+          completedAt: calibrationRun.completed_at,
+          ageMinutes: Number.isFinite(ageHours)
+            ? Number((ageHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: activeMarketSession
+            ? ACTIVE_MAX_TRANSITION_CALIBRATION_AGE_HOURS * 60
+            : null,
+          denominator: "all_finalized_before_the_crowd_cases",
+          cohort: cohortDetail,
+          authority:
+            calibrationRun.diagnostics &&
+            typeof calibrationRun.diagnostics === "object" &&
+            "authority" in calibrationRun.diagnostics
+              ? calibrationRun.diagnostics.authority
+              : null,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_transition_pattern_calibration",
+      ok: false,
+      message:
+        "Pro X Transition Calibration is unavailable; run migration 0016 after migrations 0010 and 0015.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   let latestSignal: {
     ticker?: string;
     scanned_at?: string;
@@ -553,6 +1160,101 @@ export async function GET() {
         detail: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  // The UI must never receive a different price/change than the one that
+  // earned qualification. This executes the same server-owned builder used by
+  // Home, Scanner, ledger collection, and the paper bot, then fails health if
+  // any qualified record is non-positive, post-quote divergent, peak-failed,
+  // or if a no-entry radar record was mixed into the contender ranking.
+  try {
+    const feed = await buildCanonicalOpportunityFeed({
+      requestedType: "momentum",
+      limit: 100,
+    });
+    const audit = auditCanonicalSpotMomentumFeed(feed);
+    const topDecisionSet = [
+      feed.opportunities[0],
+      ...("momentumContenders" in feed ? feed.momentumContenders : []),
+    ].filter(Boolean);
+    const liveQuoteCount = topDecisionSet.filter(
+      (record) => record.displayQuoteLive === true,
+    ).length;
+    const liveQuoteCoverage =
+      !activeMarketSession ||
+      (topDecisionSet.length > 0 && liveQuoteCount === topDecisionSet.length);
+    const proxAuthorityRecords = topDecisionSet.filter(
+      (record) => record.proxIntelligence !== null,
+    );
+    const proxAuthorityCoverage =
+      topDecisionSet.length > 0 &&
+      proxAuthorityRecords.length === topDecisionSet.length &&
+      proxAuthorityRecords.every(
+        (record) =>
+          record.proxIntelligence?.authority.version ===
+            PROX_PUBLIC_AUTHORITY_VERSION &&
+          record.proxIntelligence.authority.marketPulse ===
+            PROX_PUBLIC_AUTHORITY_CONTRACT.marketPulse &&
+          record.proxIntelligence.authority.eventEvidence ===
+            PROX_PUBLIC_AUTHORITY_CONTRACT.eventEvidence &&
+          record.proxIntelligence.authority.transitionEvidence ===
+            PROX_PUBLIC_AUTHORITY_CONTRACT.transitionEvidence &&
+          record.proxIntelligence.authority.execution === "none" &&
+          record.proxIntelligence.authority.liveTrading === "disabled" &&
+          record.scoreContext.proxAuthorityVersion ===
+            PROX_PUBLIC_AUTHORITY_VERSION,
+      );
+    checks.push({
+      name: "canonical_opportunity_atomicity",
+      ok: audit.ok && liveQuoteCoverage,
+      message: !audit.ok
+        ? "Canonical Spot Momentum contains a quote, eligibility, rank, or radar-authority mismatch."
+        : !liveQuoteCoverage
+          ? "The current hero/contender set is missing authoritative live-decision quote coverage."
+          : "Canonical Spot Momentum scoring, ranking, and display use one authoritative quote snapshot.",
+      detail: {
+        engineVersion: feed.engineVersion,
+        sourceRunId: "sourceRun" in feed ? feed.sourceRun.id : null,
+        qualifiedCount: audit.qualifiedCount,
+        contenderCount: audit.contenderCount,
+        radarCount: audit.radarCount,
+        topDecisionCount: topDecisionSet.length,
+        liveDecisionQuoteCount: liveQuoteCount,
+        liveQuoteCoverage,
+        issues: audit.issues.slice(0, 20),
+      },
+    });
+    checks.push({
+      name: "prox_public_authority_contract",
+      ok: proxAuthorityCoverage,
+      message: proxAuthorityCoverage
+        ? "ProX market authority is bounded, versioned, and separated from research and execution."
+        : "Canonical decisions do not all carry the current bounded ProX authority contract.",
+      detail: {
+        authorityVersion: PROX_PUBLIC_AUTHORITY_VERSION,
+        topDecisionCount: topDecisionSet.length,
+        coveredDecisionCount: proxAuthorityRecords.length,
+        marketPulse: PROX_PUBLIC_AUTHORITY_CONTRACT.marketPulse,
+        eventEvidence: PROX_PUBLIC_AUTHORITY_CONTRACT.eventEvidence,
+        transitionEvidence:
+          PROX_PUBLIC_AUTHORITY_CONTRACT.transitionEvidence,
+        maximumSupportAdjustment:
+          PROX_PUBLIC_AUTHORITY_CONTRACT.maximumSupportAdjustment,
+        maximumOrdinaryPenalty:
+          PROX_PUBLIC_AUTHORITY_CONTRACT.maximumOrdinaryPenalty,
+        confirmedPeakFailure:
+          PROX_PUBLIC_AUTHORITY_CONTRACT.confirmedPeakFailure,
+        execution: PROX_PUBLIC_AUTHORITY_CONTRACT.execution,
+        liveTrading: PROX_PUBLIC_AUTHORITY_CONTRACT.liveTrading,
+      },
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "canonical_opportunity_atomicity",
+      ok: false,
+      message: "Could not verify canonical Spot Momentum quote and ranking atomicity.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // This is the canonical record of what HT actually displayed and what price

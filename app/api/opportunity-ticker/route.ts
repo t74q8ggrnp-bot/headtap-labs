@@ -15,6 +15,7 @@ import {
   attachOpportunityDisplayQuote,
   loadOpportunityDisplayQuotes,
 } from "@/lib/opportunity-display-quotes";
+import { applyOpportunityDecisionQuote } from "@/lib/opportunity-decision-quote";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -115,7 +116,12 @@ export async function GET(req: Request) {
       });
     }
 
-    const candidate = mapSignalRow(row);
+    const promotedCandidate = mapSignalRow(row);
+    const decisionQuotes = await loadOpportunityDisplayQuotes([ticker]);
+    const candidate = applyOpportunityDecisionQuote(
+      promotedCandidate,
+      decisionQuotes.get(ticker),
+    );
     const strategy = chooseOpportunityStrategy(
       candidate,
       requestedStrategy,
@@ -135,10 +141,9 @@ export async function GET(req: Request) {
       sourceRunId,
       proxPackets.get(ticker) ?? null,
     );
-    const displayQuotes = await loadOpportunityDisplayQuotes([ticker]);
     const displayedOpportunity = attachOpportunityDisplayQuote(
       opportunity,
-      displayQuotes,
+      decisionQuotes,
     );
     const displayEligibility = opportunity.displayEligibility;
 

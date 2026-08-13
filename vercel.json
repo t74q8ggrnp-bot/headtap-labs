@@ -41,6 +41,30 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/prox-market-discovery",
+      "schedule": "2-59/5 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/prox-market-discovery",
+      "schedule": "2-59/5 0 * * 2-6"
+    },
+    {
+      "path": "/api/prox-outcome-memory",
+      "schedule": "3-59/5 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/prox-outcome-memory",
+      "schedule": "3-59/5 0 * * 2-6"
+    },
+    {
+      "path": "/api/prox-transition-calibration",
+      "schedule": "7-59/15 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/prox-transition-calibration",
+      "schedule": "7-59/15 0 * * 2-6"
+    },
+    {
       "path": "/api/prox-intelligence",
       "schedule": "1-59/2 * * * *"
     },

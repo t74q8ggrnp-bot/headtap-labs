@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { buildCanonicalOpportunityFeed } from "@/lib/canonical-opportunity-feed";
 import { getErrorMessage } from "@/lib/error-message";
-import { MOMENTUM_RUNNER_UP_COUNT } from "@/lib/opportunity-model";
+import {
+  MOMENTUM_RADAR_COUNT,
+  MOMENTUM_RUNNER_UP_COUNT,
+} from "@/lib/opportunity-model";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -17,6 +20,9 @@ type OpportunitySnapshot = {
   ticker?: unknown;
   price?: unknown;
   displayPrice?: unknown;
+  displayChange?: unknown;
+  displayQuoteLive?: unknown;
+  displayQuoteAsOf?: unknown;
   opportunityScore?: unknown;
   engineVersion?: unknown;
   change?: unknown;
@@ -130,6 +136,12 @@ function compactDecisionSnapshot(opportunity: OpportunitySnapshot) {
   const prox = opportunity.proxIntelligence;
   return {
     changePercent: finiteNumber(opportunity.change),
+    displayedChangePercent:
+      finiteNumber(opportunity.displayChange) ?? finiteNumber(opportunity.change),
+    displayQuoteLive: opportunity.displayQuoteLive === true,
+    displayQuoteAsOf: opportunity.displayQuoteAsOf
+      ? String(opportunity.displayQuoteAsOf)
+      : null,
     sessionOpenPrice: finiteNumber(opportunity.sessionOpenPrice),
     changeFromOpenPercent: finiteNumber(opportunity.changeFromOpenPercent),
     sessionHighPrice: finiteNumber(opportunity.sessionHighPrice),
@@ -216,6 +228,7 @@ function selectDisplayed(
     ? payload as {
         opportunities?: unknown;
         momentumContenders?: unknown;
+        momentumRadar?: unknown;
       }
     : {};
   const strict = Array.isArray(source.opportunities)
@@ -223,6 +236,9 @@ function selectDisplayed(
     : [];
   const exactMomentumContenders = Array.isArray(source.momentumContenders)
     ? source.momentumContenders as OpportunitySnapshot[]
+    : [];
+  const exactMomentumRadar = Array.isArray(source.momentumRadar)
+    ? source.momentumRadar as OpportunitySnapshot[]
     : [];
   const secondary = strategy === "spot_momentum"
     ? exactMomentumContenders
@@ -236,6 +252,14 @@ function selectDisplayed(
           ? "radar" as const
           : "contender" as const,
     })),
+    ...(strategy === "spot_momentum"
+      ? exactMomentumRadar.slice(0, MOMENTUM_RADAR_COUNT).map(
+          (opportunity) => ({
+            opportunity,
+            role: "radar" as const,
+          }),
+        )
+      : []),
   ];
   const seen = new Set<string>();
   const selected: DisplayedOpportunity[] = [];
@@ -249,7 +273,10 @@ function selectDisplayed(
     if (!mapped || seen.has(mapped.ticker)) continue;
     seen.add(mapped.ticker);
     selected.push(mapped);
-    if (selected.length >= MOMENTUM_RUNNER_UP_COUNT + 1) break;
+    const displayLimit = strategy === "spot_momentum"
+      ? MOMENTUM_RUNNER_UP_COUNT + MOMENTUM_RADAR_COUNT + 1
+      : MOMENTUM_RUNNER_UP_COUNT + 1;
+    if (selected.length >= displayLimit) break;
   }
   return selected;
 }

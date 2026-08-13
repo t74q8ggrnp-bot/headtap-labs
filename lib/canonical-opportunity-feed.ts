@@ -17,7 +17,11 @@ import {
   attachOpportunityDisplayQuote,
   loadOpportunityDisplayQuotes,
 } from "@/lib/opportunity-display-quotes";
-import { MOMENTUM_RUNNER_UP_COUNT } from "@/lib/opportunity-model";
+import { applyOpportunityDecisionQuote } from "@/lib/opportunity-decision-quote";
+import {
+  MOMENTUM_RADAR_COUNT,
+  MOMENTUM_RUNNER_UP_COUNT,
+} from "@/lib/opportunity-model";
 
 const CONCURRENCY = 20;
 const RUN_ROW_PAGE_SIZE = 1_000;
@@ -164,9 +168,18 @@ export async function buildCanonicalOpportunityFeed({
         ? candidate.retrievedForSm || candidate.retrievedForCatalyst
         : candidate.retrievedForBtc || candidate.retrievedForCatalyst,
     );
+  const decisionQuotes = await loadOpportunityDisplayQuotes(
+    candidates.map((candidate) => candidate.ticker),
+  );
+  const decisionCandidates = candidates.map((candidate) =>
+    applyOpportunityDecisionQuote(
+      candidate,
+      decisionQuotes.get(candidate.ticker),
+    ),
+  );
   const evaluated = await evaluateAll(
     supabase,
-    candidates,
+    decisionCandidates,
     strategy,
     String(run.id),
   );
@@ -206,35 +219,20 @@ export async function buildCanonicalOpportunityFeed({
               right.relativeVolume - left.relativeVolume ||
               right.signalStrength - left.signalStrength,
           )
-          .slice(0, 10)
+          .slice(0, MOMENTUM_RADAR_COUNT)
       : [];
 
   const visibleOpportunities = eligible.slice(0, limit);
   const momentumContenders =
     strategy === "spot_momentum"
-      ? [...visibleOpportunities.slice(1), ...momentumRadar]
-          .filter(
-            (candidate, index, candidates) =>
-              candidates.findIndex(
-                (other) => other.ticker === candidate.ticker,
-              ) === index,
-          )
-          .slice(0, MOMENTUM_RUNNER_UP_COUNT)
+      ? visibleOpportunities.slice(1, MOMENTUM_RUNNER_UP_COUNT + 1)
       : [];
   const visibleContinuationCandidates = continuationCandidates;
-  const displayQuotes = await loadOpportunityDisplayQuotes(
-    [
-      ...visibleOpportunities,
-      ...momentumRadar,
-      ...momentumContenders,
-      ...(includeContinuation ? visibleContinuationCandidates : []),
-    ].map((candidate) => candidate.ticker),
-  );
-  const withDisplayQuote = <T extends (typeof evaluated)[number]>(candidate: T) =>
-    attachOpportunityDisplayQuote(candidate, displayQuotes);
+  const withDecisionQuote = <T extends (typeof evaluated)[number]>(candidate: T) =>
+    attachOpportunityDisplayQuote(candidate, decisionQuotes);
 
   return {
-    opportunities: visibleOpportunities.map(withDisplayQuote),
+    opportunities: visibleOpportunities.map(withDecisionQuote),
     strategy,
     sourceRun: {
       id: run.id,
@@ -246,6 +244,9 @@ export async function buildCanonicalOpportunityFeed({
       runRows: rows.length,
       strategyCandidates: candidates.length,
       evaluated: evaluated.length,
+      liveDecisionQuotes: decisionCandidates.filter(
+        (candidate) => candidate.decisionQuoteLive,
+      ).length,
       eligible: eligible.length,
       rejected: evaluated.length - eligible.length,
       strictCanonicalEligible: evaluated.filter(
@@ -257,8 +258,8 @@ export async function buildCanonicalOpportunityFeed({
       ).length,
       momentumRadar: momentumRadar.length,
     },
-    momentumRadar: momentumRadar.map(withDisplayQuote),
-    momentumContenders: momentumContenders.map(withDisplayQuote),
+    momentumRadar: momentumRadar.map(withDecisionQuote),
+    momentumContenders: momentumContenders.map(withDecisionQuote),
     ...(debug
       ? {
           rejectedSample: ranked
@@ -278,7 +279,7 @@ export async function buildCanonicalOpportunityFeed({
     ...(includeContinuation
       ? {
           continuationCandidates:
-            visibleContinuationCandidates.map(withDisplayQuote),
+            visibleContinuationCandidates.map(withDecisionQuote),
         }
       : {}),
     engineVersion: CANONICAL_OPPORTUNITY_VERSION,
