@@ -1,9 +1,11 @@
 "use client";
 
-import Link from "next/link";
+import { useRef, useState, type TouchEvent } from "react";
 import type { CryptoOpportunity } from "@/lib/crypto/contracts";
 import { useCryptoOpportunityFeed } from "@/app/hooks/useCryptoOpportunityFeed";
 import CryptoProxPulse from "@/app/components/crypto/CryptoProxPulse";
+
+const PULL_REFRESH_THRESHOLD = 64;
 
 const money = (value: number) => {
   const maximumFractionDigits =
@@ -210,40 +212,71 @@ function ContenderCard({
 
 export default function CryptoPage() {
   const { feed, error, loading, refresh } = useCryptoOpportunityFeed();
+  const touchStartY = useRef<number | null>(null);
+  const pullDistanceRef = useRef(0);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const updatePullDistance = (distance: number) => {
+    pullDistanceRef.current = distance;
+    setPullDistance(distance);
+  };
+
+  const handleTouchStart = (event: TouchEvent<HTMLElement>) => {
+    if (window.scrollY > 0 || refreshing || event.touches.length !== 1) return;
+    touchStartY.current = event.touches[0].clientY;
+  };
+
+  const handleTouchMove = (event: TouchEvent<HTMLElement>) => {
+    if (touchStartY.current === null || event.touches.length !== 1) return;
+    const rawDistance = event.touches[0].clientY - touchStartY.current;
+    updatePullDistance(Math.min(96, Math.max(0, rawDistance * 0.45)));
+  };
+
+  const handleTouchEnd = () => {
+    touchStartY.current = null;
+    if (pullDistanceRef.current < PULL_REFRESH_THRESHOLD || refreshing) {
+      updatePullDistance(0);
+      return;
+    }
+
+    setRefreshing(true);
+    updatePullDistance(48);
+    void refresh().finally(() => {
+      setRefreshing(false);
+      updatePullDistance(0);
+    });
+  };
 
   return (
-    <main className="min-h-screen bg-[#050606] text-white">
-      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/8 bg-[#0a0c0d]/90 px-5 py-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <Link href="/" className="text-xl font-black italic tracking-tight">
-                <span className="text-white">HT</span>
-                <span className="text-orange-500"> LABS</span>
-              </Link>
-              <span className="rounded-full border border-cyan-400/20 bg-cyan-500/[0.05] px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.14em] text-cyan-300">
-                Crypto Preview
-              </span>
-            </div>
-            <p className="mt-1 text-[10px] font-semibold text-zinc-600">
-              One public Coinbase score · multi-venue discovery remains shadow-only
-            </p>
-          </div>
-          <nav className="flex items-center gap-4 text-xs font-black text-zinc-500">
-            <Link href="/" className="transition hover:text-white">
-              Stocks
-            </Link>
-            <Link href="/scanner" className="transition hover:text-white">
-              Scanner
-            </Link>
-            <button
-              onClick={() => void refresh()}
-              className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.05] px-3 py-2 text-cyan-300"
-            >
-              Refresh
-            </button>
-          </nav>
-        </header>
+    <main
+      className="min-h-screen bg-[#050606] text-white"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+    >
+      <div
+        className="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top,0px)+0.55rem)] z-[550] flex -translate-x-1/2 items-center gap-2 rounded-full border border-cyan-400/20 bg-[#071014]/95 px-3 py-2 text-[9px] font-black uppercase tracking-[0.14em] text-cyan-300 shadow-xl backdrop-blur-xl transition-[opacity,transform] duration-200"
+        style={{
+          opacity: pullDistance > 4 || refreshing ? 1 : 0,
+          transform: `translate(-50%, ${Math.max(-52, pullDistance - 52)}px)`,
+        }}
+        role="status"
+        aria-live="polite"
+      >
+        <span className={refreshing ? "animate-spin text-sm" : "text-sm"}>↻</span>
+        {refreshing
+          ? "Refreshing crypto"
+          : pullDistance >= PULL_REFRESH_THRESHOLD
+            ? "Release to refresh"
+            : "Pull to refresh"}
+      </div>
+
+      <div
+        className="mx-auto max-w-7xl px-4 py-5 transition-transform duration-200 sm:px-6 lg:px-8"
+        style={{ transform: `translateY(${pullDistance * 0.18}px)` }}
+      >
 
         {loading && !feed ? (
           <div className="rounded-3xl border border-white/8 bg-white/[0.02] px-6 py-28 text-center">
