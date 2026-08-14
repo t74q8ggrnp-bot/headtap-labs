@@ -17,6 +17,7 @@ import OpportunityScorePanel from "./components/opportunity/OpportunityScorePane
 import MomentumContenders from "./components/opportunity/MomentumContenders";
 import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileExperience from "./components/mobile/MobileExperience";
+import { useMobileAppNavigation } from "./components/MobileAppNavigationContext";
 import CryptoMomentumPreview from "./components/crypto/CryptoMomentumPreview";
 import { supabase } from "@/lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
@@ -186,6 +187,7 @@ export default function HomeClient({
   initialCryptoFeed,
 }: HomeClientProps) {
   const searchParams = useSearchParams();
+  const { homeTab: mobileTab, setHomeTab: setMobileTab } = useMobileAppNavigation();
   // build: v150-canonical-frontend-authority
   // V70 command center cleanup: live tape/search/auth first, top conviction as hero, capital and portfolio below, old marketing hero hidden.
   // v106 pre-market stabilization pass: preserve identity, polish nav/search spacing, compress support metrics, and keep market-open usability stable.
@@ -294,7 +296,6 @@ export default function HomeClient({
     }
   };
   const [mobileTouchStart, setMobileTouchStart] = useState<number | null>(null);
-  const [mobileTab, setMobileTab] = useState<"home" | "convictions" | "scanner" | "watchlist" | "profile">("home");
 
   const {
     spotMomentum: apiMomentum,

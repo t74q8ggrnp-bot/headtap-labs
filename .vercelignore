@@ -2,3 +2,6 @@ copy file/
 copy file.zip
 app/lock-test/
 *.backup
+ios/
+capacitor-web/
+IOS_SETUP.md
