@@ -2,18 +2,26 @@ function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
 }
 
-export function getCanonicalMomentumMagnitude(candidate: { change: number }) {
-  // Spot Momentum is a leaderboard of the verified move from the previous
-  // close. The current-session move is valuable context, but blending it into
-  // this magnitude core diluted genuine +50–100% leaders whenever they traded
-  // slightly below the 9:30 open and double-counted smaller moves that were
-  // positive on both references. Session direction and ProX remain explicit
-  // context in the opportunity engine; they must not replace this anchor.
-  return clamp(Math.max(0, candidate.change) * 3);
+export function getCanonicalMomentumMagnitude(candidate: {
+  change: number;
+  activeSessionChangePercent?: number | null;
+  sessionReclaim?: boolean;
+}) {
+  const fullDayCore = clamp(Math.max(0, candidate.change) * 3);
+  const activeSessionChange = candidate.activeSessionChangePercent;
+  if (activeSessionChange === null || activeSessionChange === undefined) {
+    return fullDayCore;
+  }
+  const activeSessionCore = clamp(Math.max(0, activeSessionChange) * 3);
+  return candidate.sessionReclaim
+    ? activeSessionCore
+    : Math.round(fullDayCore * 0.45 + activeSessionCore * 0.55);
 }
 
 export function getSpotMomentumStrategyScore(input: {
   change: number;
+  activeSessionChangePercent?: number | null;
+  sessionReclaim?: boolean;
   breakoutScore: number;
   qualityScore: number;
   sessionAlignmentAdjustment: number;
@@ -21,6 +29,8 @@ export function getSpotMomentumStrategyScore(input: {
 }) {
   const magnitudeCore = getCanonicalMomentumMagnitude({
     change: input.change,
+    activeSessionChangePercent: input.activeSessionChangePercent,
+    sessionReclaim: input.sessionReclaim,
   });
   const baseScore = Math.round(
     magnitudeCore * 0.5 +

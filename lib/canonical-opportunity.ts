@@ -15,7 +15,7 @@ import { evaluateProxPublicAuthority } from "@/lib/prox/public-authority";
 export { getCanonicalMomentumMagnitude } from "@/lib/canonical-momentum";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v13-prox-session-recovery";
+  "opportunities-v14-restored-fused-momentum";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -492,7 +492,11 @@ export function evaluateCanonicalOpportunity(
   const momentumReferenceChange = getMomentumReferenceChange(candidate);
   const activeSessionChange = getActiveSessionChange(candidate);
   const canonicalMomentumMagnitude =
-    getCanonicalMomentumMagnitude(candidate);
+    getCanonicalMomentumMagnitude({
+      change: candidate.change,
+      activeSessionChangePercent: activeSessionChange,
+      sessionReclaim,
+    });
   const rawConfirmedRunner = isConfirmedContinuationRunner(candidate, strategy);
   const pulse = proxIntelligence?.pulse;
   const sessionPeakPullback = candidate.pullbackFromSessionHighPercent;
@@ -707,6 +711,8 @@ export function evaluateCanonicalOpportunity(
     strategy === "spot_momentum"
       ? getSpotMomentumStrategyScore({
           change: candidate.change,
+          activeSessionChangePercent: activeSessionChange,
+          sessionReclaim,
           breakoutScore: breakout.score,
           qualityScore,
           sessionAlignmentAdjustment,

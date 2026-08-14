@@ -45,3 +45,26 @@ test("today's stronger qualified leaders outrank the smaller aligned move", () =
   assert.equal(limn, 88);
   assert.ok(dfsc > limn && limn > nmtc);
 });
+
+test("market-open ranking fuses the full-day move with current-session participation", () => {
+  const boxl = getSpotMomentumStrategyScore({
+    change: 28.62,
+    activeSessionChangePercent: 14.89,
+    breakoutScore: 77,
+    qualityScore: 75,
+    sessionAlignmentAdjustment: 4,
+    proxMarketAdjustment: 0,
+  });
+  const weto = getSpotMomentumStrategyScore({
+    change: 183.66,
+    activeSessionChangePercent: 173.07,
+    breakoutScore: 72,
+    qualityScore: 80,
+    sessionAlignmentAdjustment: 4,
+    proxMarketAdjustment: -12,
+  });
+
+  assert.equal(boxl, 74);
+  assert.equal(weto, 79);
+  assert.ok(weto > boxl);
+});
