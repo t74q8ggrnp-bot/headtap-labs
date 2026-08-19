@@ -134,12 +134,22 @@ export function scoreCryptoOpportunity(
     volume24h: rounded(volume24h),
     dollarVolume24h: rounded(dollarVolume),
     relativeVolume: rounded(relativeVolume),
+    baseOpportunityScore: opportunityScore,
     opportunityScore,
     proxIntelligence: null,
     riskScore: Math.round(riskScore),
     pulseState: pulse,
     eligible,
     radarEligible,
+    decisionState: eligible ? "qualified" : radarEligible ? "radar" : "withheld",
+    decisionReason: eligible
+      ? "The 24-hour discovery setup clears the base market-data gates."
+      : "One or more 24-hour discovery gates remains incomplete.",
+    authorityFlags: [],
+    sourceVenues: ["coinbase"],
+    quoteCurrencies: ["USD"],
+    venueConfirmationScore: 0,
+    liveDataFresh: false,
     stage,
     summary: eligible
       ? `${snapshot.symbol} combines positive 24-hour momentum, above-threshold liquidity, volume participation, and acceptable peak retention.`

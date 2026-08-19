@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { buildCryptoOpportunityFeed } from "@/lib/crypto/coinbase-public";
+import { buildFreshCryptoOpportunityFeedState } from "@/lib/crypto/coinbase-public";
+import { loadLatestCryptoDecisionFeed } from "@/lib/crypto/decision-frame";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET() {
   try {
-    const feed = await buildCryptoOpportunityFeed();
+    const feed = await loadLatestCryptoDecisionFeed() ??
+      (await buildFreshCryptoOpportunityFeedState()).feed;
     return NextResponse.json({
       success: true,
       publicScoreAuthority: feed.provider,

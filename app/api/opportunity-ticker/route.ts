@@ -16,6 +16,10 @@ import {
   loadOpportunityDisplayQuotes,
 } from "@/lib/opportunity-display-quotes";
 import { applyOpportunityDecisionQuote } from "@/lib/opportunity-decision-quote";
+import {
+  findOpportunityInDecisionFrame,
+  getRollingCanonicalDecisionFrame,
+} from "@/lib/canonical-decision-frame";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -126,6 +130,72 @@ export async function GET(req: Request) {
       candidate,
       requestedStrategy,
     );
+    const preferredFrameType = strategy === "spot_momentum"
+      ? "momentum" as const
+      : "before_crowd" as const;
+    let decisionFrame = await getRollingCanonicalDecisionFrame(
+      preferredFrameType,
+    );
+    let framedOpportunity = findOpportunityInDecisionFrame(
+      decisionFrame,
+      ticker,
+    ) as ReturnType<typeof evaluateCanonicalOpportunity> | null;
+    if (!framedOpportunity && !requestedStrategy) {
+      const alternateFrame = await getRollingCanonicalDecisionFrame(
+        preferredFrameType === "momentum" ? "before_crowd" : "momentum",
+      );
+      const alternateOpportunity = findOpportunityInDecisionFrame(
+        alternateFrame,
+        ticker,
+      ) as ReturnType<typeof evaluateCanonicalOpportunity> | null;
+      if (alternateOpportunity) {
+        decisionFrame = alternateFrame;
+        framedOpportunity = alternateOpportunity;
+      }
+    }
+    if (framedOpportunity) {
+      const framedFramework = framedOpportunity.tradeFramework;
+      const framedEligibility = framedOpportunity.displayEligibility;
+      if (mode === "explain") {
+        return NextResponse.json({
+          ticker,
+          explanation: {
+            summary: framedOpportunity.whyItMatters,
+            whatChanged: framedOpportunity.whatChanged,
+            riskNote: framedOpportunity.riskNote,
+            stage: `${framedOpportunity.stageEmoji} ${framedOpportunity.stage}`,
+            confidence: `${framedOpportunity.confidence}% confidence`,
+            signals: framedOpportunity.signals,
+            eligibility: framedEligibility.eligible,
+            rejectionReasons: framedEligibility.reasons,
+            dataQualityWarnings: framedOpportunity.rejectionReasons,
+            strategy: framedOpportunity.strategy,
+            tier: framedOpportunity.tier,
+            explosionAssessment: framedOpportunity.explosionAssessment,
+            proxIntelligence: framedOpportunity.proxIntelligence,
+            verdict: framedEligibility.eligible
+              ? `HT currently classifies ${ticker} as a ${framedOpportunity.tier} opportunity for ${framedOpportunity.strategy}.`
+              : `HT is monitoring ${ticker}, but it does not currently pass the complete opportunity gate.`,
+          },
+          tradeFramework: framedFramework,
+          decisionFrame: decisionFrame.decisionFrame,
+          engineVersion: CANONICAL_OPPORTUNITY_VERSION,
+          sourceTable: "rolling_canonical_decision_frame",
+          sourceRunId: framedOpportunity.sourceRunId,
+        });
+      }
+
+      return NextResponse.json({
+        ticker,
+        opportunity: framedOpportunity,
+        scannedAt: framedOpportunity.scannedAt,
+        sourceTable: "rolling_canonical_decision_frame",
+        sourceRunId: framedOpportunity.sourceRunId,
+        latestSignalAt: framedOpportunity.scannedAt,
+        decisionFrame: decisionFrame.decisionFrame,
+        engineVersion: CANONICAL_OPPORTUNITY_VERSION,
+      });
+    }
     const framework = await getTradeFramework(
       supabase,
       ticker,

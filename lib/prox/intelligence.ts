@@ -373,7 +373,7 @@ function buildPacket(args: {
           freshness * 0.2 -
           contradictionRisk * 0.5,
       )
-    : 0;
+    : marketConfirmation;
 
   const supportFlags: string[] = [];
   const riskFlags: string[] = [];

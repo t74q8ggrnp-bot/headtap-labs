@@ -22,6 +22,7 @@ import {
   MOMENTUM_RADAR_COUNT,
   MOMENTUM_RUNNER_UP_COUNT,
 } from "@/lib/opportunity-model";
+import { selectOverallMomentumContenders } from "@/lib/momentum-contender-ranking";
 
 const CONCURRENCY = 20;
 const RUN_ROW_PAGE_SIZE = 1_000;
@@ -209,7 +210,7 @@ export async function buildCanonicalOpportunityFeed({
         (left.explosionAssessment.paperTradeScore ?? 0),
     )
     .slice(0, 10);
-  const momentumRadar =
+  const rankedMomentumRadar =
     strategy === "spot_momentum"
       ? evaluated
           .filter((candidate) => candidate.momentumRadarEligible)
@@ -219,14 +220,24 @@ export async function buildCanonicalOpportunityFeed({
               right.relativeVolume - left.relativeVolume ||
               right.signalStrength - left.signalStrength,
           )
-          .slice(0, MOMENTUM_RADAR_COUNT)
       : [];
 
   const visibleOpportunities = eligible.slice(0, limit);
   const momentumContenders =
     strategy === "spot_momentum"
-      ? visibleOpportunities.slice(1, MOMENTUM_RUNNER_UP_COUNT + 1)
+      ? selectOverallMomentumContenders(
+          eligible[0],
+          eligible.slice(1),
+          rankedMomentumRadar,
+          MOMENTUM_RUNNER_UP_COUNT,
+        )
       : [];
+  const contenderTickers = new Set(
+    momentumContenders.map((candidate) => candidate.ticker),
+  );
+  const momentumRadar = rankedMomentumRadar
+    .filter((candidate) => !contenderTickers.has(candidate.ticker))
+    .slice(0, MOMENTUM_RADAR_COUNT);
   const visibleContinuationCandidates = continuationCandidates;
   const withDecisionQuote = <T extends (typeof evaluated)[number]>(candidate: T) =>
     attachOpportunityDisplayQuote(candidate, decisionQuotes);

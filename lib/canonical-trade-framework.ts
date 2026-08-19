@@ -4,8 +4,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
-const FRAMEWORK_VERSION = "ctf-v4-honest-price-discovery";
-const FEATURE_VERSION = 4;
+const FRAMEWORK_VERSION = "ctf-v5-stable-history-zones";
+const FEATURE_VERSION = 5;
 const CACHE_TTL_MINUTES = 45;
 // Absolute floor to compute anything at all. Below this there just isn't
 // enough price history to derive a true range or a return series.
@@ -60,6 +60,9 @@ type CachedFeaturePayload = {
   bars: DailyBar[];
   newestBarAt: string | null;
 };
+
+const HISTORICAL_RESISTANCE_PRICE_BUFFER_PERCENT = 2;
+const HISTORICAL_RESISTANCE_ATR_BUFFER_FRACTION = 0.25;
 
 function round(value: number, digits = 2): number {
   const factor = 10 ** digits;
@@ -125,13 +128,46 @@ function computeVolatility20d(bars: DailyBar[]): number {
   return round(Math.sqrt(variance) * 100, 2);
 }
 
-function computeNearestSupportResistance(bars: DailyBar[], currentPrice: number, atr14: number) {
+export function excludeIncompleteEasternSessionBar(
+  bars: DailyBar[],
+  now = new Date(),
+) {
+  const easternTradingDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  return bars.filter((bar) => {
+    const barDate = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(bar.t));
+    return barDate < easternTradingDate;
+  });
+}
+
+export function computeMeaningfulSupportResistance(
+  bars: DailyBar[],
+  currentPrice: number,
+  atr14: number,
+) {
   const last20 = bars.slice(-20);
   const supports = last20.flatMap((bar) => [bar.l, bar.c])
     .filter((value) => Number.isFinite(value) && value > 0 && value < currentPrice)
     .sort((a, b) => b - a);
+  const resistanceBuffer = Math.max(
+    currentPrice * (HISTORICAL_RESISTANCE_PRICE_BUFFER_PERCENT / 100),
+    atr14 * HISTORICAL_RESISTANCE_ATR_BUFFER_FRACTION,
+  );
   const resistances = last20.flatMap((bar) => [bar.h, bar.c])
-    .filter((value) => Number.isFinite(value) && value > currentPrice)
+    .filter(
+      (value) =>
+        Number.isFinite(value) &&
+        value > currentPrice + resistanceBuffer,
+    )
     .sort((a, b) => a - b);
   const supportFallback = Math.max(0.01, currentPrice - Math.max(atr14, currentPrice * 0.05));
   const resistanceFallback = currentPrice + Math.max(atr14, currentPrice * 0.05);
@@ -215,7 +251,7 @@ function computeFramework(
     };
   }
 
-  const { support, resistance, hasKnownResistance } = computeNearestSupportResistance(
+  const { support, resistance, hasKnownResistance } = computeMeaningfulSupportResistance(
     payload.bars,
     price,
     payload.atr14,
@@ -386,17 +422,23 @@ export async function getTradeFramework(
     };
   }
 
+  const completedBars = excludeIncompleteEasternSessionBar(fresh.bars, now);
   const payload: CachedFeaturePayload = {
-    atr14: fresh.atr14, volatility20d: fresh.volatility20d,
-    bars: fresh.bars, newestBarAt: fresh.newestBarAt,
+    atr14: computeATR14(completedBars),
+    volatility20d: computeVolatility20d(completedBars),
+    bars: completedBars,
+    newestBarAt: completedBars.at(-1)?.t
+      ? new Date(completedBars.at(-1)!.t).toISOString()
+      : null,
   };
-  const quality = fresh.barCount >= SEASONED_BAR_COUNT
+  const completedBarCount = completedBars.length;
+  const quality = completedBarCount >= SEASONED_BAR_COUNT
     ? "fresh"
-    : fresh.barCount >= MIN_BARS_HARD_FLOOR ? "stale_but_usable" : "insufficient";
+    : completedBarCount >= MIN_BARS_HARD_FLOOR ? "stale_but_usable" : "insufficient";
   const { error: cacheWriteError } = await supabase.from("ht_feature_cache").upsert({
     ticker: normalizedTicker, feature_name: "trade_framework", feature_version: FEATURE_VERSION,
-    calculated_value: payload, bar_count: fresh.barCount, data_quality_state: quality,
-    calculated_at: now.toISOString(), source_last_updated_at: fresh.newestBarAt,
+    calculated_value: payload, bar_count: completedBarCount, data_quality_state: quality,
+    calculated_at: now.toISOString(), source_last_updated_at: payload.newestBarAt,
     expires_at: expiresAt, error_state: null,
   }, { onConflict: "ticker,feature_name,feature_version" });
   if (cacheWriteError) console.error("[trade-framework] cache write failed:", cacheWriteError.message);

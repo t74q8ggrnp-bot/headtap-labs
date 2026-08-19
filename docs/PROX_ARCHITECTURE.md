@@ -1,14 +1,19 @@
 # Pro X — architecture and scope (Phase 1 foundation)
 
+> **Governing doctrine:** Read `docs/PROX_GUIDE.md` before changing this
+> subsystem. This file preserves the implementation history and phased
+> architecture. If the two documents conflict, `docs/PROX_GUIDE.md` governs.
+
 ## What Pro X is
 
 Pro X discovers and investigates. It observes external events (SEC filings
-first, more sources later) and market activity, verifies evidence, and
-eventually hands a candidate package to the canonical HT Labs engine. **Pro X
-never decides eligibility, scoring, or tier — that authority stays entirely
-with `app/api/opportunities/route.ts` and the rest of the canonical pipeline.**
-This is the same non-negotiable rule the rest of the product already
-follows (see `docs/ARCHITECTURE.md`), applied to a new subsystem.
+first, more sources later) and market activity, verifies evidence, and hands
+evidence to the canonical HT Labs engine. Public eligibility, scoring, and
+tier authority currently stay with `app/api/opportunities/route.ts` and the
+rest of the canonical pipeline. ProX may maintain a separately versioned,
+independent **shadow-only** decision board under `docs/PROX_GUIDE.md`, but that
+board has no public or execution authority unless a later measured promotion
+is explicitly approved.
 
 ## What's built in this pass, and what isn't
 
@@ -244,3 +249,51 @@ ambiguous cases), 5 (richer contradiction/rumor/recycled-news scoring), 6
 Realtime beyond the current opportunity-card pulse), 8 (outcome
 calibration), and 9 (heartbeats, dead-letter queues, kill switch, cost
 limits) remain deliberate future phases. No Pro X execution authority exists.
+
+## Update — security-type research lanes
+
+Migration `0017_prox_security_type_routing.sql`,
+`lib/prox/security-routing.ts`, and direct-market discovery v2 replace ProX's
+implicit all-instrument research pool with explicit lanes. Verified common
+shares and ADR common shares are the only opportunity-learning instruments;
+funds and indexes remain market context; warrants, rights, and units remain
+linked-instrument context; incompatible structures are excluded; and missing
+or new provider codes remain pending verification. Auxiliary lanes have hard
+capacity limits so they cannot crowd common equities out of the direct-research
+receipt. Outcome Memory v2 starts a clean equity-only learning cohort rather
+than allowing v1's mixed instrument history to influence later calibration.
+
+This changes neither canonical HT security eligibility nor public ranking.
+Security type routes evidence and contributes zero points to ProX Edge Score.
+
+## Update — independent Market Structure Brain and shadow board
+
+Migration `0018_prox_market_structure_shadow_board.sql`,
+`lib/prox/market-structure.ts`, `lib/prox/edge-score.ts`,
+`lib/prox/shadow-board.ts`, and `app/api/prox-shadow-board/route.ts` implement
+the first independent ProX decision frame described by the governing guide:
+
+- The source universe is the independently created, security-routed ProX
+  discovery run. It is not the canonical hero, contender list, or eligibility
+  set.
+- Adjusted daily Polygon bars and current-session minute bars produce ProX's
+  own ATR, support, swing, VWAP, invalidation, resistance, Price Discovery,
+  continuation-capacity, R/R, extension, and post-peak-failure assessment.
+- The Edge Score uses the frozen 60% continuation, 30% asymmetry, 10% evidence
+  contract with explicit risk penalties. Its continuation evidence includes
+  a bounded two-clock view of prior-close movement and current-session
+  participation.
+- Runtime guards reject canonical scores, ranks, roles, eligibility,
+  frameworks, targets, and R/R fields before scoring. The run receipt also
+  records an empty canonical-input list, and system health verifies it.
+- Each deeply evaluated candidate receives exactly one selected, blocked, or
+  rejected disposition. A frame may have one hero and up to five contenders;
+  it is valid to have no hero when no entry qualifies.
+- Score, price, rank, disposition, evidence, and reasons share one atomic
+  decision timestamp. A run is not healthy until persisted member coverage is
+  complete and its formula and ranks recompute correctly.
+
+This board is append-only shadow research. It is not read by the public UI or
+canonical ranking and has no trading authority. The former canonical-inline
+challenger is disabled; `prox-post-decision-comparison-v2` can compare two
+already completed independent answers but cannot manufacture a ProX answer.

@@ -4,6 +4,8 @@ import { SECURITY_TYPE_POLICY, detectLeverage } from "@/lib/security-type-policy
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const DEFAULT_STALE_HOURS = 24;
 const DEFAULT_CONCURRENCY = 25;
+const SECURITY_TYPE_REGISTRY_ENDPOINT =
+  "https://api.polygon.io/v3/reference/tickers/types";
 
 export type SecurityMetadataRow = {
   ticker: string;
@@ -21,6 +23,21 @@ export type SecurityMetadataResult = {
   cacheHits: number;
   fetched: number;
   fetchFailures: number;
+};
+
+export type SecurityTypeRegistryRow = {
+  security_type: string;
+  asset_class: string | null;
+  locale: string | null;
+  description: string | null;
+  fetched_at: string;
+};
+
+export type SecurityTypeRegistryResult = {
+  rows: SecurityTypeRegistryRow[];
+  source: "cache" | "provider" | "unavailable";
+  fetchedAt: string | null;
+  providerError: string | null;
 };
 
 async function fetchMetadata(ticker: string): Promise<SecurityMetadataRow> {
@@ -100,4 +117,93 @@ export async function loadSecurityMetadata(
   }
 
   return { byTicker, cacheHits, fetched: newRows.length, fetchFailures };
+}
+
+export async function loadSecurityTypeRegistry(
+  supabase: SupabaseClient,
+  options: { staleHours?: number } = {},
+): Promise<SecurityTypeRegistryResult> {
+  const { data: cachedRows, error: cacheError } = await supabase
+    .from("ht_security_type_registry")
+    .select("security_type,asset_class,locale,description,fetched_at")
+    .order("security_type", { ascending: true });
+  if (cacheError) {
+    throw new Error(`Security type registry cache read failed: ${cacheError.message}`);
+  }
+  const cached = (cachedRows ?? []) as SecurityTypeRegistryRow[];
+  const newestFetch = cached.reduce((latest, row) => {
+    const timestamp = new Date(row.fetched_at).getTime();
+    return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+  }, 0);
+  const staleCutoff =
+    Date.now() - (options.staleHours ?? DEFAULT_STALE_HOURS) * 60 * 60 * 1000;
+  if (cached.length > 0 && newestFetch >= staleCutoff) {
+    return {
+      rows: cached,
+      source: "cache",
+      fetchedAt: new Date(newestFetch).toISOString(),
+      providerError: null,
+    };
+  }
+
+  try {
+    if (!POLYGON_KEY) throw new Error("Missing POLYGON_API_KEY.");
+    const params = new URLSearchParams({
+      asset_class: "stocks",
+      locale: "us",
+      apiKey: POLYGON_KEY,
+    });
+    const response = await fetch(
+      `${SECURITY_TYPE_REGISTRY_ENDPOINT}?${params.toString()}`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) {
+      throw new Error(`Polygon security type registry failed: ${response.status}`);
+    }
+    type ProviderType = {
+        code?: unknown;
+        asset_class?: unknown;
+        locale?: unknown;
+        description?: unknown;
+    };
+    const payload = (await response.json()) as {
+      results?: ProviderType | ProviderType[];
+    };
+    const fetchedAt = new Date().toISOString();
+    const providerRows = Array.isArray(payload.results)
+      ? payload.results
+      : payload.results
+        ? [payload.results]
+        : [];
+    const rows = providerRows.flatMap((result) => {
+      const securityType = String(result.code ?? "").trim().toUpperCase();
+      if (!securityType) return [];
+      return [{
+        security_type: securityType,
+        asset_class:
+          typeof result.asset_class === "string" ? result.asset_class : null,
+        locale: typeof result.locale === "string" ? result.locale : null,
+        description:
+          typeof result.description === "string" ? result.description : null,
+        fetched_at: fetchedAt,
+      } satisfies SecurityTypeRegistryRow];
+    });
+    if (rows.length === 0) {
+      throw new Error("Polygon security type registry returned no rows.");
+    }
+    const { error: writeError } = await supabase
+      .from("ht_security_type_registry")
+      .upsert(rows, { onConflict: "security_type" });
+    if (writeError) {
+      throw new Error(`Security type registry cache write failed: ${writeError.message}`);
+    }
+    return { rows, source: "provider", fetchedAt, providerError: null };
+  } catch (error: unknown) {
+    return {
+      rows: cached,
+      source: cached.length > 0 ? "cache" : "unavailable",
+      fetchedAt: newestFetch > 0 ? new Date(newestFetch).toISOString() : null,
+      providerError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }

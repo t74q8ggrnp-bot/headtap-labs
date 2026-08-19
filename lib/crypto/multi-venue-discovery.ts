@@ -7,22 +7,12 @@ import type {
   CryptoOpportunity,
   CryptoShadowDiscovery,
 } from "@/lib/crypto/contracts";
+import { isAllowedMainstreamCryptoAsset } from "@/lib/crypto/asset-policy";
 
 const KRAKEN_ORIGIN = "https://api.kraken.com";
 const CRYPTO_COM_ORIGIN = "https://api.crypto.com/exchange/v1";
 const COINGECKO_ORIGIN = "https://api.coingecko.com/api/v3";
 const DISCOVERY_CANDIDATE_LIMIT = 25;
-const STABLE_ASSETS = new Set([
-  "DAI",
-  "EURC",
-  "GUSD",
-  "PAX",
-  "PYUSD",
-  "USDC",
-  "USDP",
-  "USDS",
-  "USDT",
-]);
 const USD_EQUIVALENT_QUOTES = new Set([
   "USD",
   "USDC",
@@ -257,7 +247,7 @@ async function loadKrakenMarkets(): Promise<VenueLoadResult> {
         !ticker ||
         !symbol ||
         !SUPPORTED_QUOTES.has(quoteCurrency) ||
-        STABLE_ASSETS.has(symbol)
+        !isAllowedMainstreamCryptoAsset(symbol)
       ) {
         return [];
       }
@@ -337,7 +327,7 @@ async function loadCryptoComMarkets(): Promise<VenueLoadResult> {
         !productId ||
         !symbol ||
         !SUPPORTED_QUOTES.has(quoteCurrency) ||
-        STABLE_ASSETS.has(symbol)
+        !isAllowedMainstreamCryptoAsset(symbol)
       ) {
         return [];
       }
@@ -517,6 +507,35 @@ function normalizeVenueMarkets(markets: RawVenueMarket[]) {
   return normalized;
 }
 
+export function selectCryptoDiscoverySeedSymbols(
+  sources: CryptoDiscoverySources,
+  limit = 30,
+) {
+  const normalized = normalizeVenueMarkets(
+    sources.venues.flatMap((result) => result.markets),
+  );
+  const bySymbol = new Map<string, { movement: number; liquidity: number }>();
+  for (const market of normalized) {
+    if (!isAllowedMainstreamCryptoAsset(market.symbol)) continue;
+    const current = bySymbol.get(market.symbol) ?? {
+      movement: -Infinity,
+      liquidity: 0,
+    };
+    current.movement = Math.max(current.movement, market.observedMovePercent);
+    current.liquidity += market.dollarVolume;
+    bySymbol.set(market.symbol, current);
+  }
+  return [...bySymbol.entries()]
+    .filter(([, value]) => value.movement >= 0.5 && value.liquidity >= 250_000)
+    .sort(
+      ([, left], [, right]) =>
+        right.movement - left.movement ||
+        right.liquidity - left.liquidity,
+    )
+    .slice(0, Math.max(0, limit))
+    .map(([symbol]) => symbol);
+}
+
 function chooseOneMarketPerVenue(markets: NormalizedVenueMarket[]) {
   const selected = new Map<CryptoDiscoveryVenue, NormalizedVenueMarket>();
   for (const market of markets) {
@@ -563,6 +582,7 @@ export function buildCryptoShadowDiscovery({
   }
   const attentionBySymbol = buildAttentionMap(sources.attention.items);
   const assets = [...bySymbol.entries()].flatMap(([symbol, markets]) => {
+    if (!isAllowedMainstreamCryptoAsset(symbol)) return [];
     const selectedMarkets = chooseOneMarketPerVenue(markets);
     if (selectedMarkets.length === 0) return [];
     const primary = [...selectedMarkets].sort(
@@ -648,8 +668,18 @@ export function buildCryptoShadowDiscovery({
           (confirmingVenues >= 2 && observedMovePercent >= 0.5)
         ),
     );
+    const identityVenueOrder: Record<CryptoDiscoveryVenue, number> = {
+      coinbase: 0,
+      kraken: 1,
+      crypto_com: 2,
+    };
+    const identityMarket = [...selectedMarkets].sort(
+      (left, right) =>
+        identityVenueOrder[left.venue] - identityVenueOrder[right.venue] ||
+        left.productId.localeCompare(right.productId),
+    )[0];
     return [{
-      assetId: `crypto:${symbol}`,
+      assetId: `crypto:${identityMarket.venue}:${identityMarket.productId.toLowerCase()}`,
       symbol,
       entryPriceUsd: primary.priceUsd,
       observedMovePercent,
@@ -751,9 +781,9 @@ export function buildCryptoShadowDiscovery({
 
   return {
     packet: {
-      version: "crypto-multivenue-discovery-v1",
-      mode: "shadow",
-      authority: "none",
+      version: "crypto-multivenue-discovery-v2",
+      mode: "confirmation",
+      authority: "bounded_confirmation",
       generatedAt: now.toISOString(),
       candidates: ranked,
       diagnostics: {

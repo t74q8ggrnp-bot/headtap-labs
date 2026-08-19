@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buildCanonicalOpportunityFeed } from "@/lib/canonical-opportunity-feed";
 import { getErrorMessage } from "@/lib/error-message";
+import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
 import {
   MOMENTUM_RADAR_COUNT,
   MOMENTUM_RUNNER_UP_COUNT,
@@ -53,6 +53,7 @@ type OpportunitySnapshot = {
     pulse?: { state?: unknown } | null;
     scores?: { marketConfirmation?: unknown } | null;
   } | null;
+  proxChallenger?: unknown;
 };
 type DisplayedOpportunity = {
   ticker: string;
@@ -67,6 +68,15 @@ type DisplayedOpportunity = {
   proxState: string | null;
   proxConfirmation: number | null;
   decisionSnapshot: Record<string, unknown>;
+};
+type DecisionFrameSnapshot = {
+  version?: unknown;
+  decisionAsOf?: unknown;
+  freshUntil?: unknown;
+  ageSeconds?: unknown;
+  maxAgeSeconds?: unknown;
+  fresh?: unknown;
+  staleCacheBypassed?: unknown;
 };
 type LedgerRow = {
   id: string;
@@ -181,6 +191,7 @@ function compactDecisionSnapshot(opportunity: OpportunitySnapshot) {
             : [],
         }
       : null,
+    proxChallenger: opportunity.proxChallenger ?? null,
   };
 }
 
@@ -189,6 +200,7 @@ function mapDisplayed(
   role: DisplayRole,
   rank: number,
   strategy: LedgerStrategy,
+  decisionFrame: DecisionFrameSnapshot | null,
 ): DisplayedOpportunity | null {
   const ticker = String(opportunity.ticker ?? "").trim().toUpperCase();
   const price =
@@ -216,7 +228,10 @@ function mapDisplayed(
     proxConfirmation: finiteNumber(
       opportunity.proxIntelligence?.scores?.marketConfirmation,
     ),
-    decisionSnapshot: compactDecisionSnapshot(opportunity),
+    decisionSnapshot: {
+      ...compactDecisionSnapshot(opportunity),
+      decisionFrame,
+    },
   };
 }
 
@@ -229,6 +244,7 @@ function selectDisplayed(
         opportunities?: unknown;
         momentumContenders?: unknown;
         momentumRadar?: unknown;
+        decisionFrame?: DecisionFrameSnapshot;
       }
     : {};
   const strict = Array.isArray(source.opportunities)
@@ -269,6 +285,7 @@ function selectDisplayed(
       role,
       selected.length + 1,
       strategy,
+      source.decisionFrame ?? null,
     );
     if (!mapped || seen.has(mapped.ticker)) continue;
     seen.add(mapped.ticker);
@@ -329,14 +346,8 @@ async function collect() {
   ).toISOString();
   const tradingDate = easternDateString(now);
   const [spotMomentumFeed, beforeCrowdFeed] = await Promise.all([
-    buildCanonicalOpportunityFeed({
-      requestedType: "momentum",
-      limit: 100,
-    }),
-    buildCanonicalOpportunityFeed({
-      requestedType: "before_crowd",
-      limit: 100,
-    }),
+    getRollingCanonicalDecisionFrame("momentum"),
+    getRollingCanonicalDecisionFrame("before_crowd"),
   ]);
   const displayedByStrategy = {
     spot_momentum: selectDisplayed(spotMomentumFeed, "spot_momentum"),

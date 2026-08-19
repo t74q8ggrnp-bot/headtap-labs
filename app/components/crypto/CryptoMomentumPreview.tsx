@@ -36,7 +36,7 @@ export default function CryptoMomentumPreview({
               24/7 Crypto Momentum
             </p>
             <p className="mt-0.5 text-[9px] font-semibold text-zinc-600">
-              One Coinbase score · multi-venue shadow discovery
+              One HT score · centralized-exchange discovery · ProX confirmed
             </p>
           </div>
         </div>
@@ -119,7 +119,7 @@ export default function CryptoMomentumPreview({
               <p className="text-[9px] font-black uppercase tracking-[0.17em] text-zinc-600">
                 Other contenders
               </p>
-              <p className="text-[8px] font-semibold text-zinc-700">Same scan · same score</p>
+              <p className="text-[8px] font-semibold text-zinc-700">Same atomic decision</p>
             </div>
             <div className="space-y-1.5">
               {contenders.map((opportunity, index) => (

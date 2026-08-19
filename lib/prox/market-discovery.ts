@@ -1,5 +1,5 @@
 export const PROX_MARKET_DISCOVERY_VERSION =
-  "prox-market-discovery-v1-direct-polygon";
+  "prox-market-discovery-v2-security-routed";
 export const PROX_MARKET_DISCOVERY_MODE = "shadow_research" as const;
 
 export type ProxMarketSession =

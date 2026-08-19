@@ -1,5 +1,6 @@
 export type MarketStock = {
   symbol: string;
+  opportunityStrategy?: "spot_momentum" | "before_the_crowd";
   price: number;
   change: number;
   volume?: number;

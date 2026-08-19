@@ -3,8 +3,8 @@ import type {
   CryptoProxPacket,
 } from "@/lib/crypto/contracts";
 
-export const CRYPTO_PROX_VERSION = "crypto-prox-v1" as const;
-export const CRYPTO_PROX_MODE = "shadow" as const;
+export const CRYPTO_PROX_VERSION = "crypto-prox-v2" as const;
+export const CRYPTO_PROX_MODE = "bounded_authority" as const;
 
 export type CryptoMinuteCandle = {
   time: number;
@@ -330,9 +330,9 @@ export function buildCryptoProxPacket({
       },
       {
         factor: "score_authority",
-        value: "shadow",
+        value: "bounded_authority",
         impact: "neutral",
-        reason: "The proposed score adjustment is persisted for calibration but cannot alter the public crypto ranking yet.",
+        reason: "The live-tape adjustment may refine the single HT Crypto score, while deterministic freshness and quality gates control promotion.",
       },
     ],
   };

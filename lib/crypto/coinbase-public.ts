@@ -19,24 +19,19 @@ import {
 import {
   buildCryptoShadowDiscovery,
   loadCryptoDiscoverySources,
+  selectCryptoDiscoverySeedSymbols,
 } from "@/lib/crypto/multi-venue-discovery";
+import { isAllowedMainstreamCryptoAsset } from "@/lib/crypto/asset-policy";
+import {
+  applyCryptoDecisionAuthority,
+  rankCryptoDecisionFrame,
+} from "@/lib/crypto/decision-authority";
 
 const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
 const PROVIDER_BATCH_SIZE = 8;
 const PROX_BATCH_SIZE = 6;
-const PROX_SHORTLIST_LIMIT = 20;
+const PROX_SHORTLIST_LIMIT = 30;
 const SHORTLIST_LIMIT = 80;
-const STABLE_BASE_ASSETS = new Set([
-  "DAI",
-  "EURC",
-  "GUSD",
-  "PAX",
-  "PYUSD",
-  "USDC",
-  "USDP",
-  "USDS",
-  "USDT",
-]);
 const LIQUIDITY_ANCHORS = [
   "BTC",
   "ETH",
@@ -216,6 +211,7 @@ async function loadCryptoProxPackets(opportunities: CryptoOpportunity[]) {
 function selectProducts(
   products: CoinbaseProduct[],
   volumes: CoinbaseVolume[],
+  discoverySymbols: string[],
 ) {
   const available = new Map(
     products.flatMap((product) => {
@@ -233,7 +229,7 @@ function selectProducts(
         product.limit_only !== true &&
         product.auction_mode !== true &&
         product.fx_stablecoin !== true &&
-        !STABLE_BASE_ASSETS.has(symbol);
+        isAllowedMainstreamCryptoAsset(symbol);
       return isAvailable ? [[id, { id, symbol }] as const] : [];
     }),
   );
@@ -267,6 +263,9 @@ function selectProducts(
   for (const symbol of LIQUIDITY_ANCHORS) {
     add(rankedVolumes.find((item) => item.symbol === symbol));
   }
+  for (const symbol of discoverySymbols) {
+    add(rankedVolumes.find((item) => item.symbol === symbol));
+  }
   [...rankedVolumes]
     .sort((left, right) => right.relativeVolume - left.relativeVolume)
     .slice(0, 40)
@@ -288,12 +287,17 @@ export type CryptoOpportunityFeedState = {
 };
 
 async function buildUncachedCryptoOpportunityFeedState(): Promise<CryptoOpportunityFeedState> {
-  const discoverySourcesPromise = loadCryptoDiscoverySources();
-  const [products, volumes] = await Promise.all([
+  const [products, volumes, discoverySources] = await Promise.all([
     fetchCoinbase<CoinbaseProduct[]>("/products", 300),
     fetchCoinbase<CoinbaseVolume[]>("/products/volume-summary", 60),
+    loadCryptoDiscoverySources(),
   ]);
-  const { availableCount, selected } = selectProducts(products, volumes);
+  const discoverySymbols = selectCryptoDiscoverySeedSymbols(discoverySources);
+  const { availableCount, selected } = selectProducts(
+    products,
+    volumes,
+    discoverySymbols,
+  );
   const snapshots: CryptoMarketSnapshot[] = [];
   let providerFailures = 0;
 
@@ -334,39 +338,54 @@ async function buildUncachedCryptoOpportunityFeedState(): Promise<CryptoOpportun
         right.dollarVolume24h - left.dollarVolume24h,
     );
   const prox = await loadCryptoProxPackets(baseEvaluated);
-  const evaluated = baseEvaluated.map((opportunity) => ({
+  const proxEvaluated = baseEvaluated.map((opportunity) => ({
     ...opportunity,
     proxIntelligence: prox.packets.get(opportunity.productId) ?? null,
   }));
-  const eligible = evaluated.filter((item) => item.eligible);
-  const radar = evaluated
-    .filter((item) => item.radarEligible)
-    .slice(0, 6);
   const now = new Date();
   const shadowDiscovery = buildCryptoShadowDiscovery({
     coinbaseOpportunities: baseEvaluated,
-    sources: await discoverySourcesPromise,
+    sources: discoverySources,
     now,
   });
+  const authorityEvaluated = applyCryptoDecisionAuthority({
+    opportunities: proxEvaluated,
+    discovery: shadowDiscovery.packet,
+  });
+  const ranked = rankCryptoDecisionFrame(authorityEvaluated);
+  const decisionAt = now.toISOString();
+  const freshUntil = new Date(now.getTime() + 7 * 60_000).toISOString();
 
   return {
     feed: {
       success: true,
       lane: "crypto_momentum",
       status: "observation_only",
-      provider: "coinbase_exchange_public",
-      methodologyVersion: "crypto-momentum-v2-prox-shadow",
-      hero: eligible[0] ?? null,
-      contenders: eligible.slice(1, 6),
-      radar,
+      provider: "centralized_exchange_public",
+      methodologyVersion: "crypto-momentum-v3-prox-authority",
+      decisionFrame: {
+        version: "crypto-decision-frame-v1",
+        decisionAt,
+        freshUntil,
+        fresh: true,
+        source: "computed",
+        authority: "backend_atomic",
+      },
+      hero: ranked.hero,
+      contenders: ranked.contenders,
+      radar: ranked.radar,
       shadowDiscovery: shadowDiscovery.packet,
       diagnostics: {
         availableUsdProducts: availableCount,
         shortlistedProducts: selected.length,
-        evaluatedProducts: evaluated.length,
-        eligibleProducts: eligible.length,
-        radarProducts: radar.length,
+        evaluatedProducts: ranked.evaluated.length,
+        eligibleProducts: ranked.authorityEligibleProducts,
+        radarProducts: ranked.radar.length,
         providerFailures,
+        discoverySeedProducts: discoverySymbols.length,
+        authorityEligibleProducts: ranked.authorityEligibleProducts,
+        withheldProducts: ranked.withheldProducts,
+        staleProxProducts: ranked.staleProxProducts,
         proxEvaluatedProducts: prox.evaluatedProducts,
         proxAvailableProducts: prox.packets.size,
         proxProviderFailures: prox.providerFailures,
@@ -379,7 +398,7 @@ async function buildUncachedCryptoOpportunityFeedState(): Promise<CryptoOpportun
         shadowDiscoveryProviderFailures:
           shadowDiscovery.packet.diagnostics.providerFailures,
       },
-      timestamp: now.toISOString(),
+      timestamp: decisionAt,
     },
     discoveryPrices: shadowDiscovery.prices,
   };
@@ -387,7 +406,7 @@ async function buildUncachedCryptoOpportunityFeedState(): Promise<CryptoOpportun
 
 const buildCachedCryptoOpportunityFeedState = unstable_cache(
   buildUncachedCryptoOpportunityFeedState,
-  ["ht-crypto-opportunity-feed-v4-multivenue-shadow-quote-coverage"],
+  ["ht-crypto-opportunity-feed-v5-prox-authority"],
   {
     revalidate: 60,
     tags: ["ht-crypto-opportunities"],
@@ -396,6 +415,10 @@ const buildCachedCryptoOpportunityFeedState = unstable_cache(
 
 export async function buildCryptoOpportunityFeedState() {
   return buildCachedCryptoOpportunityFeedState();
+}
+
+export async function buildFreshCryptoOpportunityFeedState() {
+  return buildUncachedCryptoOpportunityFeedState();
 }
 
 export async function buildCryptoOpportunityFeed() {

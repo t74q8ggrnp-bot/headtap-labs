@@ -15,13 +15,14 @@ import { getErrorMessage } from "@/lib/error-message";
 import { hydrateSnapshotLeaders } from "@/lib/intraday-snapshot-hydration";
 import { loadSecurityMetadata } from "@/lib/security-metadata";
 import { createClient } from "@supabase/supabase-js";
+import type { TopMoverDisposition } from "@/lib/top-mover-disposition";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v9-minute-hydration";
+const ENGINE_VERSION = "signal-writer-v10-disposition-receipts";
 
 const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
 const RECLAIM_MIN_RVOL = 2;
@@ -263,6 +264,42 @@ export async function GET(req: Request) {
     const tickers = payload.tickers ?? [];
     if (!tickers.length) throw new Error("Polygon returned an empty market snapshot.");
 
+    const topMoverDispositions = new Map<string, TopMoverDisposition>(
+      tickers
+        .map((row) => {
+          const ticker = String(row?.ticker ?? "").toUpperCase();
+          const price = resolveSnapshotPrice(row);
+          const changePercent = resolveSnapshotChangePercent(row, price);
+          return { ticker, price, changePercent };
+        })
+        .filter(
+          (row) =>
+            row.ticker &&
+            row.price > 0 &&
+            Number.isFinite(row.changePercent) &&
+            row.changePercent > 0,
+        )
+        .sort((left, right) => right.changePercent - left.changePercent)
+        .slice(0, 20)
+        .map((row) => [
+          row.ticker,
+          {
+            ticker: row.ticker,
+            changePercent: row.changePercent,
+            status: "pending" as const,
+            reason: "awaiting_retrieval_evaluation",
+          },
+        ]),
+    );
+    const setTopMoverDisposition = (
+      ticker: string,
+      update: Partial<TopMoverDisposition>,
+    ) => {
+      const existing = topMoverDispositions.get(ticker);
+      if (!existing) return;
+      topMoverDispositions.set(ticker, { ...existing, ...update });
+    };
+
     const hydratedLeaders = await hydrateSnapshotLeaders(
       tickers,
       POLYGON_KEY,
@@ -304,6 +341,10 @@ export async function GET(req: Request) {
         previousVolume < MIN_PRIOR_DAY_VOLUME &&
         !liveLiquidityOverride
       ) {
+        setTopMoverDisposition(ticker, {
+          status: "excluded",
+          reason: "prior_day_liquidity_below_floor",
+        });
         continue;
       }
       if (liveLiquidityOverride) liveLiquidityOverrides += 1;
@@ -340,7 +381,13 @@ export async function GET(req: Request) {
             rvol >= 1.2,
         );
       const retrievedForCatalyst = Boolean(catalyst && catalyst.score >= 20);
-      if (!retrievedForSm && !retrievedForBtc && !retrievedForCatalyst) continue;
+      if (!retrievedForSm && !retrievedForBtc && !retrievedForCatalyst) {
+        setTopMoverDisposition(ticker, {
+          status: "excluded",
+          reason: "retrieval_volume_participation_below_threshold",
+        });
+        continue;
+      }
       candidates.set(ticker, {
         ticker, price, changePercent, rvol, prevVol: previousVolume,
         sessionOpenPrice: sessionOpenPrice > 0 ? sessionOpenPrice : null,
@@ -364,15 +411,35 @@ export async function GET(req: Request) {
       const security = metadata.byTicker.get(ticker);
       if (!security?.security_type) {
         unknownSecurityTypes += 1;
+        setTopMoverDisposition(ticker, {
+          status: "excluded",
+          reason: "security_metadata_unavailable",
+          securityType: null,
+        });
         candidates.delete(ticker);
         continue;
       }
       if (!security.is_supported) {
         unsupportedSecurityTypes += 1;
+        setTopMoverDisposition(ticker, {
+          status: "excluded",
+          reason: `unsupported_security_type:${security.security_type}`,
+          securityType: security.security_type,
+        });
         candidates.delete(ticker);
         continue;
       }
       candidate.securityType = security.security_type;
+      setTopMoverDisposition(ticker, {
+        status: "canonical_candidate",
+        reason: candidate.retrievedForSm
+          ? "spot_momentum_retrieval"
+          : candidate.retrievedForCatalyst
+            ? "catalyst_retrieval"
+            : "before_crowd_retrieval",
+        retrievedForSm: candidate.retrievedForSm,
+        securityType: security.security_type,
+      });
     }
 
     const rows = [...candidates.values()].map((candidate) => ({
@@ -387,7 +454,12 @@ export async function GET(req: Request) {
     if (rows.length < 3) {
       await supabase.from("ht_scan_runs").update({
         status: "success", completed_at: new Date().toISOString(), promoted: false,
-        candidate_counts: { totalSnapshotTickers: tickers.length, runRows: rows.length, note: "Quiet market. No promotion." },
+        candidate_counts: {
+          totalSnapshotTickers: tickers.length,
+          runRows: rows.length,
+          topMoverDispositions: [...topMoverDispositions.values()],
+          note: "Quiet market. No promotion.",
+        },
       }).eq("id", run.id);
       return NextResponse.json({ success: true, runId: run.id, marketState: "quiet_or_weak", written: 0, candidates: rows.length });
     }
@@ -444,6 +516,7 @@ export async function GET(req: Request) {
         liveLiquidityOverrides,
         hydratedCandidates,
         hydrationCandidatesRequested: hydratedLeaders.size,
+        topMoverDispositions: [...topMoverDispositions.values()],
       },
     }).eq("id", run.id);
 

@@ -3,8 +3,10 @@ import type {
   ProxMarketSession,
 } from "@/lib/prox/market-discovery";
 
-export const PROX_OUTCOME_MEMORY_VERSION = "prox-outcome-memory-v1";
-export const PROX_CALIBRATION_VERSION = "prox-pattern-calibration-v1";
+export const PROX_OUTCOME_MEMORY_VERSION =
+  "prox-outcome-memory-v2-security-routed";
+export const PROX_CALIBRATION_VERSION =
+  "prox-pattern-calibration-v2-security-routed";
 export const PROX_OUTCOME_MODE = "shadow_research" as const;
 
 export type ProxOutcomeHorizon =

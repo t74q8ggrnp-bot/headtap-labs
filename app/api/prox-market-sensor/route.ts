@@ -34,6 +34,10 @@ const CANONICAL_MOMENTUM_LANE_LIMIT = 20;
 const CANONICAL_VOLUME_LANE_LIMIT = 10;
 const EVENT_SENSOR_LIMIT = 30;
 const DIRECT_DISCOVERY_SENSOR_LIMIT = 40;
+const DIRECT_EQUITY_SENSOR_LIMIT = 30;
+const DIRECT_CONTEXT_SENSOR_LIMIT = 5;
+const DIRECT_LINKED_SENSOR_LIMIT = 3;
+const DIRECT_PENDING_SENSOR_LIMIT = 2;
 const MAX_SENSOR_TICKERS = 130;
 
 function getSupabase() {
@@ -135,21 +139,36 @@ async function fetchDirectDiscoveryTickers(
   supabase: ReturnType<typeof getSupabase>,
 ): Promise<{ tickers: string[]; unavailable: string | null }> {
   const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabase
-    .from("prox_research_queue")
-    .select("ticker,research_priority,last_detected_at,status")
-    .in("status", ["queued", "observing"])
-    .gte("last_detected_at", since)
-    .order("research_priority", { ascending: false })
-    .order("last_detected_at", { ascending: false })
-    .limit(DIRECT_DISCOVERY_SENSOR_LIMIT);
+  const laneQuery = (instrumentLane: string, limit: number) =>
+    supabase
+      .from("prox_research_queue")
+      .select("ticker,research_priority,last_detected_at,status,instrument_lane")
+      .in("status", ["queued", "observing"])
+      .eq("instrument_lane", instrumentLane)
+      .gte("last_detected_at", since)
+      .order("research_priority", { ascending: false })
+      .order("last_detected_at", { ascending: false })
+      .limit(limit);
+  const [equity, context, linked, pending] = await Promise.all([
+    laneQuery("opportunity_equity", DIRECT_EQUITY_SENSOR_LIMIT),
+    laneQuery("market_context", DIRECT_CONTEXT_SENSOR_LIMIT),
+    laneQuery("linked_instrument_context", DIRECT_LINKED_SENSOR_LIMIT),
+    laneQuery("pending_verification", DIRECT_PENDING_SENSOR_LIMIT),
+  ]);
+  const error = equity.error ?? context.error ?? linked.error ?? pending.error;
   if (error) {
     return { tickers: [], unavailable: error.message };
   }
   return {
-    tickers: (data ?? [])
+    tickers: [
+      ...(equity.data ?? []),
+      ...(context.data ?? []),
+      ...(linked.data ?? []),
+      ...(pending.data ?? []),
+    ]
       .map((row) => String(row.ticker ?? "").toUpperCase().trim())
-      .filter(Boolean),
+      .filter(Boolean)
+      .slice(0, DIRECT_DISCOVERY_SENSOR_LIMIT),
     unavailable: null,
   };
 }

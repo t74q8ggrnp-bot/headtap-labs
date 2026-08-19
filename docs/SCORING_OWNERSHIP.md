@@ -31,6 +31,18 @@ server pipeline and are transported through `lib/opportunity-model.ts`.
 An unevaluated watchlist ticker is labeled `Not ranked`; the browser must not
 manufacture a score for it.
 
+## Independent ProX shadow owner
+
+`app/api/prox-shadow-board/route.ts` owns the separate, research-only ProX
+shadow frame. Its score and rank are produced by `lib/prox/edge-score.ts`,
+`lib/prox/market-structure.ts`, and `lib/prox/shadow-board.ts` from independent
+ProX discovery and shared raw facts. It cannot read canonical conclusions as
+inputs and it is not a canonical producer.
+
+No desktop, mobile, scanner, watchlist, bot, order, or execution surface is a
+consumer of the ProX shadow board. Comparing it with the canonical board is
+permitted only after both atomic frames are complete.
+
 ## Legacy local intelligence still in `app/page.tsx`
 
 The remaining local helpers support secondary legacy surfaces such as older

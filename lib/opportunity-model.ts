@@ -2,6 +2,7 @@ import type { TradeFrameworkResult } from "@/lib/canonical-trade-framework";
 import type { ExplosionAssessment } from "@/lib/canonical-opportunity";
 import type { MarketStock, TradeFrameworkDisplay } from "@/lib/contracts/market";
 import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
+import type { ProxShadowChallenger } from "@/lib/prox/challenger-score";
 
 export type OpportunityStrategy = "spot_momentum" | "before_the_crowd";
 export type OpportunityTier = "scanner" | "watch" | "feature" | "hero";
@@ -52,6 +53,7 @@ export type Opportunity = {
   tradeFramework?: TradeFrameworkResult | null;
   explosionAssessment?: ExplosionAssessment | null;
   proxIntelligence?: ProxIntelligencePacket | null;
+  proxChallenger?: ProxShadowChallenger | null;
   strategy?: OpportunityStrategy;
   signalStrength?: number;
   strategyScore?: number;
@@ -238,6 +240,8 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
       null) as ExplosionAssessment | null,
     proxIntelligence: (source.proxIntelligence ??
       null) as ProxIntelligencePacket | null,
+    proxChallenger: (source.proxChallenger ??
+      null) as ProxShadowChallenger | null,
     strategy: source.strategy as OpportunityStrategy | undefined,
     signalStrength: numberValue(source.signalStrength),
     strategyScore: numberValue(source.strategyScore ?? source.opportunityScore),
@@ -257,6 +261,7 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
 export function opportunityToStock(opportunity: Opportunity): OpportunityStock {
   return {
     symbol: opportunity.ticker,
+    opportunityStrategy: opportunity.strategy,
     price: opportunity.price,
     change: opportunity.change,
     relativeVolume: opportunity.relativeVolume,

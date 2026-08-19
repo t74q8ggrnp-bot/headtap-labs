@@ -15,7 +15,7 @@ export default function MomentumContenders({
     <div className="flex h-full min-h-full flex-col bg-white/[0.01] p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700">
-          Qualified Contenders
+          Overall Contenders
         </p>
         {candidates.length > 0 && (
           <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">

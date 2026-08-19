@@ -4,6 +4,7 @@ import {
   buildCanonicalOpportunityFeed,
   type OpportunityFeedRequestType,
 } from "@/lib/canonical-opportunity-feed";
+import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -33,14 +34,30 @@ export async function GET(req: Request) {
     : 10;
 
   try {
-    const payload = await buildCanonicalOpportunityFeed({
-      requestedType,
-      limit,
-      debug: url.searchParams.get("debug") === "1",
-      includeContinuation:
-        url.searchParams.get("includeContinuation") === "1",
+    const debug = url.searchParams.get("debug") === "1";
+    const includeContinuation =
+      url.searchParams.get("includeContinuation") === "1";
+    const payload = requestedType === "momentum" || requestedType === "before_crowd"
+      ? await getRollingCanonicalDecisionFrame(requestedType)
+      : await buildCanonicalOpportunityFeed({
+          requestedType,
+          limit,
+          debug,
+          includeContinuation,
+        });
+    const responsePayload: Record<string, unknown> = {
+      ...payload,
+      opportunities: Array.isArray(payload.opportunities)
+        ? payload.opportunities.slice(0, limit)
+        : [],
+    };
+    if (!debug) delete responsePayload.rejectedSample;
+    if (!includeContinuation) {
+      delete responsePayload.continuationCandidates;
+    }
+    return NextResponse.json(responsePayload, {
+      headers: OPPORTUNITY_CACHE_HEADERS,
     });
-    return NextResponse.json(payload, { headers: OPPORTUNITY_CACHE_HEADERS });
   } catch (error: unknown) {
     return NextResponse.json(
       {

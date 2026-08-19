@@ -17,6 +17,17 @@ import {
   PROX_OUTCOME_MEMORY_VERSION,
   selectProxPatternSignature,
 } from "@/lib/prox/outcome-memory";
+import {
+  loadSecurityMetadata,
+  loadSecurityTypeRegistry,
+} from "@/lib/security-metadata";
+import {
+  PROX_SECURITY_ROUTING_VERSION,
+  routeProxSecurityType,
+  selectProxRoutedResearchCandidates,
+  type ProxInstrumentLane,
+  type ProxSecurityMetadataState,
+} from "@/lib/prox/security-routing";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -26,8 +37,15 @@ const CRON_SECRET = process.env.CRON_SECRET;
 const SNAPSHOT_ENDPOINT =
   "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers";
 const SPLITS_ENDPOINT = "https://api.polygon.io/v3/reference/splits";
-const MAX_PERSISTED_OBSERVATIONS = 300;
 const PERSIST_BATCH_SIZE = 100;
+
+type RoutedDiscoveryObservation = ProxMarketDiscoveryObservation & {
+  securityType: string | null;
+  instrumentLane: ProxInstrumentLane;
+  opportunityEligible: boolean;
+  metadataState: ProxSecurityMetadataState;
+  securityRoutingReason: string;
+};
 
 type PolygonSplit = {
   id?: unknown;
@@ -256,7 +274,7 @@ function buildObservation(
 }
 
 function toObservationRow(
-  observation: ProxMarketDiscoveryObservation,
+  observation: RoutedDiscoveryObservation,
   runId: string,
   minute: string,
   sourceRow: PolygonSnapshotRow | undefined,
@@ -292,6 +310,10 @@ function toObservationRow(
     corporate_action_source_id: observation.corporateActionSourceId,
     anomaly_flags: observation.anomalyFlags,
     research_priority: observation.researchPriority,
+    security_type: observation.securityType,
+    instrument_lane: observation.instrumentLane,
+    opportunity_eligible: observation.opportunityEligible,
+    metadata_state: observation.metadataState,
     reasons: observation.reasons,
     feature_snapshot: {
       observedChangePercent: observation.observedChangePercent,
@@ -301,6 +323,8 @@ function toObservationRow(
       timeAdjustedRelativeVolume:
         observation.timeAdjustedRelativeVolume,
       dollarVolume: observation.dollarVolume,
+      securityRoutingVersion: PROX_SECURITY_ROUTING_VERSION,
+      securityRoutingReason: observation.securityRoutingReason,
     },
     source_payload: {
       ticker: observation.ticker,
@@ -314,12 +338,17 @@ function toObservationRow(
 
 async function seedOutcomeEpisodes(
   supabase: ReturnType<typeof getSupabase>,
-  selected: ProxMarketDiscoveryObservation[],
+  selected: RoutedDiscoveryObservation[],
   observationIdByTicker: Map<string, string>,
   tradingDate: string,
 ) {
   const rows = selected
-    .filter((observation) => observationIdByTicker.has(observation.ticker))
+    .filter(
+      (observation) =>
+        observation.opportunityEligible &&
+        observation.instrumentLane === "opportunity_equity" &&
+        observationIdByTicker.has(observation.ticker),
+    )
     .map((observation) => ({
       ticker: observation.ticker,
       trading_date: tradingDate,
@@ -327,6 +356,8 @@ async function seedOutcomeEpisodes(
       started_at: observation.observedAt,
       market_session: observation.marketSession,
       methodology_version: PROX_OUTCOME_MEMORY_VERSION,
+      security_type: observation.securityType,
+      instrument_lane: observation.instrumentLane,
       pattern_signature: selectProxPatternSignature(
         observation.anomalyFlags,
       ),
@@ -447,7 +478,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error:
-          "Pro X direct market discovery schema is unavailable; run migration 0013.",
+          "Pro X direct market discovery schema is unavailable; run migrations 0013 and 0017.",
         detail: runError?.message ?? null,
       },
       { status: 500 },
@@ -480,13 +511,30 @@ export async function GET(request: Request) {
       eligible.push(observation);
     }
 
-    eligible.sort(
-      (left, right) =>
-        right.researchPriority - left.researchPriority ||
-        right.dollarVolume - left.dollarVolume ||
-        left.ticker.localeCompare(right.ticker),
+    const [securityMetadata, securityTypeRegistry] = await Promise.all([
+      loadSecurityMetadata(
+        supabase,
+        eligible.map((observation) => observation.ticker),
+      ),
+      loadSecurityTypeRegistry(supabase),
+    ]);
+    const routed: RoutedDiscoveryObservation[] = eligible.map((observation) => {
+      const metadata = securityMetadata.byTicker.get(observation.ticker);
+      const route = routeProxSecurityType(metadata?.security_type);
+      return {
+        ...observation,
+        securityType: route.securityType,
+        instrumentLane: route.instrumentLane,
+        opportunityEligible: route.opportunityEligible,
+        metadataState: route.metadataState,
+        securityRoutingReason: route.reason,
+      };
+    });
+    const selected = selectProxRoutedResearchCandidates(
+      routed.filter(
+        (observation) => observation.instrumentLane !== "excluded_asset",
+      ),
     );
-    const selected = eligible.slice(0, MAX_PERSISTED_OBSERVATIONS);
     const persistedRows: Array<{ id: string; ticker: string }> = [];
     const observationRows = selected.map((observation) =>
       toObservationRow(
@@ -525,6 +573,10 @@ export async function GET(request: Request) {
         latest_observation_id: observationIdByTicker.get(observation.ticker),
         engine_version: PROX_MARKET_DISCOVERY_VERSION,
         research_priority: observation.researchPriority,
+        security_type: observation.securityType,
+        instrument_lane: observation.instrumentLane,
+        opportunity_eligible: observation.opportunityEligible,
+        metadata_state: observation.metadataState,
         anomaly_flags: observation.anomalyFlags,
         reasons: observation.reasons,
         updated_at: observedAt,
@@ -546,17 +598,80 @@ export async function GET(request: Request) {
 
     const persistedCount = persistedRows.length;
     const complete = persistedCount === selected.length;
+    const laneCounts = routed.reduce<Record<ProxInstrumentLane, number>>(
+      (counts, observation) => {
+        counts[observation.instrumentLane] += 1;
+        return counts;
+      },
+      {
+        opportunity_equity: 0,
+        market_context: 0,
+        linked_instrument_context: 0,
+        excluded_asset: 0,
+        pending_verification: 0,
+      },
+    );
+    const selectedLaneCounts = selected.reduce<
+      Record<Exclude<ProxInstrumentLane, "excluded_asset">, number>
+    >(
+      (counts, observation) => {
+        if (observation.instrumentLane !== "excluded_asset") {
+          counts[observation.instrumentLane] += 1;
+        }
+        return counts;
+      },
+      {
+        opportunity_equity: 0,
+        market_context: 0,
+        linked_instrument_context: 0,
+        pending_verification: 0,
+      },
+    );
+    const routedProviderTypes = new Set(
+      routed
+        .map((observation) => observation.securityType)
+        .filter((value): value is string => Boolean(value)),
+    );
+    const providerTypes = new Set(
+      securityTypeRegistry.rows.map((row) => row.security_type),
+    );
+    const unclassifiedProviderTypes = [...providerTypes].filter(
+      (securityType) =>
+        routeProxSecurityType(securityType).instrumentLane ===
+        "pending_verification",
+    );
     const diagnostics = {
       engineVersion: PROX_MARKET_DISCOVERY_VERSION,
       mode: PROX_MARKET_DISCOVERY_MODE,
+      securityRoutingVersion: PROX_SECURITY_ROUTING_VERSION,
       marketSession: marketClock.session,
       expectedVolumeFraction: marketClock.expectedVolumeFraction,
       splitFeedError: splitResult.error,
+      securityMetadata: {
+        cacheHits: securityMetadata.cacheHits,
+        fetched: securityMetadata.fetched,
+        fetchFailures: securityMetadata.fetchFailures,
+        missing: routed.filter((observation) => observation.securityType === null)
+          .length,
+      },
+      securityTypeRegistry: {
+        source: securityTypeRegistry.source,
+        fetchedAt: securityTypeRegistry.fetchedAt,
+        providerError: securityTypeRegistry.providerError,
+        providerTypeCount: providerTypes.size,
+        routedProviderTypeCount: routedProviderTypes.size,
+        unclassifiedProviderTypes,
+      },
+      laneCounts,
+      selectedLaneCounts,
       outcomeEpisodesSeeded: episodeSeed.seeded,
       outcomeMemoryUnavailable: episodeSeed.unavailable,
       selectedTickers: selected.slice(0, 20).map((observation) => ({
         ticker: observation.ticker,
         researchPriority: observation.researchPriority,
+        securityType: observation.securityType,
+        instrumentLane: observation.instrumentLane,
+        opportunityEligible: observation.opportunityEligible,
         flags: observation.anomalyFlags,
       })),
     };
@@ -614,6 +729,7 @@ export async function GET(request: Request) {
       {
         error: message || "Pro X direct market discovery failed.",
         authority: "shadow_research_only",
+        expectedMigration: "0017_prox_security_type_routing.sql",
       },
       { status: 500 },
     );

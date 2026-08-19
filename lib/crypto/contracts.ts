@@ -45,9 +45,9 @@ export type CryptoDiscoveryCandidate = {
 };
 
 export type CryptoShadowDiscovery = {
-  version: "crypto-multivenue-discovery-v1";
-  mode: "shadow";
-  authority: "none";
+  version: "crypto-multivenue-discovery-v2";
+  mode: "confirmation";
+  authority: "bounded_confirmation";
   generatedAt: string;
   candidates: CryptoDiscoveryCandidate[];
   diagnostics: {
@@ -83,8 +83,8 @@ export type CryptoProxState =
   | "stale";
 
 export type CryptoProxPacket = {
-  packetVersion: "crypto-prox-v1";
-  mode: "shadow";
+  packetVersion: "crypto-prox-v2";
+  mode: "bounded_authority";
   productId: string;
   symbol: string;
   computedAt: string;
@@ -133,12 +133,20 @@ export type CryptoOpportunity = {
   volume24h: number;
   dollarVolume24h: number;
   relativeVolume: number;
+  baseOpportunityScore: number;
   opportunityScore: number;
   proxIntelligence: CryptoProxPacket | null;
   riskScore: number;
   pulseState: CryptoPulseState;
   eligible: boolean;
   radarEligible: boolean;
+  decisionState: "qualified" | "radar" | "withheld";
+  decisionReason: string;
+  authorityFlags: string[];
+  sourceVenues: CryptoDiscoveryVenue[];
+  quoteCurrencies: string[];
+  venueConfirmationScore: number;
+  liveDataFresh: boolean;
   stage: string;
   summary: string;
   riskTags: string[];
@@ -155,8 +163,16 @@ export type CryptoOpportunityFeed = {
   success: true;
   lane: "crypto_momentum";
   status: "observation_only";
-  provider: "coinbase_exchange_public";
-  methodologyVersion: "crypto-momentum-v2-prox-shadow";
+  provider: "centralized_exchange_public";
+  methodologyVersion: "crypto-momentum-v3-prox-authority";
+  decisionFrame: {
+    version: "crypto-decision-frame-v1";
+    decisionAt: string;
+    freshUntil: string;
+    fresh: boolean;
+    source: "computed" | "materialized" | "stale_fallback";
+    authority: "backend_atomic";
+  };
   hero: CryptoOpportunity | null;
   contenders: CryptoOpportunity[];
   radar: CryptoOpportunity[];
@@ -168,6 +184,10 @@ export type CryptoOpportunityFeed = {
     eligibleProducts: number;
     radarProducts: number;
     providerFailures: number;
+    discoverySeedProducts: number;
+    authorityEligibleProducts: number;
+    withheldProducts: number;
+    staleProxProducts: number;
     proxEvaluatedProducts: number;
     proxAvailableProducts: number;
     proxProviderFailures: number;

@@ -48,7 +48,7 @@ export default function CryptoProxPulse({
             ProX Crypto Pulse
           </p>
           <p className="mt-1 text-[9px] font-semibold uppercase tracking-[0.13em] text-zinc-600">
-            24/7 market intelligence · shadow learning
+            24/7 live-tape intelligence · bounded authority
           </p>
         </div>
         <div className="text-right">
@@ -101,8 +101,9 @@ export default function CryptoProxPulse({
       )}
 
       <p className="mt-3 text-[9px] font-semibold leading-4 text-zinc-600">
-        ProX is recording what it would change, but the visible HT Crypto score
-        remains the single canonical score until outcome evidence validates the adjustment.
+        ProX correlates live velocity, volume, VWAP, spread, activity, and
+        BTC-relative strength into the single HT Crypto decision. Stale or
+        deteriorating evidence cannot hold hero authority.
       </p>
     </div>
   );

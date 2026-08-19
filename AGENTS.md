@@ -3,3 +3,15 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+## ProX doctrine
+
+Before changing ProX, Spot Momentum ranking, opportunity eligibility, scoring,
+or any bridge between ProX and the canonical pipeline, read
+`docs/PROX_GUIDE.md` and `docs/SCORING_OWNERSHIP.md` in full.
+
+`docs/PROX_GUIDE.md` is the governing ProX design contract. Do not expand ProX
+public or execution authority, reuse canonical decision fields as independent
+ProX scoring inputs, or change the documented score contract without explicit
+owner approval. If implementation and the guide conflict, stop and surface
+the conflict before editing code.
