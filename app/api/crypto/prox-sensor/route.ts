@@ -32,6 +32,7 @@ type PendingOutcomeRow = {
 type PendingDiscoveryOutcomeRow = {
   id: string;
   asset_id: string;
+  symbol: string;
   entry_price_usd: number;
 };
 
@@ -222,7 +223,7 @@ async function loadDueDiscoveryOutcomes(
     horizons.map(async ({ horizon, target, price }) => {
       const { data, error } = await supabase
         .from("ht_crypto_discovery_observations")
-        .select("id,asset_id,entry_price_usd")
+        .select("id,asset_id,symbol,entry_price_usd")
         .is(price, null)
         .lte(target, nowIso)
         // asset_id changed from a bare "crypto:SYMBOL" format to a
@@ -270,11 +271,23 @@ async function persistDiscoveryOutcomePrices(
   const currentPrices = new Map(
     discoveryPrices.map((price) => [price.assetId, price.priceUsd]),
   );
+  // The identity venue embedded in asset_id (e.g. "crypto:coinbase:tao-usd")
+  // is whichever venue happened to report the symbol first, by fixed
+  // priority, at discovery time. That can change by the time an outcome is
+  // due -- the symbol may no longer be on that venue's shortlist -- which
+  // would otherwise leave a resolvable row permanently stuck looking for an
+  // asset_id that will never reappear. Falling back to a symbol match keeps
+  // outcome tracking on the underlying asset instead of one venue's listing
+  // of it.
+  const currentPricesBySymbol = new Map(
+    discoveryPrices.map((price) => [price.symbol, price.priceUsd]),
+  );
   let outcomesUpdated = 0;
   let outcomesUnavailable = 0;
 
   for (const { row, horizons } of dueById.values()) {
-    const currentPrice = currentPrices.get(row.asset_id);
+    const currentPrice =
+      currentPrices.get(row.asset_id) ?? currentPricesBySymbol.get(row.symbol);
     const entryPrice = Number(row.entry_price_usd);
     if (
       !currentPrice ||
