@@ -372,6 +372,12 @@ export async function GET(req: Request) {
     diagnostics.tickersConsidered = tickers.length;
     const computedTickers = new Set<string>();
 
+    // Polygon fetches stay batched at CONCURRENCY to respect rate limits, but
+    // this loop only computes features -- it does not write. Writing one
+    // ticker at a time (up to 2 sequential Supabase round-trips x up to 130
+    // tickers) was the actual cause of this route timing out at 60s; the
+    // fetch batching alone was never the bottleneck.
+    const computedFeatures: NonNullable<ReturnType<typeof computeFeatures>>[] = [];
     for (let i = 0; i < tickers.length; i += CONCURRENCY) {
       const batch = tickers.slice(i, i + CONCURRENCY);
       const results = await Promise.allSettled(
@@ -392,40 +398,46 @@ export async function GET(req: Request) {
           diagnostics.skippedNoBars++;
           continue;
         }
-        const latestFeatures = peakRetentionSchemaReady
-          ? features
-          : omitPeakRetentionFeatures(features);
-        const { error } = await supabase
-          .from("prox_market_features")
-          .upsert(latestFeatures, { onConflict: "ticker" });
-        if (error) {
-          diagnostics.errors++;
-          continue;
-        }
-        diagnostics.computed++;
-        computedTickers.add(features.ticker);
+        computedFeatures.push(features);
+      }
+    }
 
-        // The latest-snapshot table powers fast reads. The append-only
-        // history powers Pro X memory and later calibration. Until migration
-        // 0005 is applied, history failure is reported but never allowed to
-        // disrupt the existing live pulse.
-        if (!diagnostics.historyUnavailable) {
-          const { error: historyError } = await supabase
-            .from("prox_market_feature_history")
-            .upsert(
-              peakRetentionHistorySchemaReady
-                ? features
-                : omitPeakRetentionFeatures(features),
-              {
-              onConflict: "ticker,computed_at",
-              ignoreDuplicates: true,
-              },
-            );
-          if (historyError) {
-            diagnostics.historyUnavailable = historyError.message;
-          } else {
-            diagnostics.historyPersisted++;
-          }
+    const WRITE_CHUNK_SIZE = 25;
+    for (let i = 0; i < computedFeatures.length; i += WRITE_CHUNK_SIZE) {
+      const chunk = computedFeatures.slice(i, i + WRITE_CHUNK_SIZE);
+      const latestRows = chunk.map((features) =>
+        peakRetentionSchemaReady ? features : omitPeakRetentionFeatures(features),
+      );
+      const { error } = await supabase
+        .from("prox_market_features")
+        .upsert(latestRows, { onConflict: "ticker" });
+      if (error) {
+        diagnostics.errors += chunk.length;
+        continue;
+      }
+      diagnostics.computed += chunk.length;
+      for (const features of chunk) computedTickers.add(features.ticker);
+
+      // The latest-snapshot table powers fast reads. The append-only
+      // history powers Pro X memory and later calibration. Until migration
+      // 0005 is applied, history failure is reported but never allowed to
+      // disrupt the existing live pulse.
+      if (!diagnostics.historyUnavailable) {
+        const historyRows = chunk.map((features) =>
+          peakRetentionHistorySchemaReady
+            ? features
+            : omitPeakRetentionFeatures(features),
+        );
+        const { error: historyError } = await supabase
+          .from("prox_market_feature_history")
+          .upsert(historyRows, {
+            onConflict: "ticker,computed_at",
+            ignoreDuplicates: true,
+          });
+        if (historyError) {
+          diagnostics.historyUnavailable = historyError.message;
+        } else {
+          diagnostics.historyPersisted += chunk.length;
         }
       }
     }
