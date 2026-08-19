@@ -30,7 +30,6 @@ import {
 const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
 const PROVIDER_BATCH_SIZE = 8;
 const PROX_BATCH_SIZE = 6;
-const PROX_SHORTLIST_LIMIT = 30;
 const SHORTLIST_LIMIT = 80;
 const LIQUIDITY_ANCHORS = [
   "BTC",
@@ -164,9 +163,9 @@ async function fetchCryptoTopOfBook(productId: string) {
 
 async function loadCryptoProxPackets(opportunities: CryptoOpportunity[]) {
   const packets = new Map<string, CryptoProxPacket>();
-  const candidates = opportunities
-    .filter((opportunity) => opportunity.eligible || opportunity.radarEligible)
-    .slice(0, PROX_SHORTLIST_LIMIT);
+  const candidates = opportunities.filter(
+    (opportunity) => opportunity.eligible || opportunity.radarEligible,
+  );
   let providerFailures = 0;
   let benchmarkCandles: CryptoMinuteCandle[] = [];
   try {
