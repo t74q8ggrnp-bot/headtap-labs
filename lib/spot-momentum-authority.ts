@@ -21,7 +21,11 @@ export function getPriceDiscoveryEntryRejection(assessment: {
   // that end up in this state. Only a real, computed ratio that's actually
   // below the floor should block entry; an unmeasurable one should not.
   if (assessment.scenarioBands == null) return null;
-  const scenarioRr = Number(assessment.scenarioBands.expansionRr);
+  // Number(null) is 0, not NaN — check for null/undefined explicitly rather
+  // than relying on the scenarioRr <= 0 branch below to happen to catch it.
+  const rawExpansionRr = assessment.scenarioBands.expansionRr;
+  if (rawExpansionRr === null || rawExpansionRr === undefined) return null;
+  const scenarioRr = Number(rawExpansionRr);
   if (!Number.isFinite(scenarioRr)) return null;
   if (scenarioRr <= 0) return null;
   if (scenarioRr < PRICE_DISCOVERY_SCENARIO_RR_FLOOR) {

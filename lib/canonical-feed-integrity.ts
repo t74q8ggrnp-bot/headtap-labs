@@ -71,9 +71,15 @@ export function auditCanonicalSpotMomentumFeed(
       record.displayEligibility?.eligible !== true &&
       record.momentumRadarEligible === true &&
       record.visibilityState === "momentum_radar";
-    const scenarioRr = Number(
-      record.explosionAssessment?.scenarioBands?.expansionRr,
-    );
+    // Number(null) is 0, not NaN — coercing straight through would make a
+    // genuinely unmeasurable ratio (the new, intentional null case) look
+    // like a real, computed 0, which then incorrectly satisfies "finite and
+    // below 1" below. Check for null/undefined before coercing.
+    const rawExpansionRr = record.explosionAssessment?.scenarioBands?.expansionRr;
+    const scenarioRr =
+      rawExpansionRr === null || rawExpansionRr === undefined
+        ? null
+        : Number(rawExpansionRr);
     if (
       record.displayEligibility?.eligible !== true &&
       !isEntryWithheldContender
@@ -86,6 +92,7 @@ export function auditCanonicalSpotMomentumFeed(
     if (
       record.displayEligibility?.eligible === true &&
       record.explosionAssessment?.state === "price_discovery" &&
+      scenarioRr !== null &&
       Number.isFinite(scenarioRr) &&
       scenarioRr < 1
     ) {
