@@ -25,12 +25,181 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html,
+body {
+  min-height: 100%;
+  background: #050505;
+  overscroll-behavior: none;
+}
+
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.ht-native-app {
+  background: #050505;
+  color-scheme: dark;
+}
+
+.ht-native-app body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ht-native-app input,
+.ht-native-app textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ht-native-offline {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.55rem);
+  left: 50%;
+  z-index: 1100;
+  display: flex;
+  max-width: calc(100vw - 2rem);
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(251, 146, 60, 0.28);
+  border-radius: 999px;
+  background: rgba(23, 15, 10, 0.94);
+  padding: 0.55rem 0.8rem;
+  color: #fdba74;
+  font-size: 0.68rem;
+  font-weight: 800;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.ht-native-offline-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #fb923c;
+  box-shadow: 0 0 0 4px rgba(251, 146, 60, 0.1);
+}
+
+.ht-mobile-global-nav {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 600;
+  display: flex;
+  align-items: flex-start;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.94);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  color: white;
+  box-shadow: 0 -16px 42px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.ht-native-startup,
+.ht-route-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 43%, rgba(249, 115, 22, 0.1), transparent 34%),
+    #050505;
+  color: white;
+}
+
+.ht-native-startup-logo,
+.ht-route-loading-logo {
+  width: 112px;
+  height: 112px;
+  border-radius: 25px;
+  object-fit: cover;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 42px rgba(249, 115, 22, 0.12);
+}
+
+.ht-native-startup-name,
+.ht-route-loading-name {
+  margin-top: 1.1rem;
+  color: #fafafa;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.3em;
+}
+
+.ht-native-startup-copy,
+.ht-route-loading-copy {
+  margin-top: 0.45rem;
+  color: #71717a;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.ht-native-startup-bar,
+.ht-route-loading-bar {
+  position: relative;
+  width: 116px;
+  height: 3px;
+  margin-top: 1.15rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ht-native-startup-bar::after,
+.ht-route-loading-bar::after {
+  position: absolute;
+  inset: 0;
+  width: 48%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #fb923c, transparent);
+  content: "";
+  animation: ht-startup-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes ht-startup-progress {
+  from { transform: translateX(-115%); }
+  to { transform: translateX(220%); }
+}
+
+@media (min-width: 768px) {
+  .ht-mobile-global-nav,
+  .ht-native-startup {
+    display: none !important;
+  }
+}
+
 /* ── HT Labs: pre-hydration flash prevention ──────────────────
    Applied before React hydrates so old sections never flash.
    ─────────────────────────────────────────────────────────── */
 
 /* On mobile: hide desktop layout before mobile overlay mounts */
 @media (max-width: 767px) {
+  .ht-app-content {
+    padding-bottom: calc(3.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .ht-mobile-page-shell {
+    padding-bottom: calc(3.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
   .ht-simplified-ui > .relative.z-10 {
     display: none !important;
   }

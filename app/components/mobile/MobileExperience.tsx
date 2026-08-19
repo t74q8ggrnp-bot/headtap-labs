@@ -5,7 +5,6 @@
 // sources, same handlers, now passed in as props instead of closed over.
 import type { Session } from "@supabase/supabase-js";
 import Image from "next/image";
-import Link from "next/link";
 import type {
   DecisionTraceDisplay as DecisionTraceModel,
   BullBearAnalysis,
@@ -98,7 +97,7 @@ export default function MobileExperience({
   bullBearLoading, bullBearTicker,
 }: MobileExperienceProps) {
   return (
-    <div className="md:hidden fixed inset-0 bg-[#050505] text-white flex flex-col z-[200]">
+    <div className="ht-mobile-page-shell md:hidden fixed inset-0 bg-[#050505] text-white flex flex-col z-[200]">
 
         {/* Mobile Header */}
         <div className="flex-shrink-0 border-b border-white/10 bg-black/80 backdrop-blur-xl px-4 pt-safe">
@@ -538,34 +537,6 @@ export default function MobileExperience({
           </div>
         )}
 
-        {/* Bottom Navigation */}
-        <div className="flex-shrink-0 border-t border-white/10 bg-black/90 backdrop-blur-2xl pb-safe">
-          <div className="grid grid-cols-6">
-            {[
-              { tab: "home" as const, icon: "🏠", label: "Home" },
-              { tab: "convictions" as const, icon: "🔥", label: "Top" },
-              { tab: "scanner" as const, icon: "⚡", label: "Scanner" },
-              { tab: "watchlist" as const, icon: "⭐", label: "Watchlist" },
-              { tab: "profile" as const, icon: "👤", label: "Profile" },
-            ].map(({ tab, icon, label }) => (
-              <button
-                key={tab}
-                onClick={() => setMobileTab(tab)}
-                className={`flex flex-col items-center gap-1 py-3 transition ${mobileTab === tab ? "text-orange-400" : "text-zinc-600"}`}
-              >
-                <span className="text-xl">{icon}</span>
-                <span className={`text-[9px] font-black uppercase tracking-[0.1em] ${mobileTab === tab ? "text-orange-400" : "text-zinc-600"}`}>{label}</span>
-              </button>
-            ))}
-            <Link
-              href="/crypto"
-              className="flex flex-col items-center gap-1 py-3 text-cyan-500 transition"
-            >
-              <span className="text-xl">◉</span>
-              <span className="text-[9px] font-black uppercase tracking-[0.1em]">Crypto</span>
-            </Link>
-          </div>
-        </div>
       </div>
   );
 }
