@@ -147,9 +147,9 @@ function Hero({ opportunity }: { opportunity: CryptoOpportunity }) {
             ))}
           </div>
           <p className="mt-5 text-[10px] font-semibold leading-4 text-zinc-600">
-            One score combines momentum, volume participation, peak retention,
-            liquidity, and current range position. It is a research ranking,
-            not a return forecast.
+            One backend score combines 24-hour momentum, volume participation,
+            liquidity, peak retention, multi-venue confirmation, and fresh
+            ProX live-tape evidence. It is a research ranking, not a return forecast.
           </p>
         </div>
       </div>
@@ -204,6 +204,9 @@ function ContenderCard({
         {opportunity.stage} · {compactMoney(opportunity.dollarVolume24h)} traded
         {opportunity.proxIntelligence
           ? ` · ProX ${opportunity.proxIntelligence.state}`
+          : ""}
+        {opportunity.sourceVenues.length > 1
+          ? ` · ${opportunity.sourceVenues.length} venues`
           : ""}
       </p>
     </article>
@@ -278,6 +281,7 @@ export default function CryptoPage() {
         style={{ transform: `translateY(${pullDistance * 0.18}px)` }}
       >
 
+
         {loading && !feed ? (
           <div className="rounded-3xl border border-white/8 bg-white/[0.02] px-6 py-28 text-center">
             <p className="text-xs font-black uppercase tracking-[0.24em] text-zinc-600">
@@ -296,9 +300,16 @@ export default function CryptoPage() {
                 {feed.diagnostics.evaluatedProducts} scored · {feed.diagnostics.eligibleProducts} eligible · {feed.diagnostics.shadowDiscoveryAssets} assets watched across {feed.diagnostics.shadowDiscoveryHealthyVenues} venues
               </p>
               <p className="text-[9px] font-semibold text-zinc-700">
-                Updated {new Date(feed.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                {feed.decisionFrame.fresh ? "Verified" : "Last verified"} {new Date(feed.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
               </p>
             </div>
+
+            {!feed.decisionFrame.fresh && (
+              <div className="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/[0.04] px-4 py-3 text-xs font-bold text-amber-300">
+                The latest atomic crypto frame has expired. HT is showing radar
+                context only until the next verified backend cycle completes.
+              </div>
+            )}
 
             {feed.hero ? (
               <Hero opportunity={feed.hero} />

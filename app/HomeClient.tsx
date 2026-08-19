@@ -489,8 +489,11 @@ export default function HomeClient({
     setSelectedOpportunity(null);
     setSelectedOpportunityError("");
     setSelectedOpportunityLoading(true);
+    const strategyParam = selectedStock.opportunityStrategy
+      ? `&strategy=${encodeURIComponent(selectedStock.opportunityStrategy)}`
+      : "";
     fetch(
-      `/api/opportunity-ticker?ticker=${encodeURIComponent(selectedStock.symbol)}`,
+      `/api/opportunity-ticker?ticker=${encodeURIComponent(selectedStock.symbol)}${strategyParam}`,
       { signal: controller.signal, cache: "no-store" },
     )
       .then(async (response) => {
@@ -523,7 +526,7 @@ export default function HomeClient({
       });
 
     return () => controller.abort();
-  }, [selectedStock?.symbol]);
+  }, [selectedStock?.symbol, selectedStock?.opportunityStrategy]);
 
   const selectedOpportunityPresentation = selectedOpportunity
     ? getOpportunityPresentation(selectedOpportunity)
