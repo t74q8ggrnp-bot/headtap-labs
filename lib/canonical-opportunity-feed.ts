@@ -222,7 +222,20 @@ export async function buildCanonicalOpportunityFeed({
           )
       : [];
 
-  const visibleOpportunities = eligible.slice(0, limit);
+  // Each candidate's tier is computed independently in evaluateCanonicalOpportunity
+  // from its own thresholds, with no cross-candidate uniqueness check -- more than
+  // one candidate can independently clear the "hero" bar in the same run. The
+  // single authoritative hero is eligible[0] (this same strategyScore/
+  // signalStrength/relativeVolume ranking, already trusted below for
+  // momentumContenders). Any other candidate still labeled "hero" here would
+  // show a second, contradictory hero badge on the scanner grid, mobile app,
+  // and alerts, which all render tier as-is per row.
+  const heroTicker = eligible[0]?.ticker ?? null;
+  const visibleOpportunities = eligible.slice(0, limit).map((candidate) =>
+    candidate.tier === "hero" && candidate.ticker !== heroTicker
+      ? { ...candidate, tier: "feature" as const }
+      : candidate,
+  );
   const momentumContenders =
     strategy === "spot_momentum"
       ? selectOverallMomentumContenders(
