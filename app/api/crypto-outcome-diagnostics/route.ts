@@ -10,8 +10,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
-import { loadCryptoDiscoverySources } from "@/lib/crypto/multi-venue-discovery";
-import { buildCryptoShadowDiscovery } from "@/lib/crypto/multi-venue-discovery";
+import { buildFreshCryptoOpportunityFeedState } from "@/lib/crypto/coinbase-public";
 import { isAllowedMainstreamCryptoAsset } from "@/lib/crypto/asset-policy";
 
 export const dynamic = "force-dynamic";
@@ -38,16 +37,16 @@ export async function GET() {
       .limit(50);
     if (overdueError) throw overdueError;
 
-    const sources = await loadCryptoDiscoverySources();
-    const shadow = buildCryptoShadowDiscovery({
-      coinbaseOpportunities: [],
-      sources,
-    });
+    const feedState = await buildFreshCryptoOpportunityFeedState();
+    const discoveryPrices = feedState.discoveryPrices;
     const currentPriceByAssetId = new Map(
-      shadow.prices.map((price) => [price.assetId, price.priceUsd]),
+      discoveryPrices.map((price) => [price.assetId, price.priceUsd]),
+    );
+    const currentPriceBySymbol = new Map(
+      discoveryPrices.map((price) => [price.symbol, price.priceUsd]),
     );
     const currentAssetIdsBySymbol = new Map<string, string[]>();
-    for (const price of shadow.prices) {
+    for (const price of discoveryPrices) {
       const list = currentAssetIdsBySymbol.get(price.symbol) ?? [];
       list.push(price.assetId);
       currentAssetIdsBySymbol.set(price.symbol, list);
@@ -55,6 +54,10 @@ export async function GET() {
 
     const rows = (overdueRows ?? []).map((row) => {
       const symbol = String(row.symbol ?? "");
+      const exactPrice = currentPriceByAssetId.get(row.asset_id);
+      const symbolPrice = currentPriceBySymbol.get(symbol);
+      const resolvedPrice = exactPrice ?? symbolPrice;
+      const entryPrice = Number(row.entry_price_usd);
       return {
         assetId: row.asset_id,
         symbol,
@@ -65,8 +68,15 @@ export async function GET() {
         exactAssetIdFoundNow: currentPriceByAssetId.has(row.asset_id),
         symbolFoundUnderDifferentAssetIdNow:
           !currentPriceByAssetId.has(row.asset_id) &&
-          (currentAssetIdsBySymbol.get(symbol)?.length ?? 0) > 0,
+          currentPriceBySymbol.has(symbol),
         currentAssetIdsForSymbol: currentAssetIdsBySymbol.get(symbol) ?? [],
+        resolvedPriceViaFix: resolvedPrice ?? null,
+        wouldUpdateWithFix: Boolean(
+          resolvedPrice &&
+          resolvedPrice > 0 &&
+          Number.isFinite(entryPrice) &&
+          entryPrice > 0,
+        ),
       };
     });
 
@@ -78,12 +88,8 @@ export async function GET() {
       assetIdDriftedNow: rows.filter(
         (row) => row.symbolFoundUnderDifferentAssetIdNow,
       ).length,
-      neitherFoundNow: rows.filter(
-        (row) =>
-          !row.exactAssetIdFoundNow &&
-          !row.symbolFoundUnderDifferentAssetIdNow &&
-          row.policyAllowed,
-      ).length,
+      wouldUpdateWithFixCount: rows.filter((row) => row.wouldUpdateWithFix).length,
+      discoveryPricesCount: discoveryPrices.length,
       rows,
     });
   } catch (error) {
