@@ -37,13 +37,21 @@ export default function PriceDiscoveryWindow({
         />
         <Value
           label="Structural Risk"
-          value={`-${scenarios.structuralRisk.toFixed(1)}%`}
-          tone="text-red-400"
+          value={
+            scenarios.structuralRisk !== null
+              ? `-${scenarios.structuralRisk.toFixed(1)}%`
+              : "Not yet measurable"
+          }
+          tone={scenarios.structuralRisk !== null ? "text-red-400" : "text-zinc-500"}
         />
         <Value
           label="Scenario R/R"
-          value={`${scenarios.expansionRr.toFixed(1)}:1`}
-          tone="text-violet-400"
+          value={
+            scenarios.expansionRr !== null
+              ? `${scenarios.expansionRr.toFixed(1)}:1`
+              : "Not yet measurable"
+          }
+          tone={scenarios.expansionRr !== null ? "text-violet-400" : "text-zinc-500"}
         />
       </div>
 

@@ -4,6 +4,8 @@ import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 import { isSupportedType } from "@/lib/security-type-policy";
 import {
   enforceSpotMomentumAuthority,
+  getPriceDiscoveryEntryRejection,
+  isSpotMomentumEntryTimingOnlyRejection,
   preserveDisplayHardFailures,
 } from "@/lib/spot-momentum-authority";
 import {
@@ -15,7 +17,7 @@ import { evaluateProxPublicAuthority } from "@/lib/prox/public-authority";
 export { getCanonicalMomentumMagnitude } from "@/lib/canonical-momentum";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v14-restored-fused-momentum";
+  "opportunities-v17-price-discovery-entry-floor";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -112,8 +114,13 @@ export type ExplosionAssessment = {
     base: { min: number; max: number };
     expansion: { min: number; max: number };
     tail: { min: number; max: number };
-    structuralRisk: number;
-    expansionRr: number;
+    // Null when framework.downsideRisk isn't available (a genuine breakout
+    // that's blown past the historical-deviation check before a support
+    // level was ever computed) — the upside bands below don't need a
+    // downside number to be computed, only these two do. Null means
+    // "not measurable yet," never a manufactured number.
+    structuralRisk: number | null;
+    expansionRr: number | null;
     inputs: {
       atrPercent: number;
       currentMovePercent: number;
@@ -349,12 +356,19 @@ function buildExplosionAssessment(
     framework.atr14 !== null && candidate.price > 0
       ? (framework.atr14 / candidate.price) * 100
       : null;
+  // Only the risk/ratio piece below genuinely needs a real downsideRisk —
+  // the upside bands (base/expansion/tail) are built entirely from ATR,
+  // live impulse, volume, and momentum. Previously the whole scenario was
+  // gated on downsideRisk being available, which meant one missing number
+  // (structurally null for the biggest, most extended movers — the ones
+  // that blew past the historical-deviation check before a support level
+  // was ever computed) blanked out the entire scenario for a candidate
+  // that had already passed every other confirmation check. Now the bands
+  // compute whenever ATR data is available; structuralRisk/expansionRr
+  // individually fall back to null when downsideRisk isn't there, rather
+  // than the whole thing disappearing.
   const scenarioBands =
-    state === "price_discovery" &&
-    atrPercent !== null &&
-    atrPercent > 0 &&
-    framework.downsideRisk !== null &&
-    framework.downsideRisk > 0
+    state === "price_discovery" && atrPercent !== null && atrPercent > 0
       ? (() => {
           // These are conditional expansion scenarios, not price targets.
           // Base is anchored to the stock's own ATR. Expansion and tail are
@@ -403,11 +417,16 @@ function buildExplosionAssessment(
               max: rounded(expansionMax),
             },
             tail: { min: rounded(tailMin), max: rounded(tailMax) },
-            structuralRisk: rounded(framework.downsideRisk),
+            structuralRisk:
+              framework.downsideRisk !== null && framework.downsideRisk > 0
+                ? rounded(framework.downsideRisk)
+                : null,
             expansionRr:
-              Math.round(
-                (expansionMidpoint / framework.downsideRisk) * 10,
-              ) / 10,
+              framework.downsideRisk !== null && framework.downsideRisk > 0
+                ? Math.round(
+                    (expansionMidpoint / framework.downsideRisk) * 10,
+                  ) / 10
+                : null,
             inputs: {
               atrPercent: rounded(atrPercent),
               currentMovePercent: rounded(momentumReferenceChange),
@@ -471,14 +490,6 @@ function isMoveExplainedPriceDiscontinuity(
   const move = Math.abs(candidateChange);
   if (!Number.isFinite(deviation) || move <= 0) return false;
   return Math.abs(deviation - move) <= Math.max(5, move * 0.1);
-}
-
-function isEntryTimingOnlyRejection(reason: string) {
-  return (
-    reason.startsWith("R:R ") ||
-    reason === "Reward magnitude is negligible." ||
-    reason === PROX_SESSION_RECLAIM_REQUIRED
-  );
 }
 
 export function evaluateCanonicalOpportunity(
@@ -608,7 +619,7 @@ export function evaluateCanonicalOpportunity(
     }
   }
 
-  const eligible = rejectionReasons.length === 0;
+  const baseEligible = rejectionReasons.length === 0;
   // Visibility and conventional framework availability answer different
   // questions. During a genuine opening drive, Polygon's newest completed
   // daily bar is normally yesterday's close, so a real +100% move also looks
@@ -634,6 +645,42 @@ export function evaluateCanonicalOpportunity(
     rejectionReasons,
     removablePriceDiscontinuity,
   );
+  const strength = signalStrength(candidate, strategy);
+  const breakout = getBreakoutPotential(
+    {
+      change: momentumReferenceChange,
+      relativeVolume: candidate.relativeVolume,
+      momentumScore: candidate.momentumScore,
+      crowdScore: candidate.crowdScore,
+      trapScore: candidate.trapScore,
+      catalystScore: candidate.catalystScore,
+    },
+    framework,
+    strategy,
+  );
+  let explosionAssessment = buildExplosionAssessment(
+    candidate,
+    framework,
+    breakout.score,
+    baseEligible,
+    strategy,
+    priceDiscoveryVisibilityOverride,
+    confirmedRunner,
+  );
+  const priceDiscoveryEntryRejection =
+    strategy === "spot_momentum"
+      ? getPriceDiscoveryEntryRejection(explosionAssessment)
+      : null;
+  if (priceDiscoveryEntryRejection) {
+    rejectionReasons.push(priceDiscoveryEntryRejection);
+    displayRejectionReasons.push(priceDiscoveryEntryRejection);
+    explosionAssessment = {
+      ...explosionAssessment,
+      paperEntryEligible: false,
+      paperTradeScore: null,
+    };
+  }
+  const eligible = rejectionReasons.length === 0;
   const displayEligible = displayRejectionReasons.length === 0;
   const momentumRadarEligible = Boolean(
     strategy === "spot_momentum" &&
@@ -648,29 +695,9 @@ export function evaluateCanonicalOpportunity(
       proxMarketConfirmation >= 55 &&
       (pulse.state === "expanding" || pulse.state === "stable") &&
       displayRejectionReasons.length > 0 &&
-      displayRejectionReasons.every(isEntryTimingOnlyRejection),
-  );
-  const strength = signalStrength(candidate, strategy);
-  const breakout = getBreakoutPotential(
-    {
-      change: momentumReferenceChange,
-      relativeVolume: candidate.relativeVolume,
-      momentumScore: candidate.momentumScore,
-      crowdScore: candidate.crowdScore,
-      trapScore: candidate.trapScore,
-      catalystScore: candidate.catalystScore,
-    },
-    framework,
-    strategy,
-  );
-  const explosionAssessment = buildExplosionAssessment(
-    candidate,
-    framework,
-    breakout.score,
-    eligible,
-    strategy,
-    priceDiscoveryVisibilityOverride,
-    confirmedRunner,
+      displayRejectionReasons.every(
+        isSpotMomentumEntryTimingOnlyRejection,
+      ),
   );
   const tradeQuality =
     framework.rrRatio === null
@@ -725,6 +752,11 @@ export function evaluateCanonicalOpportunity(
               proxMarketAdjustment,
           ),
         );
+  // The former inline challenger was derived inside the canonical evaluator
+  // and could fall back to the canonical score. That is not independent ProX
+  // intelligence. The separately materialized ProX shadow board now owns its
+  // own discovery, structure, Edge Score, and ranking before any comparison.
+  const proxChallenger = null;
   const heroPulseConfirmed =
     !isActiveMarketSession() ||
     (proxIntelligence?.pulse?.fresh === true &&
@@ -911,6 +943,7 @@ export function evaluateCanonicalOpportunity(
     engineVersion: CANONICAL_OPPORTUNITY_VERSION,
     sourceRunId,
     proxIntelligence,
+    proxChallenger,
     setupType: sessionReclaim ? "session_reclaim" : "standard",
     displayChange: momentumReferenceChange,
     scoreContext: {

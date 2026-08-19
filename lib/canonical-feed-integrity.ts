@@ -10,6 +10,10 @@ export type CanonicalFeedRecord = {
   momentumRadarEligible?: unknown;
   visibilityState?: unknown;
   tradeFramework?: { hardFailures?: unknown } | null;
+  explosionAssessment?: {
+    state?: unknown;
+    scenarioBands?: { expansionRr?: unknown } | null;
+  } | null;
   scoreContext?: { peakFailureConfirmed?: unknown } | null;
 };
 
@@ -62,17 +66,44 @@ export function auditCanonicalSpotMomentumFeed(
     if (!nearlyEqual(change, displayChange)) {
       issues.push({ ticker, role, code: "decision_display_change_mismatch" });
     }
-    if (record.displayEligibility?.eligible !== true) {
-      issues.push({ ticker, role, code: "not_display_eligible" });
-    }
-    if (record.momentumRadarEligible === true) {
-      issues.push({ ticker, role, code: "radar_mixed_into_qualified_set" });
+    const isEntryWithheldContender =
+      role === "contender" &&
+      record.displayEligibility?.eligible !== true &&
+      record.momentumRadarEligible === true &&
+      record.visibilityState === "momentum_radar";
+    const scenarioRr = Number(
+      record.explosionAssessment?.scenarioBands?.expansionRr,
+    );
+    if (
+      record.displayEligibility?.eligible !== true &&
+      !isEntryWithheldContender
+    ) {
+      issues.push({ ticker, role, code: "invalid_contender_authority" });
     }
     if (record.scoreContext?.peakFailureConfirmed === true) {
       issues.push({ ticker, role, code: "confirmed_peak_failure_visible" });
     }
     if (
+      record.displayEligibility?.eligible === true &&
+      record.explosionAssessment?.state === "price_discovery" &&
+      Number.isFinite(scenarioRr) &&
+      scenarioRr < 1
+    ) {
+      // A missing ratio (scenarioRr not finite) is no longer a violation on
+      // its own — getPriceDiscoveryEntryRejection (spot-momentum-authority.ts)
+      // stopped blocking entry on an unmeasurable ratio, only on a real,
+      // computed one below the floor. This check needs to agree with that
+      // rule, not the old one, or every legitimately-passing unmeasurable-
+      // ratio candidate would trip a fresh false alarm here.
+      issues.push({
+        ticker,
+        role,
+        code: "price_discovery_entry_floor_violation",
+      });
+    }
+    if (
       hardFailures.length > 0 &&
+      !isEntryWithheldContender &&
       record.visibilityState !== "verified_price_discovery"
     ) {
       issues.push({ ticker, role, code: "hard_failure_visible" });
@@ -91,15 +122,12 @@ export function auditCanonicalSpotMomentumFeed(
   opportunities.forEach((record) => auditQualified(record, "qualified"));
   contenders.forEach((record) => auditQualified(record, "contender"));
 
-  const expectedContenders = opportunities
-    .slice(1, 1 + contenders.length)
-    .map((record) => tickerValue(record.ticker));
   const actualContenders = contenders.map((record) => tickerValue(record.ticker));
-  if (JSON.stringify(expectedContenders) !== JSON.stringify(actualContenders)) {
+  if (new Set(actualContenders).size !== actualContenders.length) {
     issues.push({
       ticker: actualContenders.join(",") || "NONE",
       role: "feed",
-      code: "contenders_do_not_match_canonical_rank",
+      code: "duplicate_overall_contenders",
     });
   }
 
