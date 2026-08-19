@@ -136,6 +136,7 @@ export async function GET(req: Request) {
       timestamp: new Date().toISOString(),
     });
   } catch (error: unknown) {
+    console.error("[prox-shadow-scorecard] failed:", error);
     return NextResponse.json({ error: getErrorMessage(error, "Failed to build ProX shadow scorecard") }, { status: 500 });
   }
 }
