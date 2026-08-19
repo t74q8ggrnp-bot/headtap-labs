@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  buildCryptoOpportunityFeedState,
+  buildFreshCryptoOpportunityFeedState,
   loadCoinbaseCurrentPrices,
 } from "@/lib/crypto/coinbase-public";
 import type {
@@ -94,6 +94,38 @@ function decisionSnapshot(opportunity: CryptoOpportunity) {
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000).toISOString();
+}
+
+async function persistDecisionFrame({
+  supabase,
+  feed,
+  observationMinute,
+  observedAt,
+}: {
+  supabase: ReturnType<typeof getSupabase>;
+  feed: CryptoOpportunityFeed;
+  observationMinute: string;
+  observedAt: string;
+}) {
+  const opportunityCount =
+    Number(feed.hero !== null) + feed.contenders.length + feed.radar.length;
+  const { error } = await supabase
+    .from("ht_crypto_decision_frames")
+    .upsert({
+      decision_at: feed.decisionFrame.decisionAt,
+      decision_minute: observationMinute,
+      fresh_until: feed.decisionFrame.freshUntil,
+      methodology_version: feed.methodologyVersion,
+      expected_opportunity_count: opportunityCount,
+      complete: feed.decisionFrame.fresh,
+      feed,
+      diagnostics: feed.diagnostics,
+      updated_at: observedAt,
+    }, {
+      onConflict: "decision_minute",
+    });
+  if (error) throw error;
+  return opportunityCount;
 }
 
 async function loadDueOutcomes(
@@ -193,6 +225,15 @@ async function loadDueDiscoveryOutcomes(
         .select("id,asset_id,entry_price_usd")
         .is(price, null)
         .lte(target, nowIso)
+        // asset_id changed from a bare "crypto:SYMBOL" format to a
+        // venue-qualified "crypto:venue:productid" format when multi-venue
+        // discovery landed. Rows written under the old format (confirmed
+        // live: 49,583 of them) can never resolve — current price lookups
+        // are keyed by the new format and will never match — so without
+        // this filter they'd stay "overdue" forever and permanently red-flag
+        // this health check. The historical rows themselves are left alone;
+        // this only stops chasing outcomes that can't ever be found.
+        .like("asset_id", "crypto:%:%")
         .order(target, { ascending: true })
         .limit(OUTCOME_QUERY_LIMIT);
       if (error) throw error;
@@ -278,7 +319,7 @@ function discoveryObservationRow(
     observed_move_percent: candidate.observedMovePercent,
     dollar_volume: candidate.dollarVolume,
     venue_count: candidate.venueCount,
-    methodology_version: "crypto-multivenue-discovery-v1",
+    methodology_version: "crypto-multivenue-discovery-v2",
     discovery_packet: candidate,
     target_15m_at: addMinutes(now, 15),
     target_1h_at: addMinutes(now, 60),
@@ -380,9 +421,15 @@ async function collect() {
   const observationMinute = new Date(
     Math.floor(now.getTime() / 60_000) * 60_000,
   ).toISOString();
-  const feedState = await buildCryptoOpportunityFeedState();
+  const feedState = await buildFreshCryptoOpportunityFeedState();
   const feed = feedState.feed;
   const observed = selectObserved(feed);
+  const frameOpportunityCount = await persistDecisionFrame({
+    supabase,
+    feed,
+    observationMinute,
+    observedAt,
+  });
   const observationRows = observed.map(({ opportunity, role, rank }) => ({
     product_id: opportunity.productId,
     symbol: opportunity.symbol,
@@ -467,8 +514,13 @@ async function collect() {
 
   return {
     success: true,
-    authority: "shadow_only",
+    authority: "bounded_backend",
     methodologyVersion: feed.methodologyVersion,
+    decisionFrame: {
+      decisionAt: feed.decisionFrame.decisionAt,
+      freshUntil: feed.decisionFrame.freshUntil,
+      opportunityCount: frameOpportunityCount,
+    },
     observed: observationRows.length,
     persisted: persistedObservationCount,
     proxPackets: observationRows.filter((row) => row.prox_packet).length,
@@ -494,7 +546,7 @@ export async function GET(request: Request) {
         error: error instanceof Error
           ? error.message
           : "Crypto ProX sensor failed.",
-        authority: "shadow_only",
+        authority: "bounded_backend",
       },
       { status: 500 },
     );

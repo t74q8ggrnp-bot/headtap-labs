@@ -21,12 +21,22 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buildCanonicalOpportunityFeed } from "@/lib/canonical-opportunity-feed";
 import { auditCanonicalSpotMomentumFeed } from "@/lib/canonical-feed-integrity";
+import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
+import { auditTopMoverDispositions } from "@/lib/top-mover-disposition";
 import {
   PROX_PUBLIC_AUTHORITY_CONTRACT,
   PROX_PUBLIC_AUTHORITY_VERSION,
 } from "@/lib/prox/public-authority";
+import { PROX_MARKET_DISCOVERY_VERSION } from "@/lib/prox/market-discovery";
+import { PROX_SECURITY_ROUTING_VERSION } from "@/lib/prox/security-routing";
+import { PROX_OUTCOME_MEMORY_VERSION } from "@/lib/prox/outcome-memory";
+import { PROX_MARKET_STRUCTURE_VERSION } from "@/lib/prox/market-structure";
+import {
+  PROX_EDGE_SCORE_VERSION,
+  assertNoForbiddenProxInputs,
+} from "@/lib/prox/edge-score";
+import { PROX_SHADOW_BOARD_VERSION } from "@/lib/prox/shadow-board";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -36,6 +46,7 @@ const CLOSED_MAX_SIGNAL_AGE_HOURS = 8;
 const ACTIVE_MAX_PROX_AGE_HOURS = 10 / 60;
 const ACTIVE_MAX_DIRECT_DISCOVERY_AGE_HOURS = 12 / 60;
 const ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS = 12 / 60;
+const ACTIVE_MAX_SHADOW_BOARD_AGE_HOURS = 12 / 60;
 const ACTIVE_MAX_TRANSITION_MEMORY_AGE_HOURS = 12 / 60;
 const ACTIVE_MAX_TRANSITION_CALIBRATION_AGE_HOURS = 22 / 60;
 const ACTIVE_MAX_LEDGER_AGE_HOURS = 12 / 60;
@@ -222,6 +233,26 @@ export async function GET() {
             reclaimCandidates: candidateCounts.retrievedForReclaim ?? null,
           }
         : null,
+    });
+
+    const writerVersion = Number(writerVersionMatch?.[1] ?? 0);
+    const dispositionAudit = auditTopMoverDispositions(
+      candidateCounts.topMoverDispositions,
+    );
+    const dispositionReceiptsExpected = writerVersion >= 10;
+    checks.push({
+      name: "polygon_top_mover_dispositions",
+      ok: !dispositionReceiptsExpected || dispositionAudit.complete,
+      message: !dispositionReceiptsExpected
+        ? "Top-mover disposition receipts activate with the next v10 promoted scan."
+        : dispositionAudit.complete
+          ? "Every sampled Polygon top mover has an explicit canonical or exclusion outcome."
+          : "One or more sampled Polygon top movers disappeared without a complete disposition.",
+      detail: {
+        writerVersion,
+        expected: dispositionReceiptsExpected,
+        ...dispositionAudit,
+      },
     });
 
     let runRowCount = 0;
@@ -435,6 +466,7 @@ export async function GET() {
       .select(
         "id,started_at,completed_at,status,market_session,snapshot_count,eligible_count,expected_observation_count,persisted_observation_count,research_queued_count,complete,engine_version,diagnostics",
       )
+      .eq("engine_version", PROX_MARKET_DISCOVERY_VERSION)
       .eq("status", "success")
       .eq("complete", true)
       .order("completed_at", { ascending: false })
@@ -451,11 +483,30 @@ export async function GET() {
           : "Pro X direct market discovery schema is ready and awaiting its next active session.",
         detail: { activeMarketSession },
       });
+      checks.push({
+        name: "prox_security_type_routing",
+        ok: !activeMarketSession,
+        message: activeMarketSession
+          ? "Pro X security routing has no completed v2 active-session run."
+          : "Pro X security routing schema is ready and awaiting its next active session.",
+        detail: {
+          activeMarketSession,
+          expectedEngineVersion: PROX_MARKET_DISCOVERY_VERSION,
+          expectedRoutingVersion: PROX_SECURITY_ROUTING_VERSION,
+        },
+      });
     } else {
-      const { count: actualObservationCount, error: countError } =
+      const {
+        data: routedObservationRows,
+        count: actualObservationCount,
+        error: countError,
+      } =
         await supabase
           .from("prox_market_discovery_observations")
-          .select("*", { count: "exact", head: true })
+          .select(
+            "security_type,instrument_lane,opportunity_eligible,metadata_state",
+            { count: "exact" },
+          )
           .eq("run_id", discoveryRun.id);
       if (countError) throw countError;
 
@@ -514,13 +565,316 @@ export async function GET() {
               : null,
         },
       });
+
+      const rows = routedObservationRows ?? [];
+      const invalidRows = rows.filter((row) => {
+        const lane = String(row.instrument_lane ?? "");
+        const securityType = String(row.security_type ?? "");
+        const metadataState = String(row.metadata_state ?? "");
+        const opportunityEligible = row.opportunity_eligible === true;
+        if (lane === "excluded_asset") return true;
+        if (lane === "opportunity_equity") {
+          return (
+            !opportunityEligible ||
+            !["CS", "ADRC"].includes(securityType) ||
+            metadataState !== "verified"
+          );
+        }
+        if (opportunityEligible) return true;
+        if (lane === "pending_verification") {
+          return metadataState !== "pending";
+        }
+        return (
+          !["market_context", "linked_instrument_context"].includes(lane) ||
+          metadataState !== "verified"
+        );
+      });
+      const discoveryDiagnostics =
+        discoveryRun.diagnostics &&
+        typeof discoveryRun.diagnostics === "object" &&
+        !Array.isArray(discoveryRun.diagnostics)
+          ? (discoveryRun.diagnostics as Record<string, unknown>)
+          : {};
+      const registryDiagnostics =
+        discoveryDiagnostics.securityTypeRegistry &&
+        typeof discoveryDiagnostics.securityTypeRegistry === "object" &&
+        !Array.isArray(discoveryDiagnostics.securityTypeRegistry)
+          ? (discoveryDiagnostics.securityTypeRegistry as Record<string, unknown>)
+          : {};
+      const routingVersionValid =
+        discoveryDiagnostics.securityRoutingVersion ===
+        PROX_SECURITY_ROUTING_VERSION;
+      const registryAvailable =
+        registryDiagnostics.source === "cache" ||
+        registryDiagnostics.source === "provider";
+      const routeIntegrityValid =
+        rows.length === actualCount &&
+        invalidRows.length === 0 &&
+        routingVersionValid &&
+        registryAvailable;
+      checks.push({
+        name: "prox_security_type_routing",
+        ok: routeIntegrityValid,
+        message: !routingVersionValid
+          ? "Pro X security routing version is missing or stale."
+          : !registryAvailable
+            ? "The provider security-type registry is unavailable."
+            : invalidRows.length > 0
+              ? "Pro X security lanes contain an invalid opportunity-eligibility combination."
+              : "Pro X security lanes are verified and only CS/ADRC observations can seed opportunity learning.",
+        detail: {
+          runId: discoveryRun.id,
+          engineVersion: discoveryRun.engine_version,
+          securityRoutingVersion:
+            discoveryDiagnostics.securityRoutingVersion ?? null,
+          registry: registryDiagnostics,
+          routedObservationCount: rows.length,
+          invalidRowCount: invalidRows.length,
+          laneCounts: discoveryDiagnostics.laneCounts ?? null,
+          selectedLaneCounts:
+            discoveryDiagnostics.selectedLaneCounts ?? null,
+          metadata: discoveryDiagnostics.securityMetadata ?? null,
+        },
+      });
     }
   } catch (err: unknown) {
     checks.push({
       name: "prox_direct_market_discovery",
       ok: false,
       message:
-        "Pro X direct Polygon discovery is unavailable; run migration 0013 before deploying.",
+        "Pro X direct Polygon discovery is unavailable; run migrations 0013 and 0017 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    checks.push({
+      name: "prox_security_type_routing",
+      ok: false,
+      message:
+        "Pro X security routing is unavailable; run migration 0017 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // The independent ProX board must be atomic, complete, and free of
+  // canonical scoring inputs. It remains shadow-only and never changes the
+  // public HT board or any execution path.
+  try {
+    const { data: boardRun, error: boardRunError } = await supabase
+      .from("prox_shadow_board_runs")
+      .select(
+        "id,decision_at,completed_at,status,complete,candidate_count,expected_member_count,persisted_member_count,selected_count,blocked_count,rejected_count,hero_ticker,engine_version,structure_version,edge_score_version,security_routing_version,authority,diagnostics",
+      )
+      .eq("engine_version", PROX_SHADOW_BOARD_VERSION)
+      .eq("status", "success")
+      .eq("complete", true)
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (boardRunError) throw boardRunError;
+
+    if (!boardRun) {
+      checks.push({
+        name: "prox_independent_shadow_board",
+        ok: !activeMarketSession,
+        message: activeMarketSession
+          ? "The independent ProX shadow board has no completed active-session frame."
+          : "The independent ProX shadow board is awaiting its next active session.",
+        detail: {
+          activeMarketSession,
+          expectedEngineVersion: PROX_SHADOW_BOARD_VERSION,
+          expectedStructureVersion: PROX_MARKET_STRUCTURE_VERSION,
+          expectedEdgeScoreVersion: PROX_EDGE_SCORE_VERSION,
+        },
+      });
+    } else {
+      const { data: members, count, error: membersError } = await supabase
+        .from("prox_shadow_board_members")
+        .select(
+          "decision_at,ticker,market_session,discovery_pattern,edge_score,continuation_probability,reward_risk_asymmetry,evidence_confidence,risk_penalty,entry_qualified,role,disposition,rank,edge_assessment,structure_assessment,input_provenance",
+          { count: "exact" },
+        )
+        .eq("run_id", boardRun.id)
+        .order("edge_score", { ascending: false });
+      if (membersError) throw membersError;
+      const rows = members ?? [];
+      const actualCount = count ?? 0;
+      const expectedCount = Number(boardRun.expected_member_count);
+      const persistedCount = Number(boardRun.persisted_member_count);
+      const selected = rows.filter(
+        (member) => member.disposition === "selected",
+      );
+      const blocked = rows.filter(
+        (member) => member.disposition === "blocked",
+      );
+      const rejected = rows.filter(
+        (member) => member.disposition === "rejected",
+      );
+      const hero = rows.filter((member) => member.role === "hero");
+      const contenders = rows.filter(
+        (member) => member.role === "contender",
+      );
+      const selectedRanks = selected
+        .map((member) => Number(member.rank))
+        .sort((left, right) => left - right);
+      const expectedRanks = Array.from(
+        { length: selected.length },
+        (_, index) => index + 1,
+      );
+      const dispositionValid = rows.every((member) => {
+        if (
+          !["pre_market", "regular", "after_hours", "closed"].includes(
+            String(member.market_session),
+          ) ||
+          String(member.discovery_pattern ?? "").trim().length === 0
+        ) {
+          return false;
+        }
+        if (member.disposition === "selected") {
+          return (
+            member.entry_qualified === true &&
+            ["hero", "contender"].includes(String(member.role)) &&
+            Number(member.rank) >= 1 &&
+            Number(member.rank) <= 6
+          );
+        }
+        if (member.disposition === "blocked") {
+          return (
+            member.entry_qualified === false &&
+            member.role === "radar" &&
+            member.rank === null
+          );
+        }
+        return (
+          member.disposition === "rejected" &&
+          member.entry_qualified === true &&
+          member.role === "none" &&
+          member.rank === null
+        );
+      });
+      const scoreMathValid = rows.every((member) => {
+        const expected = Math.min(
+          100,
+          Math.max(
+            0,
+            Number(member.continuation_probability) * 0.6 +
+              Number(member.reward_risk_asymmetry) * 0.3 +
+              Number(member.evidence_confidence) * 0.1 -
+              Number(member.risk_penalty),
+          ),
+        );
+        return Math.abs(expected - Number(member.edge_score)) <= 0.2;
+      });
+      let forbiddenInputCount = 0;
+      for (const member of rows) {
+        try {
+          assertNoForbiddenProxInputs(member.input_provenance);
+          assertNoForbiddenProxInputs(member.edge_assessment);
+          assertNoForbiddenProxInputs(member.structure_assessment);
+        } catch {
+          forbiddenInputCount += 1;
+        }
+      }
+      const diagnostics =
+        boardRun.diagnostics &&
+        typeof boardRun.diagnostics === "object" &&
+        !Array.isArray(boardRun.diagnostics)
+          ? (boardRun.diagnostics as Record<string, unknown>)
+          : {};
+      const canonicalInputsConsumed = Array.isArray(
+        diagnostics.canonicalInputsConsumed,
+      )
+        ? diagnostics.canonicalInputsConsumed
+        : null;
+      const coverageValid =
+        Number(boardRun.candidate_count) === expectedCount &&
+        expectedCount === persistedCount &&
+        persistedCount === actualCount &&
+        rows.length === actualCount &&
+        Number(boardRun.selected_count) === selected.length &&
+        Number(boardRun.blocked_count) === blocked.length &&
+        Number(boardRun.rejected_count) === rejected.length;
+      const boardShapeValid =
+        dispositionValid &&
+        selected.length <= 6 &&
+        contenders.length <= 5 &&
+        hero.length === (selected.length > 0 ? 1 : 0) &&
+        JSON.stringify(selectedRanks) === JSON.stringify(expectedRanks) &&
+        (hero[0]?.ticker ?? null) === boardRun.hero_ticker;
+      const versionValid =
+        boardRun.structure_version === PROX_MARKET_STRUCTURE_VERSION &&
+        boardRun.edge_score_version === PROX_EDGE_SCORE_VERSION &&
+        boardRun.security_routing_version ===
+          PROX_SECURITY_ROUTING_VERSION &&
+        boardRun.authority === "shadow_research_only";
+      const independentInputValid =
+        forbiddenInputCount === 0 &&
+        canonicalInputsConsumed !== null &&
+        canonicalInputsConsumed.length === 0;
+      const frameAtomic = rows.every(
+        (member) => member.decision_at === boardRun.decision_at,
+      );
+      const ageHours = hoursSince(
+        boardRun.completed_at ?? boardRun.decision_at,
+      );
+      const fresh =
+        !activeMarketSession ||
+        ageHours <= ACTIVE_MAX_SHADOW_BOARD_AGE_HOURS;
+      const ok =
+        coverageValid &&
+        boardShapeValid &&
+        versionValid &&
+        independentInputValid &&
+        frameAtomic &&
+        scoreMathValid &&
+        fresh;
+      checks.push({
+        name: "prox_independent_shadow_board",
+        ok,
+        message: !coverageValid
+          ? "The independent ProX board failed its complete-candidate disposition receipt."
+          : !independentInputValid
+            ? "A forbidden canonical decision field entered the independent ProX board."
+            : !frameAtomic
+              ? "ProX score, rank, price, and disposition do not share one atomic frame."
+              : !scoreMathValid
+                ? "A persisted ProX Edge Score does not match the versioned 60/30/10 contract."
+                : !boardShapeValid || !versionValid
+                  ? "The ProX board role, version, or shadow-authority contract is invalid."
+                  : !fresh
+                    ? "The independent ProX board is stale during the active market-data session."
+                    : "The independent ProX board is fresh, atomic, complete, and free of canonical scoring inputs.",
+        detail: {
+          runId: boardRun.id,
+          engineVersion: boardRun.engine_version,
+          structureVersion: boardRun.structure_version,
+          edgeScoreVersion: boardRun.edge_score_version,
+          securityRoutingVersion: boardRun.security_routing_version,
+          decisionAt: boardRun.decision_at,
+          completedAt: boardRun.completed_at,
+          ageMinutes: Number.isFinite(ageHours)
+            ? Number((ageHours * 60).toFixed(1))
+            : null,
+          candidateCount: Number(boardRun.candidate_count),
+          expectedCount,
+          persistedCount,
+          actualCount,
+          selectedCount: selected.length,
+          blockedCount: blocked.length,
+          rejectedCount: rejected.length,
+          heroTicker: boardRun.hero_ticker,
+          forbiddenInputCount,
+          canonicalInputsConsumed,
+          frameAtomic,
+          scoreMathValid,
+          authority: boardRun.authority,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_independent_shadow_board",
+      ok: false,
+      message:
+        "The independent ProX shadow board is unavailable; run migration 0018 before deploying.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
@@ -534,6 +888,7 @@ export async function GET() {
       .select(
         "id,observed_at,completed_at,status,market_session,snapshot_count,active_episode_count,updated_episode_count,due_outcome_count,persisted_outcome_count,unavailable_outcome_count,calibration_count,complete,methodology_version,diagnostics",
       )
+      .eq("methodology_version", PROX_OUTCOME_MEMORY_VERSION)
       .order("observed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -542,8 +897,9 @@ export async function GET() {
     const { data: latestEpisode, error: latestEpisodeError } = await supabase
       .from("prox_research_episodes")
       .select(
-        "ticker,started_at,entry_price,sampled_high_price,sampled_low_price,max_gain_percent,max_drawdown_percent,time_to_peak_minutes,outcome_label,status,measurement_quality,updated_at",
+        "ticker,started_at,entry_price,sampled_high_price,sampled_low_price,max_gain_percent,max_drawdown_percent,time_to_peak_minutes,outcome_label,status,measurement_quality,updated_at,methodology_version,security_type,instrument_lane",
       )
+      .eq("methodology_version", PROX_OUTCOME_MEMORY_VERSION)
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -600,7 +956,9 @@ export async function GET() {
           Number.isFinite(calculatedDrawdown) &&
           Math.abs(storedGain - calculatedGain) <= 0.05 &&
           Math.abs(storedDrawdown - calculatedDrawdown) <= 0.05 &&
-          Number(latestEpisode.time_to_peak_minutes) >= 0;
+          Number(latestEpisode.time_to_peak_minutes) >= 0 &&
+          latestEpisode.instrument_lane === "opportunity_equity" &&
+          ["CS", "ADRC"].includes(String(latestEpisode.security_type ?? ""));
         episodeDetail = {
           ticker: latestEpisode.ticker,
           startedAt: latestEpisode.started_at,
@@ -613,6 +971,8 @@ export async function GET() {
           label: latestEpisode.outcome_label,
           status: latestEpisode.status,
           measurementQuality: latestEpisode.measurement_quality,
+          securityType: latestEpisode.security_type,
+          instrumentLane: latestEpisode.instrument_lane,
           arithmeticValid: episodeMathValid,
         };
       }
@@ -625,7 +985,7 @@ export async function GET() {
           : !fresh
             ? "Pro X Outcome Memory is stale during the active market-data session."
             : !episodeMathValid
-              ? "Pro X Outcome Memory contains invalid entry, MFE, or MAE arithmetic."
+              ? "Pro X Outcome Memory contains invalid equity routing, entry, MFE, or MAE arithmetic."
               : activeMarketSession
                 ? "Pro X Outcome Memory is fresh, complete, and arithmetically valid."
                 : "Latest Pro X Outcome Memory cycle is retained outside the active session.",
@@ -1168,12 +1528,9 @@ export async function GET() {
   // earned qualification. This executes the same server-owned builder used by
   // Home, Scanner, ledger collection, and the paper bot, then fails health if
   // any qualified record is non-positive, post-quote divergent, peak-failed,
-  // or if a no-entry radar record was mixed into the contender ranking.
+  // or if an entry-withheld contender carries invalid radar authority.
   try {
-    const feed = await buildCanonicalOpportunityFeed({
-      requestedType: "momentum",
-      limit: 100,
-    });
+    const feed = await getRollingCanonicalDecisionFrame("momentum");
     const audit = auditCanonicalSpotMomentumFeed(feed);
     const topDecisionSet = [
       feed.opportunities[0],
@@ -1210,15 +1567,18 @@ export async function GET() {
       );
     checks.push({
       name: "canonical_opportunity_atomicity",
-      ok: audit.ok,
+      ok: audit.ok && feed.decisionFrame.fresh,
       message: !audit.ok
         ? "Canonical Spot Momentum contains a quote, eligibility, rank, or radar-authority mismatch."
+        : !feed.decisionFrame.fresh
+          ? "The rolling canonical decision frame exceeded its strict freshness window."
         : directQuoteCoverage
-          ? "Canonical Spot Momentum scoring, ranking, and display use one directly refreshed authoritative quote snapshot."
-          : "Canonical Spot Momentum remains atomic; unavailable direct quote refreshes retain the fresh promoted-run decision without a display override.",
+          ? "Canonical Spot Momentum scoring, ranking, and display use one fresh rolling decision frame."
+          : "Canonical Spot Momentum remains atomic; unavailable direct quote refreshes retain the fresh promoted-run decision.",
       detail: {
         engineVersion: feed.engineVersion,
         sourceRunId: "sourceRun" in feed ? feed.sourceRun.id : null,
+        decisionFrame: feed.decisionFrame,
         qualifiedCount: audit.qualifiedCount,
         contenderCount: audit.contenderCount,
         radarCount: audit.radarCount,
@@ -1611,12 +1971,22 @@ export async function GET() {
       const fresh = cryptoRunAgeHours <= MAX_CRYPTO_PROX_AGE_HOURS;
       const packetCoverage = (cryptoObservations ?? []).every((row) => {
         const packet = row.prox_packet && typeof row.prox_packet === "object"
-          ? row.prox_packet as { mode?: unknown; packetVersion?: unknown }
+          ? row.prox_packet as {
+              mode?: unknown;
+              packetVersion?: unknown;
+              fresh?: unknown;
+              state?: unknown;
+            }
           : null;
+        const requiresFreshAuthority = row.role === "hero" || row.role === "contender";
         return Boolean(
           row.prox_state &&
-          packet?.mode === "shadow" &&
-          packet.packetVersion === "crypto-prox-v1",
+          packet?.mode === "bounded_authority" &&
+          packet.packetVersion === "crypto-prox-v2" &&
+          (!requiresFreshAuthority ||
+            (packet.fresh === true &&
+              packet.state !== "stale" &&
+              packet.state !== "weakening")),
         );
       });
       const complete =
@@ -1641,7 +2011,7 @@ export async function GET() {
             : !exactCryptoSet
               ? "The persisted Crypto ProX products do not match the collection receipt."
               : !packetCoverage
-                ? "One or more current crypto opportunities is missing a valid shadow ProX packet."
+                ? "One or more current crypto opportunities is missing a valid bounded-authority ProX packet."
                 : !outcomesCurrent
                   ? "Crypto ProX has overdue 15-minute outcome observations."
                   : !fresh
@@ -1674,6 +2044,114 @@ export async function GET() {
       name: "crypto_prox_observation_pipeline",
       ok: false,
       message: "Crypto ProX history is unavailable; run migration 0011 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Home, Crypto, and mobile must consume one complete backend frame. A
+  // healthy provider scan is not sufficient if the public decision itself is
+  // missing, expired, hybrid, or grants authority to stale live-tape data.
+  try {
+    const { data: cryptoFrame, error: cryptoFrameError } = await supabase
+      .from("ht_crypto_decision_frames")
+      .select(
+        "decision_at,fresh_until,methodology_version,expected_opportunity_count,complete,feed,diagnostics",
+      )
+      .eq("complete", true)
+      .order("decision_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (cryptoFrameError) throw cryptoFrameError;
+    if (!cryptoFrame) {
+      checks.push({
+        name: "crypto_atomic_decision_frame",
+        ok: false,
+        message: "Crypto has no completed backend decision frame yet.",
+      });
+    } else {
+      const feed = cryptoFrame.feed && typeof cryptoFrame.feed === "object" &&
+          !Array.isArray(cryptoFrame.feed)
+        ? cryptoFrame.feed as Record<string, unknown>
+        : {};
+      const frame = feed.decisionFrame &&
+          typeof feed.decisionFrame === "object" &&
+          !Array.isArray(feed.decisionFrame)
+        ? feed.decisionFrame as Record<string, unknown>
+        : {};
+      const hero = feed.hero && typeof feed.hero === "object" &&
+          !Array.isArray(feed.hero)
+        ? feed.hero as Record<string, unknown>
+        : null;
+      const contenders = Array.isArray(feed.contenders)
+        ? feed.contenders as Array<Record<string, unknown>>
+        : [];
+      const radar = Array.isArray(feed.radar)
+        ? feed.radar as Array<Record<string, unknown>>
+        : [];
+      const actualOpportunityCount = Number(hero !== null) +
+        contenders.length + radar.length;
+      const expectedOpportunityCount = Number(
+        cryptoFrame.expected_opportunity_count,
+      );
+      const decisionAgeMinutes = hoursSince(cryptoFrame.decision_at) * 60;
+      const freshUntilMs = new Date(cryptoFrame.fresh_until).getTime();
+      const frameFresh = Number.isFinite(freshUntilMs) && freshUntilMs >= Date.now();
+      const authorityRows = [...(hero ? [hero] : []), ...contenders];
+      const authorityValid = authorityRows.every((opportunity) => {
+        const packet = opportunity.proxIntelligence &&
+            typeof opportunity.proxIntelligence === "object" &&
+            !Array.isArray(opportunity.proxIntelligence)
+          ? opportunity.proxIntelligence as Record<string, unknown>
+          : null;
+        return Boolean(
+          opportunity.decisionState === "qualified" &&
+          opportunity.eligible === true &&
+          opportunity.liveDataFresh === true &&
+          packet?.fresh === true &&
+          packet.state !== "stale" &&
+          packet.state !== "weakening",
+        );
+      });
+      const contractValid = Boolean(
+        cryptoFrame.methodology_version === "crypto-momentum-v3-prox-authority" &&
+        frame.version === "crypto-decision-frame-v1" &&
+        frame.authority === "backend_atomic" &&
+        expectedOpportunityCount === actualOpportunityCount,
+      );
+      const ok = cryptoFrame.complete === true &&
+        frameFresh && contractValid && authorityValid;
+      checks.push({
+        name: "crypto_atomic_decision_frame",
+        ok,
+        message: !frameFresh
+          ? "The latest crypto decision frame has expired."
+          : !contractValid
+            ? "The latest crypto decision frame does not match its atomic contract."
+            : !authorityValid
+              ? "A crypto hero or contender lacks fresh bounded ProX authority."
+              : "Crypto is serving one fresh atomic backend decision with validated hero and contender authority.",
+        detail: {
+          decisionAt: cryptoFrame.decision_at,
+          freshUntil: cryptoFrame.fresh_until,
+          ageMinutes: Number.isFinite(decisionAgeMinutes)
+            ? Number(decisionAgeMinutes.toFixed(1))
+            : null,
+          expectedOpportunityCount,
+          actualOpportunityCount,
+          heroSymbol: hero ? String(hero.symbol ?? "") : null,
+          contenderCount: contenders.length,
+          radarCount: radar.length,
+          frameFresh,
+          contractValid,
+          authorityValid,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "crypto_atomic_decision_frame",
+      ok: false,
+      message: "Crypto decision frames are unavailable; run migration 0019 before deploying.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
@@ -1713,7 +2191,14 @@ export async function GET() {
           .from("ht_crypto_discovery_observations")
           .select("*", { count: "exact", head: true })
           .is("price_15m_usd", null)
-          .lte("target_15m_at", overdueCutoff);
+          .lte("target_15m_at", overdueCutoff)
+          // Must match the same current-format filter as the outcome
+          // backfill query in crypto/prox-sensor/route.ts, or this count
+          // would permanently include the 49,583 legacy "crypto:SYMBOL"
+          // rows that pipeline deliberately stopped chasing — they can
+          // never resolve, so counting them here would just reintroduce
+          // the same false failure at a different layer.
+          .like("asset_id", "crypto:%:%");
       if (overdueOutcomeError) throw overdueOutcomeError;
 
       type DiscoveryCoverageRow = {
