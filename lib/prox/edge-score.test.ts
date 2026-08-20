@@ -22,6 +22,7 @@ const structure = {
   extensionAtrMultiple: 0.8,
   extended: false,
   postPeakFailure: false,
+  severePeakFailure: false,
   measurable: true,
   reasons: ["Observed structure is measurable."],
 };
@@ -114,6 +115,16 @@ test("price consistency tolerance expands with observed volatility but stays bou
     structure: { ...structure, atrPercent: 50 },
   });
   assert.match(impossible.hardFailures.join(" "), /internally inconsistent/);
+});
+
+test("blocks a severe realized pullback even when the current tick looks quiet", () => {
+  const result = scoreProxEdge({
+    ...input,
+    pullbackFromWindowHighPercent: 28.7,
+    structure: { ...structure, severePeakFailure: true },
+  });
+  assert.equal(result.entryQualified, false);
+  assert.match(result.hardFailures.join(" "), /severe regardless of the current tick/);
 });
 
 test("does not manufacture a hero qualification from a weak but measurable setup", () => {

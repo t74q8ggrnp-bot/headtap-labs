@@ -40,6 +40,7 @@ export type ProxMarketStructureAssessment = {
   extensionAtrMultiple: number | null;
   extended: boolean;
   postPeakFailure: boolean;
+  severePeakFailure: boolean;
   measurable: boolean;
   reasons: string[];
 };
@@ -237,6 +238,16 @@ export function assessProxMarketStructure(
     (finite(input.acceleration5m) ?? 0) <= 0 &&
     vwap !== null &&
     price < vwap;
+  // postPeakFailure only catches a breakdown while it is actively happening
+  // (current 5-minute acceleration and current price-vs-VWAP). A name that
+  // already failed hard and has since gone quiet -- flat or even ticking up
+  // slightly, sitting above a VWAP the earlier selloff itself dragged down --
+  // can pass through it untouched. This is the same volatility-adjusted
+  // threshold at a much higher multiple, so it only fires on realized
+  // pullback magnitude far beyond anything ambiguous, independent of the
+  // current tick.
+  const severePeakFailure =
+    pullback !== null && pullback >= peakFailureThreshold * 2.5;
   const measurable =
     price > 0 &&
     atrPercent !== null &&
@@ -252,6 +263,7 @@ export function assessProxMarketStructure(
   if (resistancePrice !== null) reasons.push("Continuation capacity stops at the nearest observed daily resistance.");
   if (extended) reasons.push("Price is extended by at least 2.5 ATR from live VWAP.");
   if (postPeakFailure) reasons.push("Price is below VWAP after a volatility-adjusted failure from the recent high.");
+  if (severePeakFailure && !postPeakFailure) reasons.push("Realized pullback from the recent high is severe regardless of the current tick.");
   if (!measurable) reasons.push("Structure, risk, or continuation capacity cannot yet be measured honestly.");
 
   return {
@@ -287,6 +299,7 @@ export function assessProxMarketStructure(
       extensionAtrMultiple === null ? null : round(extensionAtrMultiple),
     extended,
     postPeakFailure,
+    severePeakFailure,
     measurable,
     reasons,
   };

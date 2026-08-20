@@ -89,3 +89,33 @@ test("confirms post-peak failure only with volatility-adjusted damage below VWAP
   assert.equal(failed.postPeakFailure, true);
   assert.equal(recovering.postPeakFailure, false);
 });
+
+test("flags a severe realized pullback even on a quiet, currently-positive tick", () => {
+  const quietAfterSevereFailure = assessProxMarketStructure({
+    price: 10.7,
+    vwap: 10.5,
+    windowHighPrice: 15,
+    pullbackFromWindowHighPercent: 28.7,
+    acceleration5m: 2,
+    averageBarRangePercent: 1.5,
+    dailyBars: bars(60, 7, 0.04),
+    intradayBars: bars(30, 8.5, 0.03),
+  });
+  assert.equal(quietAfterSevereFailure.postPeakFailure, false);
+  assert.equal(quietAfterSevereFailure.severePeakFailure, true);
+});
+
+test("does not flag severe failure for an ordinary, shallower pullback", () => {
+  const ordinaryPullback = assessProxMarketStructure({
+    price: 10.7,
+    vwap: 10.5,
+    windowHighPrice: 12,
+    pullbackFromWindowHighPercent: 10.8,
+    acceleration5m: 2,
+    averageBarRangePercent: 1.5,
+    dailyBars: bars(60, 7, 0.04),
+    intradayBars: bars(30, 8.5, 0.03),
+  });
+  assert.equal(ordinaryPullback.postPeakFailure, false);
+  assert.equal(ordinaryPullback.severePeakFailure, false);
+});

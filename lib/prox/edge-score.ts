@@ -339,6 +339,11 @@ export function scoreProxEdge(input: ProxEdgeScoreInput): ProxEdgeScoreResult {
   if (input.structure.postPeakFailure) {
     hardFailures.push("Fresh structure confirms post-peak failure below VWAP.");
   }
+  if (input.structure.severePeakFailure && !input.structure.postPeakFailure) {
+    hardFailures.push(
+      "Realized pullback from the recent high is severe regardless of the current tick.",
+    );
+  }
   if (
     input.structure.scenarioRiskReward !== null &&
     input.structure.scenarioRiskReward < 1
