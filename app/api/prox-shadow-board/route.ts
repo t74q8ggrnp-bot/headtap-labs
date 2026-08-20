@@ -623,13 +623,47 @@ export async function GET(request: Request) {
       };
     });
     let persistedCount = 0;
+    const outcomeParentRows: Array<Record<string, unknown>> = [];
     for (let index = 0; index < memberRows.length; index += WRITE_BATCH_SIZE) {
+      const batch = memberRows.slice(index, index + WRITE_BATCH_SIZE);
       const { data, error } = await supabase
         .from("prox_shadow_board_members")
-        .insert(memberRows.slice(index, index + WRITE_BATCH_SIZE))
+        .insert(batch)
         .select("id");
       if (error) throw error;
       persistedCount += data?.length ?? 0;
+      (data ?? []).forEach((row, i) => {
+        const member = batch[i];
+        outcomeParentRows.push({
+          member_id: row.id,
+          ticker: member.ticker,
+          trading_date: tradingDate,
+          market_session: member.market_session,
+          decision_at: member.decision_at,
+          entry_price: member.decision_price,
+          status: "active",
+          latest_price: member.decision_price,
+          latest_observed_at: member.decision_at,
+          sampled_high_price: member.decision_price,
+          sampled_high_at: member.decision_at,
+          sampled_low_price: member.decision_price,
+          sampled_low_at: member.decision_at,
+        });
+      });
+    }
+    // Seed the outcome-tracking parent row inline, same precedent as
+    // prox-market-discovery seeding prox_research_episodes right after
+    // writing its own observations -- prox-shadow-board-outcomes (the
+    // companion cron) only resolves due rows, it never creates parents.
+    for (
+      let index = 0;
+      index < outcomeParentRows.length;
+      index += WRITE_BATCH_SIZE
+    ) {
+      const { error } = await supabase
+        .from("prox_shadow_board_member_outcomes")
+        .insert(outcomeParentRows.slice(index, index + WRITE_BATCH_SIZE));
+      if (error) throw error;
     }
 
     const selected = board.filter((member) => member.disposition === "selected");

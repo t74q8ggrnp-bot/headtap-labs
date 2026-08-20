@@ -30,7 +30,10 @@ import {
 } from "@/lib/prox/public-authority";
 import { PROX_MARKET_DISCOVERY_VERSION } from "@/lib/prox/market-discovery";
 import { PROX_SECURITY_ROUTING_VERSION } from "@/lib/prox/security-routing";
-import { PROX_OUTCOME_MEMORY_VERSION } from "@/lib/prox/outcome-memory";
+import {
+  PROX_OUTCOME_MEMORY_VERSION,
+  PROX_SHADOW_BOARD_OUTCOMES_VERSION,
+} from "@/lib/prox/outcome-memory";
 import { PROX_MARKET_STRUCTURE_VERSION } from "@/lib/prox/market-structure";
 import {
   PROX_EDGE_SCORE_VERSION,
@@ -47,6 +50,8 @@ const ACTIVE_MAX_PROX_AGE_HOURS = 10 / 60;
 const ACTIVE_MAX_DIRECT_DISCOVERY_AGE_HOURS = 12 / 60;
 const ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS = 12 / 60;
 const ACTIVE_MAX_SHADOW_BOARD_AGE_HOURS = 12 / 60;
+const ACTIVE_MAX_SHADOW_BOARD_OUTCOMES_AGE_HOURS = 12 / 60;
+const SHADOW_BOARD_OUTCOME_GRACE_MINUTES = 10;
 const ACTIVE_MAX_TRANSITION_MEMORY_AGE_HOURS = 12 / 60;
 const ACTIVE_MAX_TRANSITION_CALIBRATION_AGE_HOURS = 22 / 60;
 const ACTIVE_MAX_LEDGER_AGE_HOURS = 12 / 60;
@@ -875,6 +880,92 @@ export async function GET() {
       ok: false,
       message:
         "The independent ProX shadow board is unavailable; run migration 0018 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Shadow-board outcome tracking must account for every active decision
+  // (selected, blocked, and rejected -- complete denominator) and every due
+  // horizon, with no writes back to the shadow board itself.
+  try {
+    const { data: outcomeRun, error: outcomeRunError } = await supabase
+      .from("prox_shadow_board_outcome_runs")
+      .select(
+        "id,observed_at,completed_at,status,complete,active_member_count,updated_member_count,due_outcome_count,persisted_outcome_count,unavailable_outcome_count,engine_version",
+      )
+      .eq("engine_version", PROX_SHADOW_BOARD_OUTCOMES_VERSION)
+      .eq("status", "success")
+      .eq("complete", true)
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (outcomeRunError) throw outcomeRunError;
+
+    if (!outcomeRun) {
+      checks.push({
+        name: "prox_shadow_board_outcomes",
+        ok: !activeMarketSession,
+        message: activeMarketSession
+          ? "Shadow-board outcome tracking has no completed active-session run."
+          : "Shadow-board outcome tracking is awaiting its next active session.",
+        detail: {
+          activeMarketSession,
+          expectedEngineVersion: PROX_SHADOW_BOARD_OUTCOMES_VERSION,
+        },
+      });
+    } else {
+      const overdueCutoff = new Date(
+        Date.now() - SHADOW_BOARD_OUTCOME_GRACE_MINUTES * 60_000,
+      ).toISOString();
+      const { count: overdueOutcomeCount, error: overdueOutcomeError } =
+        await supabase
+          .from("prox_shadow_board_member_outcome_horizons")
+          .select("*", { count: "exact", head: true })
+          .eq("complete", false)
+          .lte("target_at", overdueCutoff);
+      if (overdueOutcomeError) throw overdueOutcomeError;
+
+      const ageHours = hoursSince(
+        outcomeRun.completed_at ?? outcomeRun.observed_at,
+      );
+      const fresh =
+        !activeMarketSession ||
+        ageHours <= ACTIVE_MAX_SHADOW_BOARD_OUTCOMES_AGE_HOURS;
+      const outcomesCurrent = (overdueOutcomeCount ?? 0) === 0;
+      const ok = fresh && outcomesCurrent;
+
+      checks.push({
+        name: "prox_shadow_board_outcomes",
+        ok,
+        message: !outcomesCurrent
+          ? "Shadow-board outcome tracking has overdue horizon measurements."
+          : !fresh
+            ? "Shadow-board outcome tracking is stale during the active market-data session."
+            : "Shadow-board outcome tracking is fresh and covering every active decision.",
+        detail: {
+          authority: "shadow_research_only",
+          runId: outcomeRun.id,
+          engineVersion: outcomeRun.engine_version,
+          completedAt: outcomeRun.completed_at,
+          ageMinutes: Number.isFinite(ageHours)
+            ? Number((ageHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: ACTIVE_MAX_SHADOW_BOARD_OUTCOMES_AGE_HOURS * 60,
+          activeMemberCount: outcomeRun.active_member_count,
+          updatedMemberCount: outcomeRun.updated_member_count,
+          dueOutcomeCount: outcomeRun.due_outcome_count,
+          persistedOutcomeCount: outcomeRun.persisted_outcome_count,
+          unavailableOutcomeCount: outcomeRun.unavailable_outcome_count,
+          overdueOutcomeCount: overdueOutcomeCount ?? 0,
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_shadow_board_outcomes",
+      ok: false,
+      message:
+        "Shadow-board outcome tracking is unavailable; run migration 0020 before deploying.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
