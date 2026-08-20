@@ -56,6 +56,7 @@ export async function GET() {
         continuationProbability: m.continuation_probability,
         peakRetentionComponent: components?.peakRetention ?? null,
         postPeakFailure: structure?.postPeakFailure ?? null,
+        severePeakFailure: structure?.severePeakFailure ?? null,
         extended: structure?.extended ?? null,
         hardFailures: m.hard_failures,
       };
