@@ -6,6 +6,16 @@ import type {
 export const CRYPTO_PROX_VERSION = "crypto-prox-v2" as const;
 export const CRYPTO_PROX_MODE = "bounded_authority" as const;
 
+// Coinbase publishes closed 1-minute candles, not a live in-progress one, and
+// how far the latest closed candle trails "now" varies by product and by
+// when in the current minute it's queried -- measured directly up to ~120s
+// under completely normal conditions, for major pairs, not just thin ones.
+// 180s left too little margin above that real variance. ProX evaluates the
+// crypto board every 5 minutes, so "fresh" matching that cadence is the
+// natural bar -- tighter than how often we actually look doesn't buy
+// anything.
+const CRYPTO_PULSE_FRESH_SECONDS = 300;
+
 export type CryptoMinuteCandle = {
   time: number;
   low: number;
@@ -128,7 +138,7 @@ export function buildCryptoProxPacket({
   const ageSeconds = latestBucketEndMs > 0
     ? Math.max(0, Math.round((now.getTime() - latestBucketEndMs) / 1_000))
     : Infinity;
-  const fresh = ageSeconds <= 180;
+  const fresh = ageSeconds <= CRYPTO_PULSE_FRESH_SECONDS;
   const velocity1m = changeAtLookback(orderedCandles, 1);
   const velocity5m = changeAtLookback(orderedCandles, 5);
   const velocity15m = changeAtLookback(orderedCandles, 15);
