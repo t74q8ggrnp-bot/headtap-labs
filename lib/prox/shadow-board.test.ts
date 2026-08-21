@@ -14,7 +14,7 @@ function candidate(index: number, qualified = true) {
     discoveryPattern: "price_expansion",
     dollarVolume: 1_000_000,
     edge: {
-      version: "prox-edge-score-v1" as const,
+      version: "prox-edge-score-v2" as const,
       edgeScore: 90 - index,
       continuationProbability: 80 - index,
       rewardRiskAsymmetry: 75,
@@ -30,6 +30,7 @@ function candidate(index: number, qualified = true) {
         marketStructure: 80,
         twoClockAlignment: 80,
         comparableOutcomes: null,
+        newsAttention: null,
       },
       hardFailures: qualified ? [] : ["Entry withheld."],
       reasons: [],

@@ -1,6 +1,6 @@
 import type { ProxMarketStructureAssessment } from "@/lib/prox/market-structure";
 
-export const PROX_EDGE_SCORE_VERSION = "prox-edge-score-v1";
+export const PROX_EDGE_SCORE_VERSION = "prox-edge-score-v2";
 
 export const PROX_FORBIDDEN_CANONICAL_INPUT_FIELDS = [
   "htScore",
@@ -59,6 +59,22 @@ export type ProxEdgeCalibrationEvidence = {
   evidenceState: "insufficient" | "emerging" | "calibrated";
 };
 
+// A second, explicitly lower-tier evidence channel from ProX's own
+// independent news-intel lookup (headline/keyword heuristics over
+// Finnhub + NewsAPI), distinct from `event` above. `event` is
+// SEC-filing-style evidence with deterministic ticker matching and source
+// credibility; this has neither. dataAvailable must be true only when a
+// provider call actually returned at least one real article -- "no API
+// key configured" and "found nothing" produce near-identical numbers
+// otherwise, and scoring off either as if it were measured signal would
+// violate the guide's evidence-confidence floor.
+export type ProxEdgeNewsAttentionEvidence = {
+  velocity: number;
+  hypeScore: number;
+  sourceCount: number;
+  dataAvailable: boolean;
+};
+
 export type ProxEdgeScoreInput = {
   ticker: string;
   price: number;
@@ -85,6 +101,7 @@ export type ProxEdgeScoreInput = {
   structure: ProxMarketStructureAssessment;
   event: ProxEdgeEventEvidence | null;
   calibration: ProxEdgeCalibrationEvidence | null;
+  newsAttention: ProxEdgeNewsAttentionEvidence | null;
 };
 
 export type ProxEdgeScoreResult = {
@@ -104,6 +121,7 @@ export type ProxEdgeScoreResult = {
     marketStructure: number;
     twoClockAlignment: number;
     comparableOutcomes: number | null;
+    newsAttention: number | null;
   };
   hardFailures: string[];
   reasons: string[];
@@ -238,6 +256,15 @@ export function scoreProxEdge(input: ProxEdgeScoreInput): ProxEdgeScoreResult {
   const comparableOutcomes = calibrationAvailable
     ? clamp(input.calibration!.continuationRate * 100)
     : null;
+  const newsAttentionAvailable =
+    input.newsAttention !== null &&
+    input.newsAttention.dataAvailable &&
+    input.newsAttention.sourceCount >= 1;
+  const newsAttention = newsAttentionAvailable
+    ? clamp(
+        input.newsAttention!.velocity * 0.6 + input.newsAttention!.hypeScore * 0.4,
+      )
+    : null;
   const continuationProbability = clamp(
     weightedAverage([
       { value: liveImpulse, weight: 0.2 },
@@ -247,6 +274,7 @@ export function scoreProxEdge(input: ProxEdgeScoreInput): ProxEdgeScoreResult {
       { value: marketStructure, weight: 0.2 },
       { value: twoClockAlignment, weight: 0.1 },
       { value: comparableOutcomes, weight: 0.1 },
+      { value: newsAttention, weight: 0.1 },
     ]),
   );
   const rewardRiskAsymmetry = asymmetryScore(
@@ -381,6 +409,9 @@ export function scoreProxEdge(input: ProxEdgeScoreInput): ProxEdgeScoreResult {
   if (!calibrationAvailable) {
     reasons.push("Comparable ProX outcome evidence is insufficient and contributes no probability points.");
   }
+  if (!newsAttentionAvailable) {
+    reasons.push("Independent news-attention evidence is unavailable and contributes no probability points.");
+  }
   reasons.push(...input.structure.reasons);
 
   const edgeScore = clamp(
@@ -422,6 +453,7 @@ export function scoreProxEdge(input: ProxEdgeScoreInput): ProxEdgeScoreResult {
       twoClockAlignment: round(twoClockAlignment),
       comparableOutcomes:
         comparableOutcomes === null ? null : round(comparableOutcomes),
+      newsAttention: newsAttention === null ? null : round(newsAttention),
     },
     hardFailures,
     reasons: reasons.slice(0, 12),

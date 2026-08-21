@@ -53,6 +53,7 @@ const input = {
   structure,
   event: null,
   calibration: null,
+  newsAttention: null,
 };
 
 test("scores only independent evidence and qualifies honest positive asymmetry", () => {
@@ -147,6 +148,79 @@ test("does not manufacture a hero qualification from a weak but measurable setup
   });
   assert.equal(result.entryQualified, false);
   assert.match(result.hardFailures.join(" "), /entry-quality floor/);
+});
+
+test("news attention contributes nothing when no provider call actually succeeded", () => {
+  const result = scoreProxEdge({
+    ...input,
+    newsAttention: {
+      velocity: 90,
+      hypeScore: 90,
+      sourceCount: 0,
+      dataAvailable: false,
+    },
+  });
+  assert.equal(result.components.newsAttention, null);
+  assert.match(result.reasons.join(" "), /news-attention evidence is unavailable/);
+});
+
+test("news attention contributes nothing when dataAvailable is true but sourceCount is zero", () => {
+  const result = scoreProxEdge({
+    ...input,
+    newsAttention: {
+      velocity: 90,
+      hypeScore: 90,
+      sourceCount: 0,
+      dataAvailable: true,
+    },
+  });
+  assert.equal(result.components.newsAttention, null);
+});
+
+test("a real news-attention measurement blends velocity and hype into a single component", () => {
+  const result = scoreProxEdge({
+    ...input,
+    newsAttention: {
+      velocity: 80,
+      hypeScore: 70,
+      sourceCount: 3,
+      dataAvailable: true,
+    },
+  });
+  assert.equal(result.components.newsAttention, 76); // 80*0.6 + 70*0.4
+});
+
+test("news attention actually moves continuation probability via the same renormalization comparableOutcomes already uses", () => {
+  const baseline = scoreProxEdge(input);
+  // Every other component in this fixture lands well under 90 (see the
+  // "scores only independent evidence" test's edgeScore > 60 assertion) --
+  // an unambiguous 100 must raise the renormalized average regardless of
+  // what the other six components happen to compute to, so this isn't
+  // sensitive to incidental drift in the rest of the formula.
+  const withStrongNews = scoreProxEdge({
+    ...input,
+    newsAttention: {
+      velocity: 100,
+      hypeScore: 100,
+      sourceCount: 5,
+      dataAvailable: true,
+    },
+  });
+  assert.equal(withStrongNews.components.newsAttention, 100);
+  assert.ok(withStrongNews.continuationProbability > baseline.continuationProbability);
+
+  // And an unambiguous 0 must lower it the same way.
+  const withWeakNews = scoreProxEdge({
+    ...input,
+    newsAttention: {
+      velocity: 0,
+      hypeScore: 0,
+      sourceCount: 5,
+      dataAvailable: true,
+    },
+  });
+  assert.equal(withWeakNews.components.newsAttention, 0);
+  assert.ok(withWeakNews.continuationProbability < baseline.continuationProbability);
 });
 
 test("fails closed when independent timestamps are invalid or reversed", () => {

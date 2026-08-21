@@ -61,8 +61,12 @@ Positive discovery patterns include:
 - price holding above VWAP;
 - pullback recovery and higher-low behavior;
 - live liquidity expansion;
-- verified catalyst activity; and
-- sustained movement near the current session or observation-window high.
+- verified catalyst activity;
+- sustained movement near the current session or observation-window high; and
+- independently observed news-attention velocity (headline volume and
+  recency from ProX's own news lookup — a distinct, explicitly lower-rigor
+  evidence class than verified catalyst activity below; see "Continuation
+  probability — 60%").
 
 Defensive research patterns include:
 
@@ -137,8 +141,20 @@ Its evidence includes:
 - time-adjusted relative volume and volume acceleration;
 - price relative to VWAP;
 - pullback from the recent high and time since that high;
-- recovery, higher-low, and orderly path behavior; and
-- measured outcomes from comparable independent ProX discoveries.
+- recovery, higher-low, and orderly path behavior;
+- measured outcomes from comparable independent ProX discoveries; and
+- independently observed news-attention velocity (`prox-edge-score-v2`):
+  headline volume and hype-keyword density from ProX's own Finnhub/NewsAPI
+  lookup, blended 60% velocity / 40% hype into a single component at 10%
+  weight, the same weight and renormalization mechanism already governing
+  comparable-outcomes evidence. This is **not** the verified `event`
+  channel above — it carries no deterministic ticker match, no source
+  credibility score, and no verification state, and it must never be
+  confused with or substituted for verified catalyst activity. It
+  contributes nothing (`null`, not a neutral-looking number) unless ProX's
+  own lookup actually returned at least one real article; "no API key
+  configured" and "measured genuinely near-zero" are different states and
+  must not be allowed to look identical to the scoring formula.
 
 ### Reward/risk asymmetry — 30%
 

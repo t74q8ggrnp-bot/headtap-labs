@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { unstable_cache } from "next/cache";
 import { getErrorMessage } from "@/lib/error-message";
+import { fetchNewsIntel } from "@/lib/news-intel";
 import {
   PROX_MARKET_DISCOVERY_VERSION,
 } from "@/lib/prox/market-discovery";
@@ -14,6 +16,7 @@ import {
   scoreProxEdge,
   type ProxEdgeCalibrationEvidence,
   type ProxEdgeEventEvidence,
+  type ProxEdgeNewsAttentionEvidence,
 } from "@/lib/prox/edge-score";
 import {
   PROX_SHADOW_BOARD_VERSION,
@@ -208,6 +211,27 @@ async function fetchPolygonBars(
 function calibrationKey(pattern: string, session: string) {
   return `${pattern}:${session}`;
 }
+
+// This route is force-dynamic, which forces fetchCache to 'force-no-store'
+// for every plain fetch() in it -- a fetch-level `next: { revalidate }`
+// here would be silently ignored and refetched every single cron cycle.
+// unstable_cache keys on its arguments (the ticker) and maintains its own
+// Data Cache entry independent of that route-level fetch override, so this
+// is the only mechanism that actually honors NEWS_ATTENTION_REVALIDATE_SECONDS.
+const NEWS_ATTENTION_REVALIDATE_SECONDS = 900;
+const getCachedNewsAttention = unstable_cache(
+  async (ticker: string): Promise<ProxEdgeNewsAttentionEvidence> => {
+    const intel = await fetchNewsIntel(ticker);
+    return {
+      velocity: intel.newsVelocity,
+      hypeScore: intel.hypeScore,
+      sourceCount: intel.sourceCount,
+      dataAvailable: intel.dataAvailable,
+    };
+  },
+  ["prox-shadow-board-news-attention"],
+  { revalidate: NEWS_ATTENTION_REVALIDATE_SECONDS },
+);
 
 async function loadEventEvidence(
   supabase: ReturnType<typeof getSupabase>,
@@ -467,6 +491,27 @@ export async function GET(request: Request) {
       });
     }
 
+    const newsAttentionByTicker = new Map<
+      string,
+      ProxEdgeNewsAttentionEvidence
+    >();
+    for (let index = 0; index < tickers.length; index += FETCH_CONCURRENCY) {
+      const batch = tickers.slice(index, index + FETCH_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        batch.map((ticker) => getCachedNewsAttention(ticker)),
+      );
+      settled.forEach((result, resultIndex) => {
+        const ticker = batch[resultIndex];
+        if (result.status === "fulfilled") {
+          newsAttentionByTicker.set(ticker, result.value);
+        }
+        // On failure, the ticker is simply absent from the map -- edge-score
+        // treats a missing/null newsAttention exactly like "no data available"
+        // and contributes nothing to scoring, same as a missing event or
+        // calibration lookup.
+      });
+    }
+
     const structureByTicker = new Map<
       string,
       ReturnType<typeof assessProxMarketStructure>
@@ -546,6 +591,7 @@ export async function GET(request: Request) {
           structure,
           event: eventEvidence.get(candidate.ticker) ?? null,
           calibration,
+          newsAttention: newsAttentionByTicker.get(candidate.ticker) ?? null,
         });
         if (history.error) {
           edge.reasons.push(history.error);

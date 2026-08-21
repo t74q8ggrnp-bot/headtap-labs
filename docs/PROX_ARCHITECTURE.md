@@ -297,3 +297,30 @@ This board is append-only shadow research. It is not read by the public UI or
 canonical ranking and has no trading authority. The former canonical-inline
 challenger is disabled; `prox-post-decision-comparison-v2` can compare two
 already completed independent answers but cannot manufacture a ProX answer.
+
+## Update — independent news-attention evidence
+
+`prox-edge-score-v2` (`lib/prox/edge-score.ts`) adds a second, explicitly
+lower-rigor evidence class to continuation probability: independently
+observed news-attention velocity, sourced from ProX's own Finnhub/NewsAPI
+lookup (`lib/news-intel.ts`, extracted from the pre-existing but previously
+scoring-orphaned `/api/news-intel` UI route) and fetched per ticker in
+`app/api/prox-shadow-board/route.ts` via `unstable_cache` (15-minute
+revalidate — this route is `force-dynamic`, which forces plain `fetch()`
+calls to `no-store` regardless of any `next.revalidate` option passed to
+them; `unstable_cache` is the mechanism that actually honors a revalidate
+window here).
+
+This is deliberately not folded into or disguised as the verified `event`
+channel: it carries no deterministic ticker match, no source credibility
+score, and no verification state, unlike SEC-filing-style verified catalyst
+evidence. It contributes `null` — not a neutral-looking number — unless the
+lookup actually returned at least one real article, since "no API key
+configured" and "measured genuinely near-zero" produce almost identical
+numbers from the underlying keyword-heuristic scoring and must not be
+allowed to look like real signal to the weighted average. Weighted at 10%
+of continuation probability via the same renormalization mechanism already
+governing comparable-outcomes evidence — not a new kind of mechanism, an
+additional term in the existing one. See `docs/PROX_GUIDE.md`'s
+"Independent candidate discovery" and "Continuation probability — 60%"
+sections for the governing doctrine text.
