@@ -55,6 +55,8 @@ export async function GET() {
         edgeScore: m.edge_score,
         continuationProbability: m.continuation_probability,
         peakRetentionComponent: components?.peakRetention ?? null,
+        newsAttentionComponent: components?.newsAttention ?? null,
+        edgeVersion: edge?.version ?? null,
         postPeakFailure: structure?.postPeakFailure ?? null,
         severePeakFailure: structure?.severePeakFailure ?? null,
         extended: structure?.extended ?? null,
