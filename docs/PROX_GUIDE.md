@@ -40,12 +40,34 @@ canonical result.
 4. Shared raw market facts are allowed: fresh price, timestamps, bars, volume,
    VWAP, session open/high/low, verified corporate actions, and primary-source
    events. Shared facts are not shared decisions.
-5. ProX remains shadow-only until a separately approved promotion phase. It
-   cannot alter the public board, publish a second public score, place an
-   order, size a position, manage an exit, or enable live trading.
+5. The independent ProX Edge board remains shadow-only until a separately
+   approved promotion phase. It cannot alter the public board, publish a
+   second public score, place an order, size a position, manage an exit, or
+   enable live trading.
 6. The public product continues to show one HT opportunity score. Internal
    ProX components and traces exist for auditability, not as competing user
    percentages.
+
+## Authority namespaces
+
+HT Labs currently contains two deliberately separate ProX systems. Their
+names and authority must not be conflated:
+
+- **ProX Market Pulse** is the established, bounded live-tape input consumed
+  by the canonical evaluator. `prox-public-market-authority-v2` may apply a
+  bounded rank adjustment, confirm a post-peak eligibility failure, or
+  withhold a deep-session recovery until reclaim. It never produces a second
+  public score, discovers the canonical universe, or receives execution
+  authority. Canonical HT Labs remains the decision owner.
+- **Independent ProX Edge** is the full-market discovery, Market Structure
+  Brain, Edge Score, shadow board, and Outcome Memory governed by the rest of
+  this guide. It remains research-only. Its score, rank, hero, dispositions,
+  comparison results, and learned outcomes cannot enter the canonical board
+  until the promotion ladder's evidence and approval requirements are met.
+
+This distinction documents the production boundary approved by the owner on
+2026-08-23. It does not expand either system's authority or change a score,
+threshold, gate, or public field.
 
 ## Independent candidate discovery
 
@@ -328,3 +350,13 @@ are implemented by `lib/prox/market-structure.ts`,
 `0018_prox_market_structure_shadow_board.sql` adds the append-only shadow run
 and member records. These records remain research-only and have no frontend,
 canonical, position, order, or execution authority.
+
+Shadow-board outcomes are implemented by
+`app/api/prox-shadow-board-outcomes/route.ts` under the versioned
+`prox-shadow-board-outcomes-v2-historical-bars` contract. Migrations
+`0020_prox_shadow_board_outcomes.sql` and
+`0021_prox_shadow_outcome_resolution.sql` create the complete-denominator
+ledger and its honest resolution states. Each due horizon is measured from a
+verified historical minute bar near that horizon's own timestamp; it may be
+pending or terminally unavailable, but missing evidence is never converted
+into a zero return. Calibration and scorecards consume measured outcomes only.

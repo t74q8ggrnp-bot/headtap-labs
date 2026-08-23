@@ -26,6 +26,7 @@ import {
 import {
   PROX_CALIBRATION_VERSION,
   PROX_OUTCOME_MEMORY_VERSION,
+  getProxEpisodeHorizonTargets,
   selectProxPatternSignature,
 } from "@/lib/prox/outcome-memory";
 import { PROX_SECURITY_ROUTING_VERSION } from "@/lib/prox/security-routing";
@@ -701,14 +702,49 @@ export async function GET(request: Request) {
     // prox-market-discovery seeding prox_research_episodes right after
     // writing its own observations -- prox-shadow-board-outcomes (the
     // companion cron) only resolves due rows, it never creates parents.
+    const seededOutcomeParents: Array<{
+      id: string;
+      decision_at: string;
+      trading_date: string;
+      market_session: DiscoveryObservationRow["market_session"];
+    }> = [];
     for (
       let index = 0;
       index < outcomeParentRows.length;
       index += WRITE_BATCH_SIZE
     ) {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("prox_shadow_board_member_outcomes")
-        .insert(outcomeParentRows.slice(index, index + WRITE_BATCH_SIZE));
+        .insert(outcomeParentRows.slice(index, index + WRITE_BATCH_SIZE))
+        .select("id,decision_at,trading_date,market_session");
+      if (error) throw error;
+      seededOutcomeParents.push(
+        ...((data ?? []) as typeof seededOutcomeParents),
+      );
+    }
+    const seededHorizons = seededOutcomeParents.flatMap((parent) =>
+      getProxEpisodeHorizonTargets({
+        startedAt: parent.decision_at,
+        tradingDate: parent.trading_date,
+        marketSession: parent.market_session,
+      }).map((target) => ({
+        member_outcome_id: parent.id,
+        horizon: target.horizon,
+        target_at: target.targetAt,
+        complete: false,
+      })),
+    );
+    for (
+      let index = 0;
+      index < seededHorizons.length;
+      index += WRITE_BATCH_SIZE
+    ) {
+      const { error } = await supabase
+        .from("prox_shadow_board_member_outcome_horizons")
+        .upsert(seededHorizons.slice(index, index + WRITE_BATCH_SIZE), {
+          onConflict: "member_outcome_id,horizon",
+          ignoreDuplicates: true,
+        });
       if (error) throw error;
     }
 

@@ -55,7 +55,10 @@ export function scoreCryptoOpportunity(
     low <= 0 ||
     last <= 0 ||
     volume24h < 0 ||
-    volume30d <= 0
+    volume30d <= 0 ||
+    high < low ||
+    last > high ||
+    last < low
   ) {
     return null;
   }

@@ -7,6 +7,8 @@ export function useCryptoOpportunityFeed(
   initialFeed: CryptoOpportunityFeed | null = null,
 ) {
   const hasInitialFeed = initialFeed !== null;
+  const needsImmediateRefresh =
+    initialFeed === null || initialFeed.decisionFrame.fresh === false;
   const [feed, setFeed] = useState<CryptoOpportunityFeed | null>(initialFeed);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!hasInitialFeed);
@@ -36,7 +38,7 @@ export function useCryptoOpportunityFeed(
   }, []);
 
   useEffect(() => {
-    const kickoff = !hasInitialFeed
+    const kickoff = needsImmediateRefresh
       ? window.setTimeout(() => void refresh(), 0)
       : null;
     const interval = window.setInterval(() => void refresh(), 60_000);
@@ -44,7 +46,7 @@ export function useCryptoOpportunityFeed(
       if (kickoff !== null) window.clearTimeout(kickoff);
       window.clearInterval(interval);
     };
-  }, [hasInitialFeed, refresh]);
+  }, [needsImmediateRefresh, refresh]);
 
   return { feed, error, loading, refresh };
 }

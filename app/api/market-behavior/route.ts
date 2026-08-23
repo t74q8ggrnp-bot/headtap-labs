@@ -6,6 +6,21 @@ const getSupabase = () => createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+async function getAuthenticatedSupabase(req: Request) {
+  const header = req.headers.get("authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+  if (!token) return null;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) return null;
+  const supabase = createClient(url, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await supabase.auth.getUser(token);
+  return error || !data.user ? null : { supabase, user: data.user };
+}
+
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 type MarketBehaviorRow = {
@@ -42,13 +57,21 @@ function getMarketSession(hour: number): string {
 // POST — log a new signal
 export async function POST(req: Request) {
   try {
+    const authenticated = await getAuthenticatedSupabase(req);
+    if (!authenticated) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const body = await req.json();
+    const ticker = String(body.ticker ?? "").trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) {
+      return NextResponse.json({ error: "Invalid ticker" }, { status: 400 });
+    }
     const now = new Date();
     const day = now.getDay();
     const hour = now.getHours();
 
     const payload = {
-      ticker: body.ticker,
+      ticker,
       signaled_at: now.toISOString(),
       day_of_week: day,
       day_name: DAY_NAMES[day],
@@ -73,10 +96,10 @@ export async function POST(req: Request) {
       outcome: "pending",
       max_gain: null,
       max_drawdown: null,
-      user_id: body.userId ?? null,
+      user_id: authenticated.user.id,
     };
 
-    const { data, error } = await getSupabase()
+    const { data, error } = await authenticated.supabase
       .from("ht_market_behavior")
       .insert(payload)
       .select("id")

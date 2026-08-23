@@ -1,39 +1,37 @@
 // app/api/prox-shadow-board-outcomes/route.ts
 //
-// Measures what actually happened after each ProX shadow-board decision.
-// Mirrors app/api/prox-outcome-memory/route.ts's control flow exactly, but
-// scoped to prox_shadow_board_member_outcomes (seeded inline by
-// app/api/prox-shadow-board/route.ts) instead of prox_research_episodes.
-// This route never creates parent rows, only horizon children and their
-// resolution -- same division of responsibility as the outcome-memory
-// route relative to prox-market-discovery.
-//
-// Shadow/research-only: no table here is a public score, canonical
-// eligibility decision, position instruction, or execution signal.
+// Measures what actually happened after each independent ProX shadow-board
+// decision. Every horizon is resolved from a verified historical minute bar
+// near its own target timestamp. A missing bar stays pending until it is old
+// enough to be terminally unavailable; it is never converted into a zero
+// return. Shadow/research-only: nothing here changes canonical ranking,
+// eligibility, a public score, or execution authority.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
 import {
-  resolveSnapshotPrice,
-  resolveSnapshotTimestampMs,
-  type PolygonSnapshotRow,
-} from "@/lib/polygon-snapshot";
-import {
-  getProxEpisodeHorizonTargets,
   computeProxReturnPercent,
+  getProxEpisodeHorizonTargets,
   PROX_SHADOW_BOARD_OUTCOMES_VERSION,
   type ProxOutcomeHorizon,
 } from "@/lib/prox/outcome-memory";
+import {
+  normalizeProxOutcomeBars,
+  resolveProxOutcomeHorizon,
+  summarizeProxOutcomePath,
+  type ProxOutcomeBar,
+} from "@/lib/prox/shadow-outcome-resolution";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const SNAPSHOT_ENDPOINT =
-  "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers";
-const ACTIVE_MEMBER_LIMIT = 2_000;
+const POLYGON_AGGREGATES_ORIGIN = "https://api.polygon.io/v2/aggs/ticker";
+const ACTIVE_MEMBER_BATCH_LIMIT = 600;
+const TICKER_BATCH_LIMIT = 20;
+const POLYGON_FETCH_CONCURRENCY = 5;
 const WRITE_BATCH_SIZE = 100;
 
 type MemberOutcomeRow = {
@@ -43,13 +41,16 @@ type MemberOutcomeRow = {
   market_session: "pre_market" | "regular" | "after_hours" | "closed";
   decision_at: string;
   entry_price: number;
+  latest_price: number;
   latest_observed_at: string;
   sampled_high_price: number;
   sampled_high_at: string;
   sampled_low_price: number;
   sampled_low_at: string;
+  max_gain_percent: number;
+  max_drawdown_percent: number;
+  time_to_peak_minutes: number;
   status: "active" | "complete";
-  [key: string]: unknown;
 };
 
 type HorizonRow = {
@@ -61,6 +62,16 @@ type HorizonRow = {
   measured_price: number | null;
   return_percent: number | null;
   complete: boolean;
+  resolution_state?: "pending" | "measured" | "unavailable";
+  unavailable_reason?: string | null;
+};
+
+type PolygonAggregateRow = {
+  t?: number;
+  o?: number;
+  h?: number;
+  l?: number;
+  c?: number;
 };
 
 function getSupabase() {
@@ -94,32 +105,71 @@ function observationMinute(date: Date) {
   return minute.toISOString();
 }
 
-async function fetchPolygonSnapshot() {
-  const response = await fetch(
-    `${SNAPSHOT_ENDPOINT}?include_otc=false&apiKey=${POLYGON_KEY}`,
-    { cache: "no-store" },
-  );
-  if (!response.ok) {
-    throw new Error(`Polygon shadow-board-outcomes snapshot failed: ${response.status}`);
+function isoDate(value: string | Date) {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new Error(`Invalid ProX outcome timestamp: ${String(value)}`);
   }
-  const payload = (await response.json()) as { tickers?: PolygonSnapshotRow[] };
-  const rows = Array.isArray(payload.tickers) ? payload.tickers : [];
-  if (rows.length === 0) {
-    throw new Error("Polygon returned an empty shadow-board-outcomes snapshot.");
-  }
-  return rows;
+  return parsed.toISOString().slice(0, 10);
 }
 
-function snapshotPriceMap(rows: PolygonSnapshotRow[]) {
-  const map = new Map<string, { price: number; sourceTimestampMs: number | null }>();
-  for (const row of rows) {
-    const ticker = String(row.ticker ?? "").toUpperCase().trim();
-    const price = resolveSnapshotPrice(row);
-    if (ticker && price > 0) {
-      map.set(ticker, { price, sourceTimestampMs: resolveSnapshotTimestampMs(row) });
+async function fetchPolygonMinuteBars({
+  ticker,
+  from,
+  to,
+}: {
+  ticker: string;
+  from: string;
+  to: string;
+}) {
+  const params = new URLSearchParams({
+    adjusted: "true",
+    sort: "asc",
+    limit: "50000",
+    apiKey: POLYGON_KEY ?? "",
+  });
+  const response = await fetch(
+    `${POLYGON_AGGREGATES_ORIGIN}/${encodeURIComponent(ticker)}` +
+      `/range/1/minute/${from}/${to}?${params.toString()}`,
+    { cache: "no-store", signal: AbortSignal.timeout(25_000) },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Polygon historical bars failed for ${ticker}: ${response.status}`,
+    );
+  }
+  const payload = (await response.json()) as { results?: PolygonAggregateRow[] };
+  return normalizeProxOutcomeBars(
+    (payload.results ?? []).map(
+      (row): ProxOutcomeBar => ({
+        timeMs: finiteNumber(row.t),
+        open: finiteNumber(row.o),
+        high: finiteNumber(row.h),
+        low: finiteNumber(row.l),
+        close: finiteNumber(row.c),
+      }),
+    ),
+  );
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+) {
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(values[index]);
     }
   }
-  return map;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, () => worker()),
+  );
+  return results;
 }
 
 async function writeInBatches(
@@ -178,6 +228,15 @@ async function readMemberHorizons(
   return rows;
 }
 
+function isTerminalHorizon(horizon: HorizonRow) {
+  if (!horizon.complete) return false;
+  return (
+    horizon.resolution_state === "unavailable" ||
+    horizon.resolution_state === "measured" ||
+    (horizon.resolution_state === undefined && horizon.return_percent !== null)
+  );
+}
+
 export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -220,8 +279,9 @@ export async function GET(request: Request) {
     }
     return NextResponse.json(
       {
-        error: "Pro X shadow-board outcomes schema is unavailable; run migration 0020.",
-        detail: runError?.message ?? null,
+        error:
+          "ProX shadow-board outcomes schema is unavailable; run migrations 0020 and 0021.",
+        detail: getErrorMessage(runError, "Unknown schema error."),
       },
       { status: 500 },
     );
@@ -229,16 +289,24 @@ export async function GET(request: Request) {
   runId = String(run.id);
 
   try {
-    const activeSince = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
     const { data, error: memberError } = await supabase
       .from("prox_shadow_board_member_outcomes")
       .select("*")
       .eq("status", "active")
-      .gte("decision_at", activeSince)
       .order("decision_at", { ascending: true })
-      .limit(ACTIVE_MEMBER_LIMIT);
+      .limit(ACTIVE_MEMBER_BATCH_LIMIT);
     if (memberError) throw memberError;
-    const members = (data ?? []) as MemberOutcomeRow[];
+    const activeMembers = (data ?? []) as MemberOutcomeRow[];
+
+    const selectedTickers = new Set<string>();
+    for (const member of activeMembers) {
+      if (selectedTickers.size >= TICKER_BATCH_LIMIT) break;
+      selectedTickers.add(member.ticker.toUpperCase());
+    }
+    const members = activeMembers.filter((member) =>
+      selectedTickers.has(member.ticker.toUpperCase()),
+    );
+
     await ensureMemberHorizons(supabase, members);
     const horizonRows = await readMemberHorizons(
       supabase,
@@ -251,20 +319,38 @@ export async function GET(request: Request) {
       horizonsByMember.set(horizon.member_outcome_id, group);
     }
 
-    const snapshot = members.length > 0 ? await fetchPolygonSnapshot() : [];
-    const priceMap = snapshotPriceMap(snapshot);
+    const earliestDecisionByTicker = new Map<string, string>();
+    for (const member of members) {
+      const ticker = member.ticker.toUpperCase();
+      const existing = earliestDecisionByTicker.get(ticker);
+      if (!existing || member.decision_at < existing) {
+        earliestDecisionByTicker.set(ticker, member.decision_at);
+      }
+    }
+    const tickerBars = new Map<string, ProxOutcomeBar[]>();
+    await mapWithConcurrency(
+      [...selectedTickers],
+      POLYGON_FETCH_CONCURRENCY,
+      async (ticker) => {
+        const bars = await fetchPolygonMinuteBars({
+          ticker,
+          from: isoDate(earliestDecisionByTicker.get(ticker) ?? observedAt),
+          to: isoDate(now),
+        });
+        tickerBars.set(ticker, bars);
+      },
+    );
+
     const memberUpdates: Array<Record<string, unknown>> = [];
     const dueHorizonUpdates: Array<Record<string, unknown>> = [];
     let dueOutcomeCount = 0;
     let unavailableOutcomeCount = 0;
+    let terminalUnavailableCount = 0;
+    let deferredOutcomeCount = 0;
     let updatedMemberCount = 0;
 
     for (const member of members) {
-      const currentSnapshot = priceMap.get(member.ticker);
-      const currentPrice = positiveNumber(currentSnapshot?.price);
-      const sourceTimestampMs = currentSnapshot?.sourceTimestampMs ?? null;
-      const sourceObservedAt =
-        sourceTimestampMs !== null ? new Date(sourceTimestampMs).toISOString() : null;
+      const bars = tickerBars.get(member.ticker.toUpperCase()) ?? [];
       const memberHorizons = horizonsByMember.get(member.id) ?? [];
       const dueHorizons = memberHorizons.filter(
         (horizon) =>
@@ -272,81 +358,126 @@ export async function GET(request: Request) {
       );
       dueOutcomeCount += dueHorizons.length;
 
-      if (
-        currentPrice === null ||
-        sourceTimestampMs === null ||
-        sourceTimestampMs < new Date(member.latest_observed_at).getTime()
-      ) {
-        unavailableOutcomeCount += dueHorizons.length;
-        continue;
-      }
-
-      updatedMemberCount += 1;
-      const entryPrice = finiteNumber(member.entry_price);
-      const previousHigh = finiteNumber(member.sampled_high_price, entryPrice);
-      const previousLow = finiteNumber(member.sampled_low_price, entryPrice);
-      const newHigh = Math.max(previousHigh, currentPrice);
-      const newLow = Math.min(previousLow, currentPrice);
-      const highChanged = newHigh > previousHigh;
-      const lowChanged = newLow < previousLow;
-      const maxGainPercent =
-        computeProxReturnPercent(entryPrice, newHigh) ?? finiteNumber(member.max_gain_percent);
-      const maxDrawdownPercent =
-        computeProxReturnPercent(entryPrice, newLow) ??
-        finiteNumber(member.max_drawdown_percent);
-      const sampledHighAt = highChanged ? (sourceObservedAt as string) : member.sampled_high_at;
-      const sampledLowAt = lowChanged ? (sourceObservedAt as string) : member.sampled_low_at;
-      const timeToPeakMinutes = Math.max(
-        0,
-        (new Date(sampledHighAt).getTime() - new Date(member.decision_at).getTime()) / 60_000,
-      );
-
-      const returnByHorizon: Partial<Record<ProxOutcomeHorizon, number>> = {};
+      const terminalByHorizon = new Map<ProxOutcomeHorizon, boolean>();
       for (const horizon of memberHorizons) {
-        if (horizon.complete && horizon.return_percent !== null) {
-          returnByHorizon[horizon.horizon] = finiteNumber(horizon.return_percent);
+        terminalByHorizon.set(horizon.horizon, isTerminalHorizon(horizon));
+      }
+
+      const entryPrice = positiveNumber(member.entry_price);
+      if (entryPrice === null) {
+        throw new Error(`Invalid ProX entry price for ${member.ticker}.`);
+      }
+
+      for (const horizon of dueHorizons) {
+        const resolved = resolveProxOutcomeHorizon({
+          horizon: horizon.horizon,
+          targetAt: horizon.target_at,
+          bars,
+          now,
+        });
+        if (resolved.state === "measured" && resolved.measuredPrice !== null) {
+          const returnPercent = computeProxReturnPercent(
+            entryPrice,
+            resolved.measuredPrice,
+          );
+          if (returnPercent === null) {
+            throw new Error(`Invalid ProX horizon return for ${member.ticker}.`);
+          }
+          dueHorizonUpdates.push({
+            member_outcome_id: member.id,
+            horizon: horizon.horizon,
+            target_at: horizon.target_at,
+            measured_at: resolved.measuredAt,
+            measured_price: resolved.measuredPrice,
+            return_percent: returnPercent,
+            complete: true,
+            resolution_state: "measured",
+            unavailable_reason: null,
+            updated_at: observedAt,
+          });
+          terminalByHorizon.set(horizon.horizon, true);
+        } else if (resolved.state === "unavailable") {
+          dueHorizonUpdates.push({
+            member_outcome_id: member.id,
+            horizon: horizon.horizon,
+            target_at: horizon.target_at,
+            measured_at: null,
+            measured_price: null,
+            return_percent: null,
+            complete: true,
+            resolution_state: "unavailable",
+            unavailable_reason: resolved.unavailableReason,
+            updated_at: observedAt,
+          });
+          terminalByHorizon.set(horizon.horizon, true);
+          unavailableOutcomeCount += 1;
+          terminalUnavailableCount += 1;
+        } else {
+          unavailableOutcomeCount += 1;
+          deferredOutcomeCount += 1;
         }
       }
-      for (const horizon of dueHorizons) {
-        if (sourceTimestampMs < new Date(horizon.target_at).getTime() - 60_000) {
-          unavailableOutcomeCount += 1;
-          continue;
-        }
-        const returnPercent = computeProxReturnPercent(entryPrice, currentPrice);
-        if (returnPercent === null) {
-          unavailableOutcomeCount += 1;
-          continue;
-        }
-        returnByHorizon[horizon.horizon] = returnPercent;
-        dueHorizonUpdates.push({
-          member_outcome_id: member.id,
-          horizon: horizon.horizon,
-          target_at: horizon.target_at,
-          measured_at: sourceObservedAt,
-          measured_price: currentPrice,
-          return_percent: returnPercent,
-          complete: true,
+
+      const path = summarizeProxOutcomePath({
+        bars,
+        entryPrice,
+        decisionAt: member.decision_at,
+        through: now,
+      });
+      if (path) updatedMemberCount += 1;
+
+      const previousHigh = positiveNumber(member.sampled_high_price) ?? entryPrice;
+      const previousLow = positiveNumber(member.sampled_low_price) ?? entryPrice;
+      const pathHigh = path?.highest.high ?? previousHigh;
+      const pathLow = path?.lowest.low ?? previousLow;
+      const newHigh = Math.max(previousHigh, pathHigh);
+      const newLow = Math.min(previousLow, pathLow);
+      const sampledHighAt =
+        path && path.highest.high > previousHigh
+          ? new Date(path.highest.timeMs).toISOString()
+          : member.sampled_high_at;
+      const sampledLowAt =
+        path && path.lowest.low < previousLow
+          ? new Date(path.lowest.timeMs).toISOString()
+          : member.sampled_low_at;
+      const finalHorizonsComplete =
+        terminalByHorizon.get("24h") === true &&
+        terminalByHorizon.get("next_session") === true;
+
+      if (path || finalHorizonsComplete) {
+        const latestBarIsNewer =
+          path && path.latest.timeMs >= new Date(member.latest_observed_at).getTime();
+        memberUpdates.push({
+          id: member.id,
+          latest_price: latestBarIsNewer ? path.latest.close : member.latest_price,
+          latest_observed_at: latestBarIsNewer
+            ? new Date(path.latest.timeMs).toISOString()
+            : member.latest_observed_at,
+          sampled_high_price: newHigh,
+          sampled_high_at: sampledHighAt,
+          sampled_low_price: newLow,
+          sampled_low_at: sampledLowAt,
+          max_gain_percent:
+            computeProxReturnPercent(entryPrice, newHigh) ??
+            finiteNumber(member.max_gain_percent),
+          max_drawdown_percent:
+            computeProxReturnPercent(entryPrice, newLow) ??
+            finiteNumber(member.max_drawdown_percent),
+          time_to_peak_minutes: Math.max(
+            0,
+            Number(
+              (
+                (new Date(sampledHighAt).getTime() -
+                  new Date(member.decision_at).getTime()) /
+                60_000
+              ).toFixed(1),
+            ),
+          ),
+          status: finalHorizonsComplete ? "complete" : "active",
+          completed_at: finalHorizonsComplete ? observedAt : null,
           updated_at: observedAt,
         });
       }
-
-      const finalHorizonsComplete =
-        returnByHorizon["24h"] !== undefined && returnByHorizon.next_session !== undefined;
-      memberUpdates.push({
-        id: member.id,
-        latest_price: currentPrice,
-        latest_observed_at: sourceObservedAt,
-        sampled_high_price: newHigh,
-        sampled_high_at: sampledHighAt,
-        sampled_low_price: newLow,
-        sampled_low_at: sampledLowAt,
-        max_gain_percent: maxGainPercent,
-        max_drawdown_percent: maxDrawdownPercent,
-        time_to_peak_minutes: Number(timeToPeakMinutes.toFixed(1)),
-        status: finalHorizonsComplete ? "complete" : "active",
-        completed_at: finalHorizonsComplete ? observedAt : null,
-        updated_at: observedAt,
-      });
     }
 
     await writeInBatches(dueHorizonUpdates, async (batch) => {
@@ -363,8 +494,25 @@ export async function GET(request: Request) {
     });
 
     const persistedOutcomeCount = dueHorizonUpdates.length;
-    const complete = dueOutcomeCount === persistedOutcomeCount + unavailableOutcomeCount;
+    const complete =
+      dueOutcomeCount === persistedOutcomeCount + deferredOutcomeCount;
     const completedAt = new Date().toISOString();
+    const diagnostics = {
+      authority: "shadow_research_only",
+      priceAuthority: "polygon_historical_minute_bars",
+      engineVersion: PROX_SHADOW_BOARD_OUTCOMES_VERSION,
+      activeMemberBatchCount: activeMembers.length,
+      processedMemberCount: members.length,
+      selectedTickerCount: selectedTickers.size,
+      historicalBarCount: [...tickerBars.values()].reduce(
+        (sum, bars) => sum + bars.length,
+        0,
+      ),
+      deferredOutcomeCount,
+      terminalUnavailableCount,
+      noPublicScore: true,
+      noExecutionAuthority: true,
+    };
     const { error: completionError } = await supabase
       .from("prox_shadow_board_outcome_runs")
       .update({
@@ -375,13 +523,7 @@ export async function GET(request: Request) {
         persisted_outcome_count: persistedOutcomeCount,
         unavailable_outcome_count: unavailableOutcomeCount,
         complete,
-        diagnostics: {
-          authority: "shadow_research_only",
-          engineVersion: PROX_SHADOW_BOARD_OUTCOMES_VERSION,
-          snapshotCount: snapshot.length,
-          noPublicScore: true,
-          noExecutionAuthority: true,
-        },
+        diagnostics,
         error_message: complete ? null : "Outcome coverage mismatch.",
         completed_at: completedAt,
         updated_at: completedAt,
@@ -393,8 +535,7 @@ export async function GET(request: Request) {
       success: complete,
       authority: "shadow_research_only",
       diagnostics: {
-        snapshotCount: snapshot.length,
-        activeMemberCount: members.length,
+        ...diagnostics,
         updatedMemberCount,
         dueOutcomeCount,
         persistedOutcomeCount,
@@ -403,7 +544,7 @@ export async function GET(request: Request) {
       timestamp: completedAt,
     });
   } catch (error: unknown) {
-    const message = getErrorMessage(error, "Pro X shadow-board outcomes failed.");
+    const message = getErrorMessage(error, "ProX shadow-board outcomes failed.");
     if (runId) {
       await supabase
         .from("prox_shadow_board_outcome_runs")

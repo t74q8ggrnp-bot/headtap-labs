@@ -43,6 +43,16 @@ No desktop, mobile, scanner, watchlist, bot, order, or execution surface is a
 consumer of the ProX shadow board. Comparing it with the canonical board is
 permitted only after both atomic frames are complete.
 
+## Bounded ProX Market Pulse consumer
+
+`lib/prox/public-authority.ts` owns the separate, established ProX Market Pulse
+contract. The canonical evaluator may consume that fresh raw-tape assessment
+for its documented bounded rank adjustment, confirmed peak-failure block, and
+deep-session-recovery withholding. This pulse is not the independent ProX Edge
+board, cannot consume or publish the independent Edge Score, and cannot create
+a second public score. `lib/canonical-opportunity.ts` remains the final owner of
+the single public HT Labs decision.
+
 ## Legacy local intelligence still in `app/page.tsx`
 
 The remaining local helpers support secondary legacy surfaces such as older

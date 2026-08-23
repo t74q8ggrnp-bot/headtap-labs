@@ -4,7 +4,7 @@ const config: CapacitorConfig = {
   appId: "com.gethtlabs.app",
   appName: "HT Labs",
   webDir: "capacitor-web",
-  loggingBehavior: "debug",
+  loggingBehavior: "production",
   appendUserAgent: "HTLabsApp/1.0",
   backgroundColor: "#050505",
   plugins: {

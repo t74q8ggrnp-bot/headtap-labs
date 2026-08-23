@@ -78,7 +78,9 @@ export function useOpportunityFeed(initial: InitialOpportunityFeeds) {
       // ~1.6-2s-each per-ticker evaluation from scratch just to return a
       // different slice/filter of data the other calls already computed.
       // One limit=100 call per strategy carries everything below needs.
-      const momentumRequest = fetch("/api/opportunities?limit=100");
+      const momentumRequest = fetch(
+        "/api/opportunities?type=momentum&limit=100",
+      );
       const beforeCrowdRequest = fetch(
         "/api/opportunities?type=before_crowd&limit=100",
       );

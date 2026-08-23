@@ -8,7 +8,8 @@ export const PROX_OUTCOME_MEMORY_VERSION =
 export const PROX_CALIBRATION_VERSION =
   "prox-pattern-calibration-v2-security-routed";
 export const PROX_OUTCOME_MODE = "shadow_research" as const;
-export const PROX_SHADOW_BOARD_OUTCOMES_VERSION = "prox-shadow-board-outcomes-v1";
+export const PROX_SHADOW_BOARD_OUTCOMES_VERSION =
+  "prox-shadow-board-outcomes-v2-historical-bars";
 
 export type ProxOutcomeHorizon =
   | "5m"
@@ -93,6 +94,14 @@ function addMinutes(value: string, minutes: number) {
   return new Date(new Date(value).getTime() + minutes * 60_000).toISOString();
 }
 
+function nextWeekdayTimestamp(value: string) {
+  const date = new Date(value);
+  while (date.getUTCDay() === 0 || date.getUTCDay() === 6) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return date.toISOString();
+}
+
 function nextWeekdayDate(easternDate: string) {
   const [year, month, day] = easternDate.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day, 12));
@@ -161,7 +170,10 @@ export function getProxEpisodeHorizonTargets(input: {
       horizon: "next_session",
       targetAt: easternWallClockToUtc(nextWeekdayDate(input.tradingDate), 9, 35),
     },
-    { horizon: "24h", targetAt: addMinutes(input.startedAt, 24 * 60) },
+    {
+      horizon: "24h",
+      targetAt: nextWeekdayTimestamp(addMinutes(input.startedAt, 24 * 60)),
+    },
   ];
 }
 

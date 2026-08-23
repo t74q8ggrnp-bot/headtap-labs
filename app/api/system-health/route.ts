@@ -21,6 +21,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getErrorMessage } from "@/lib/error-message";
 import { auditCanonicalSpotMomentumFeed } from "@/lib/canonical-feed-integrity";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
 import { auditTopMoverDispositions } from "@/lib/top-mover-disposition";
@@ -124,6 +125,45 @@ function getSupabase() {
   }
 
   return createClient(supabaseUrl, supabaseKey);
+}
+
+type ProxRoutedObservationHealthRow = {
+  id: string;
+  security_type: string | null;
+  instrument_lane: string | null;
+  opportunity_eligible: boolean | null;
+  metadata_state: string | null;
+};
+
+const PROX_OBSERVATION_HEALTH_PAGE_SIZE = 1_000;
+
+async function loadProxRoutedObservationHealthRows(
+  supabase: NonNullable<ReturnType<typeof getSupabase>>,
+  runId: string,
+) {
+  const rows: ProxRoutedObservationHealthRow[] = [];
+
+  for (
+    let offset = 0;
+    ;
+    offset += PROX_OBSERVATION_HEALTH_PAGE_SIZE
+  ) {
+    const { data, error } = await supabase
+      .from("prox_market_discovery_observations")
+      .select(
+        "id,security_type,instrument_lane,opportunity_eligible,metadata_state",
+      )
+      .eq("run_id", runId)
+      .order("id", { ascending: true })
+      .range(offset, offset + PROX_OBSERVATION_HEALTH_PAGE_SIZE - 1);
+    if (error) throw error;
+
+    const page = (data ?? []) as ProxRoutedObservationHealthRow[];
+    rows.push(...page);
+    if (page.length < PROX_OBSERVATION_HEALTH_PAGE_SIZE) break;
+  }
+
+  return rows;
 }
 
 export async function GET() {
@@ -501,19 +541,11 @@ export async function GET() {
         },
       });
     } else {
-      const {
-        data: routedObservationRows,
-        count: actualObservationCount,
-        error: countError,
-      } =
-        await supabase
-          .from("prox_market_discovery_observations")
-          .select(
-            "security_type,instrument_lane,opportunity_eligible,metadata_state",
-            { count: "exact" },
-          )
-          .eq("run_id", discoveryRun.id);
-      if (countError) throw countError;
+      const routedObservationRows =
+        await loadProxRoutedObservationHealthRows(
+          supabase,
+          String(discoveryRun.id),
+        );
 
       const ageHours = hoursSince(
         discoveryRun.completed_at ?? discoveryRun.started_at,
@@ -524,7 +556,7 @@ export async function GET() {
       const persistedCount = Number(
         discoveryRun.persisted_observation_count,
       );
-      const actualCount = actualObservationCount ?? 0;
+      const actualCount = routedObservationRows.length;
       const coverageComplete =
         discoveryRun.status === "success" &&
         discoveryRun.complete === true &&
@@ -571,7 +603,7 @@ export async function GET() {
         },
       });
 
-      const rows = routedObservationRows ?? [];
+      const rows = routedObservationRows;
       const invalidRows = rows.filter((row) => {
         const lane = String(row.instrument_lane ?? "");
         const securityType = String(row.security_type ?? "");
@@ -643,19 +675,21 @@ export async function GET() {
       });
     }
   } catch (err: unknown) {
+    const message = getErrorMessage(
+      err,
+      "Unknown Pro X direct-discovery health-check error.",
+    );
     checks.push({
       name: "prox_direct_market_discovery",
       ok: false,
-      message:
-        "Pro X direct Polygon discovery is unavailable; run migrations 0013 and 0017 before deploying.",
-      detail: err instanceof Error ? err.message : String(err),
+      message: "Pro X direct Polygon discovery health validation failed.",
+      detail: message,
     });
     checks.push({
       name: "prox_security_type_routing",
       ok: false,
-      message:
-        "Pro X security routing is unavailable; run migration 0017 before deploying.",
-      detail: err instanceof Error ? err.message : String(err),
+      message: "Pro X security routing health validation failed.",
+      detail: message,
     });
   }
 
@@ -965,8 +999,11 @@ export async function GET() {
       name: "prox_shadow_board_outcomes",
       ok: false,
       message:
-        "Shadow-board outcome tracking is unavailable; run migration 0020 before deploying.",
-      detail: err instanceof Error ? err.message : String(err),
+        "Shadow-board outcome tracking is unavailable; run migrations 0020 and 0021 before deploying.",
+      detail: getErrorMessage(
+        err,
+        "Unknown Pro X shadow-board outcome health-check error.",
+      ),
     });
   }
 

@@ -9,18 +9,16 @@ export default function MobileConvictionsList({
   opportunities,
   onOpen,
 }: MobileConvictionsListProps) {
-  const ranked = [...opportunities].sort((a, b) => b.opportunityScore - a.opportunityScore);
-
   return (
     <div className="h-full overflow-y-auto px-4 pb-24 pt-12">
       <p className="mb-4 text-[11px] font-black uppercase tracking-[0.24em] text-orange-300">Top Convictions</p>
-      {ranked.length === 0 ? (
+      {opportunities.length === 0 ? (
         <div className="rounded-2xl border border-white/10 bg-black/20 p-6 text-center">
           <p className="text-sm font-semibold text-zinc-400">No canonical opportunities qualify right now.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {ranked.map((opportunity) => (
+          {opportunities.map((opportunity) => (
               <button key={opportunity.ticker} onClick={() => onOpen(opportunity)} className="w-full rounded-2xl border border-white/10 bg-white/[0.025] p-4 text-left">
               <div className="flex items-start justify-between gap-3">
                 <div>

@@ -16,6 +16,15 @@ import { isAllowedMainstreamCryptoAsset } from "@/lib/crypto/asset-policy";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+const CRON_SECRET = process.env.CRON_SECRET;
+
+function isAuthorized(req: Request) {
+  return Boolean(
+    CRON_SECRET &&
+      req.headers.get("authorization") === `Bearer ${CRON_SECRET}`,
+  );
+}
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -23,7 +32,10 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const supabase = getSupabase();
     const overdueCutoff = new Date(Date.now() - 10 * 60_000).toISOString();

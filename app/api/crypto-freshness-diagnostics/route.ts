@@ -12,6 +12,15 @@ import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 
+const CRON_SECRET = process.env.CRON_SECRET;
+
+function isAuthorized(req: Request) {
+  return Boolean(
+    CRON_SECRET &&
+      req.headers.get("authorization") === `Bearer ${CRON_SECRET}`,
+  );
+}
+
 const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
 const PRODUCTS = [
   "BTC-USD",
@@ -61,7 +70,10 @@ async function fetchLatestCandle(
   };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const noStore = await Promise.all(
       PRODUCTS.map((p) => fetchLatestCandle(p, "no-store")),

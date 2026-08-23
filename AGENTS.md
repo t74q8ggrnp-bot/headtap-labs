@@ -15,3 +15,8 @@ public or execution authority, reuse canonical decision fields as independent
 ProX scoring inputs, or change the documented score contract without explicit
 owner approval. If implementation and the guide conflict, stop and surface
 the conflict before editing code.
+
+Before changing the paper trading bot, its entry or exit rules, its connection
+to canonical opportunities, or its ProX observation bridge, read
+`docs/TRADING_BOT_GUIDE.md` in full. Preserve the single-bot, Alpaca-paper-only
+boundary and keep position management independently enabled from new entries.

@@ -50,6 +50,7 @@ type HorizonRow = {
   member_outcome_id: string;
   horizon: string;
   return_percent: number;
+  resolution_state: "measured";
 };
 
 type MemberOutcomeRow = {
@@ -158,8 +159,9 @@ export async function GET(req: Request) {
 
     const { data: horizonData, error: horizonError } = await supabase
       .from("prox_shadow_board_member_outcome_horizons")
-      .select("member_outcome_id,horizon,return_percent")
+      .select("member_outcome_id,horizon,return_percent,resolution_state")
       .eq("complete", true)
+      .eq("resolution_state", "measured")
       .gte("target_at", windowStart)
       .limit(20_000);
     if (horizonError) throw horizonError;

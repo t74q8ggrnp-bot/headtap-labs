@@ -75,3 +75,15 @@ test("uses the next weekday close for an after-hours episode", () => {
   assert.equal(sessionClose?.targetAt, "2026-08-17T20:00:00.000Z");
   assert.equal(nextSession?.targetAt, "2026-08-17T13:35:00.000Z");
 });
+
+test("moves a Friday 24-hour stock horizon to the next tradable weekday", () => {
+  const targets = getProxEpisodeHorizonTargets({
+    startedAt: "2026-08-21T13:30:00.000Z",
+    tradingDate: "2026-08-21",
+    marketSession: "regular",
+  });
+  assert.equal(
+    targets.find((target) => target.horizon === "24h")?.targetAt,
+    "2026-08-24T13:30:00.000Z",
+  );
+});

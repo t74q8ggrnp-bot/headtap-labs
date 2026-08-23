@@ -8,6 +8,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
+import {
+  buildBotPerformanceScorecard,
+  getBotEntryPath,
+  type BotTradeScorecardRow,
+} from "@/lib/trading-bot/scorecard";
 
 export const dynamic = "force-dynamic";
 
@@ -26,11 +31,6 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-function round(value: number, decimals = 2) {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
-
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
@@ -38,7 +38,7 @@ export async function GET(req: Request) {
     const { data: closedTrades, error: closedError } = await supabase
       .from("bot_trades")
       .select(
-        "id,ticker,status,entry_price,entry_at,exit_price,exit_at,exit_reason,pnl,pnl_percent,bot_score",
+        "id,ticker,status,entry_price,entry_at,exit_price,exit_at,exit_reason,pnl,pnl_percent,bot_score,bot_logic_version,entry_snapshot",
       )
       .eq("status", "closed")
       .order("exit_at", { ascending: false })
@@ -57,69 +57,39 @@ export async function GET(req: Request) {
       .eq("status", "failed");
     if (failedError) throw failedError;
 
-    const trades = closedTrades ?? [];
-    const wins = trades.filter((t) => (t.pnl ?? 0) > 0);
-    const losses = trades.filter((t) => (t.pnl ?? 0) < 0);
-    const flat = trades.filter((t) => (t.pnl ?? 0) === 0);
-
-    const totalPnl = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-    const avgWinPnl = wins.length > 0
-      ? wins.reduce((sum, t) => sum + (t.pnl ?? 0), 0) / wins.length
-      : null;
-    const avgLossPnl = losses.length > 0
-      ? losses.reduce((sum, t) => sum + (t.pnl ?? 0), 0) / losses.length
-      : null;
-    const avgWinPercent = wins.length > 0
-      ? wins.reduce((sum, t) => sum + (t.pnl_percent ?? 0), 0) / wins.length
-      : null;
-    const avgLossPercent = losses.length > 0
-      ? losses.reduce((sum, t) => sum + (t.pnl_percent ?? 0), 0) / losses.length
-      : null;
-
-    const byExitReason = new Map<
-      string,
-      { count: number; wins: number; losses: number; totalPnl: number }
-    >();
-    for (const trade of trades) {
-      const reason = trade.exit_reason ?? "unknown";
-      const group = byExitReason.get(reason) ?? { count: 0, wins: 0, losses: 0, totalPnl: 0 };
-      group.count += 1;
-      if ((trade.pnl ?? 0) > 0) group.wins += 1;
-      if ((trade.pnl ?? 0) < 0) group.losses += 1;
-      group.totalPnl += trade.pnl ?? 0;
-      byExitReason.set(reason, group);
-    }
-
-    const expectancy =
-      wins.length + losses.length > 0
-        ? ((wins.length / trades.length) * (avgWinPnl ?? 0)) +
-          ((losses.length / trades.length) * (avgLossPnl ?? 0))
-        : null;
+    const trades = (closedTrades ?? []) as BotTradeScorecardRow[];
+    const scorecard = buildBotPerformanceScorecard(trades);
+    const {
+      realizedTrades,
+      operationalClosures,
+      entryLogicSummary,
+      allRealizedSummary,
+      byLogicVersion,
+      byEntryPath,
+      byScoreBucket,
+      byExitReason,
+      operationalClosuresByReason,
+    } = scorecard;
 
     return NextResponse.json({
       openTradeCount: openCount ?? 0,
       failedTradeCount: failedCount ?? 0,
       closedTradeCount: trades.length,
-      winCount: wins.length,
-      lossCount: losses.length,
-      flatCount: flat.length,
-      winRatePercent: trades.length > 0 ? round((wins.length / trades.length) * 100) : null,
-      totalPnl: round(totalPnl),
-      avgWinPnl: avgWinPnl === null ? null : round(avgWinPnl),
-      avgLossPnl: avgLossPnl === null ? null : round(avgLossPnl),
-      avgWinPercent: avgWinPercent === null ? null : round(avgWinPercent),
-      avgLossPercent: avgLossPercent === null ? null : round(avgLossPercent),
-      winLossRatio:
-        avgWinPnl !== null && avgLossPnl !== null && avgLossPnl !== 0
-          ? round(Math.abs(avgWinPnl / avgLossPnl))
-          : null,
-      expectancyPerTrade: expectancy === null ? null : round(expectancy),
-      byExitReason: Object.fromEntries(
-        [...byExitReason.entries()].map(([reason, g]) => [
-          reason,
-          { ...g, totalPnl: round(g.totalPnl) },
-        ]),
-      ),
+      realizedTradeCount: realizedTrades.length,
+      operationalClosureCount: operationalClosures.length,
+      winCount: entryLogicSummary.wins,
+      lossCount: entryLogicSummary.losses,
+      flatCount: entryLogicSummary.flat,
+      winRatePercent: entryLogicSummary.winRatePercent,
+      totalPnl: entryLogicSummary.totalPnl,
+      expectancyPerTrade: entryLogicSummary.averagePnl,
+      entryLogicPerformance: entryLogicSummary,
+      allRealizedPerformance: allRealizedSummary,
+      byLogicVersion,
+      byEntryPath,
+      byScoreBucket,
+      byExitReason,
+      operationalClosuresByReason,
       recentTrades: trades.slice(0, 20).map((t) => ({
         ticker: t.ticker,
         entryAt: t.entry_at,
@@ -130,6 +100,9 @@ export async function GET(req: Request) {
         pnl: t.pnl,
         pnlPercent: t.pnl_percent,
         botScore: t.bot_score,
+        botLogicVersion: t.bot_logic_version,
+        entryPath: getBotEntryPath(t),
+        realized: t.pnl !== null && t.exit_price !== null,
       })),
       timestamp: new Date().toISOString(),
     });

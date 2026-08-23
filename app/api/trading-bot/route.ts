@@ -9,13 +9,17 @@
 // "safest probable trade," not "biggest headline mover" — those are
 // deliberately different questions. Paper trading only, via Alpaca.
 //
-// Two safety gates, both required before this does anything:
+// Position management has two safety gates:
 // 1. ALPACA_API_KEY / ALPACA_SECRET_KEY must be set (paper keys only —
 //    see lib/trading-bot/alpaca.ts, which hardcodes the paper base URL).
 // 2. TRADING_BOT_ENABLED must be the literal string "true". Absent or
 //    anything else, the bot manages nothing and places no orders. This
 //    is deliberate: adding the code and adding the keys should not, by
 //    themselves, cause a single trade to happen.
+// New entries have a third, independent gate:
+// 3. TRADING_BOT_ENTRY_ENABLED must be the literal string "true". When it
+//    is absent or false, existing paper positions are still managed and the
+//    v3 candidate board is still recorded in shadow mode, but no buy occurs.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -35,6 +39,14 @@ import {
   type ExplosionAssessment,
 } from "@/lib/canonical-opportunity";
 import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
+import {
+  BOT_DECISION_VERSION,
+  evaluateBotEntry,
+  getBotEntryControlSkipReason,
+  isBotCandidateReady,
+  type BotEntryDecision,
+  type BotEntryPath,
+} from "@/lib/trading-bot/decision";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -45,7 +57,7 @@ const CRON_SECRET = process.env.CRON_SECRET;
 // blur together in bot_trades with no way to separate them once the logic
 // changes again — this is the only thing that keeps "did the new formula
 // actually help" answerable later.
-const BOT_LOGIC_VERSION = "bot-v2-continuation-parity";
+const BOT_LOGIC_VERSION = "bot-v3-unified-observed-quality";
 // Position size is a % of *current* account equity, not a flat dollar
 // amount — stays proportional as the paper account grows/shrinks from
 // testing, rather than becoming meaningless at a fixed number.
@@ -54,7 +66,6 @@ const POSITION_SIZE_PERCENT = 0.05;
 // equity (continuation entries remain half-size). This is capacity only:
 // every candidate still has to clear the existing canonical entry gates.
 const MAX_CONCURRENT_POSITIONS = 6;
-const MIN_RR_RATIO = 1.5;
 const MAX_HOLD_DAYS = 3;
 // Hard floor under the canonical framework's own downsideRisk. That number
 // comes from ATR/support-distance on daily bars and can come out under 1% —
@@ -66,7 +77,11 @@ const MAX_HOLD_DAYS = 3;
 // was structurally biased toward picking the most fragile stops, not the
 // safest trades. User's explicit ask: "four to five percent before it even
 // looks like it might go down" — 5% chosen, the wider end of that range.
-const MIN_STOP_LOSS_PERCENT = 5;
+// Capacity is never a purchase target. New entries are intentionally paced so
+// an unchanged board cannot make the bot walk down into weaker leftovers.
+const MAX_NEW_POSITIONS_PER_ROLLING_24_HOURS = 3;
+const MIN_MINUTES_BETWEEN_ENTRIES = 30;
+const CANDIDATE_PERSISTENCE_LOOKBACK_MINUTES = 15;
 
 // Trailing-stop exit, confirmed with the user against real math before
 // building it. A single fixed take-profit computed once at entry sells a
@@ -79,6 +94,7 @@ const MIN_PROFIT_TO_TRAIL_PERCENT = 8; // below this, no trailing yet — just t
 const WIDE_TRAIL_PERCENT = 15; // pullback from peak allowed while gain is 8-25%
 const EXTENDED_GAIN_THRESHOLD_PERCENT = 25;
 const TIGHT_TRAIL_PERCENT = 5; // pullback from peak allowed once gain exceeds 25% (user: "4-5%, lock in profits")
+const TRAILING_BREAKEVEN_LOCK_PERCENT = 0.5;
 
 // User's explicit, informed call on 2026-07-29 (both positions at a loss:
 // ANY -6.2%, GLOB -1.6%): don't let the hard/trailing stop force a sale on
@@ -220,6 +236,10 @@ async function placeBuyOrder(
 type CanonicalOpportunity = {
   ticker: string;
   price: number;
+  change: number;
+  changeFromOpenPercent: number | null;
+  relativeVolume: number;
+  signalState: string;
   riskTags: string[];
   tradeFramework: {
     rrRatio: number | null;
@@ -234,7 +254,7 @@ type CanonicalOpportunity = {
   visibilityState: string;
   engineVersion: string;
   sourceRunId: string | null;
-  explosionAssessment: ExplosionAssessment;
+  explosionAssessment: ExplosionAssessment | null;
   strategyScore: number;
   opportunityScore: number;
   proxIntelligence: ProxIntelligencePacket | null;
@@ -295,142 +315,6 @@ async function recordProxShadowObservations(
     wouldReduceSize: rows.filter((row) => row.prox_would_reduce_size).length,
     unavailableReason: error?.message ?? null,
   };
-}
-
-// Effective downside is never tighter than MIN_STOP_LOSS_PERCENT, regardless
-// of what the framework's own downsideRisk says — this is the actual distance
-// the bot will place its stop at (see entry construction below), so R:R and
-// the eligibility floor both need to be judged against that real number, not
-// the framework's optimistic tight-stop figure. Using tf.rrRatio directly
-// here previously meant a stock with a razor-thin theoretical stop scored
-// artificially high (tiny downside inflates upside÷downside), which is
-// exactly backwards — it rewarded the most fragile setups, not the safest.
-function effectiveDownsidePercent(tf: NonNullable<CanonicalOpportunity["tradeFramework"]>): number | null {
-  if (tf.downsideRisk === null) return null;
-  return Math.max(tf.downsideRisk, MIN_STOP_LOSS_PERCENT);
-}
-
-// Mirrors the exact deduction tiers in canonical-trade-framework.ts's own
-// entryQuality calculation, so this can be reversed for confirmed runners
-// below without touching that shared file (which also feeds the site's
-// display data) or duplicating its full formula.
-function extensionRiskDeduction(extensionRisk: number | null): number {
-  if (extensionRisk === null) return 0;
-  if (extensionRisk >= 75) return 50;
-  if (extensionRisk >= 50) return 25;
-  if (extensionRisk >= 35) return 10;
-  return 0;
-}
-
-// Confirmed live in bot_trades: 26 of 26 stop-outs lost, every one, while
-// entryQuality was actively docking up to 50 points for the exact thing
-// that makes a move real — high extensionRisk. A quiet, barely-moving
-// stock with a technically-clean R:R was scoring higher than a genuinely
-// explosive, confirmed mover. This reverses that specific penalty only
-// when the same continuationConfirmed check already used everywhere else
-// (real volume, not Exhaustion Risk, momentum still strong) says the move
-// is real — every other component of entryQuality (R:R quality, downside
-// containment, magnitude) is untouched.
-function confirmedRunnerEntryQuality(candidate: CanonicalOpportunity, tf: NonNullable<CanonicalOpportunity["tradeFramework"]>): number {
-  const raw = tf.entryQuality ?? 0;
-  if (candidate.explosionAssessment?.continuationConfirmed !== true) return raw;
-  return Math.min(100, raw + extensionRiskDeduction(tf.extensionRisk));
-}
-
-// Mirrors MAX_PAPER_CONTINUATION_DOWNSIDE_PERCENT / MIN_PAPER_CONTINUATION_
-// ENTRY_QUALITY in lib/canonical-opportunity.ts intentionally, rather than
-// importing them — keeps this file's changes fully self-contained instead
-// of adding any export surface to a file the site's display also depends on.
-const MAX_FALLBACK_CONTINUATION_DOWNSIDE_PERCENT = 30;
-const MIN_FALLBACK_CONTINUATION_ENTRY_QUALITY = 20;
-
-// paperEntryEligible (lib/canonical-opportunity.ts) requires a real,
-// measured downsideRisk — which structurally doesn't exist for a genuine
-// price-discovery breakout (framework.downsideRisk is null specifically
-// because the move blew past the 35% historical-deviation check before
-// support/resistance was ever computed, not because data is missing).
-// That excludes exactly the strongest, most-confirmed movers of the day
-// from the one entry path built for them. This computes a defensible
-// fallback stop from ATR — the same measurement used as a floor everywhere
-// else in this codebase — so those candidates become tradeable off a real
-// number instead of being invisible to both entry paths.
-function fallbackDownsidePercent(tf: NonNullable<CanonicalOpportunity["tradeFramework"]>, price: number): number | null {
-  if (tf.atr14 === null || price <= 0) return null;
-  const atrPct = (tf.atr14 / price) * 100;
-  const downside = Math.max(atrPct, MIN_STOP_LOSS_PERCENT);
-  return downside <= MAX_FALLBACK_CONTINUATION_DOWNSIDE_PERCENT ? downside : null;
-}
-
-// Real-downside-first, ATR-fallback-only-for-confirmed-runners. Used for
-// continuation-path scoring and, for whichever candidate is actually
-// picked, for the real stop_price placed at entry — same number both times
-// so the recorded stop always matches what was actually scored.
-function resolveContinuationDownsidePercent(candidate: CanonicalOpportunity): number | null {
-  const tf = candidate.tradeFramework;
-  if (!tf) return null;
-  if (tf.downsideRisk !== null) return Math.max(tf.downsideRisk, MIN_STOP_LOSS_PERCENT);
-  if (candidate.explosionAssessment?.continuationConfirmed !== true) return null;
-  return fallbackDownsidePercent(tf, candidate.price);
-}
-
-// Deliberately the opposite emphasis from the canonical hero's display
-// ranking. HT Labs' own opportunityScore now favors raw magnitude — the
-// right call for "what should the headline show." It's the wrong call
-// for "what should I risk paper money on right now": the biggest mover
-// is usually the most extended one. This rewards a clean R:R and
-// entryQuality (which already penalizes over-extension) and actively
-// docks points per risk tag, with a hard floor that disqualifies
-// anything below a 1.5 R:R outright rather than just scoring it lower.
-// "Extended — Chasing Risk" is set (see opportunities/route.ts) at the exact
-// same extensionRisk>=75 threshold that already costs a candidate 50 points
-// inside entryQuality itself — docking it again here penalized the same
-// signal twice. Every other tag (Parabolic Move, Extreme Momentum, High
-// Volatility, New Listing) reflects something entryQuality does NOT already
-// account for, so those still count normally.
-const DOUBLE_COUNTED_TAGS_IN_ENTRY_QUALITY = new Set(["Extended — Chasing Risk"]);
-
-function computeBotScore(candidate: CanonicalOpportunity): number | null {
-  const tf = candidate.tradeFramework;
-  if (!tf || tf.upsideMax === null) return null;
-  const downside = effectiveDownsidePercent(tf);
-  const rr = downside && downside > 0 ? tf.upsideMax / downside : null;
-  if (rr === null || rr < MIN_RR_RATIO) return null;
-  const entryQuality = confirmedRunnerEntryQuality(candidate, tf);
-  const rrBonus = Math.min(30, rr * 10);
-  const riskTagPenalty = candidate.riskTags.filter((tag) => !DOUBLE_COUNTED_TAGS_IN_ENTRY_QUALITY.has(tag)).length * 10;
-  return entryQuality + rrBonus - riskTagPenalty;
-}
-
-function computeContinuationScore(candidate: CanonicalOpportunity): number | null {
-  const assessment = candidate.explosionAssessment;
-  const tf = candidate.tradeFramework;
-  if (!tf || !assessment?.continuationConfirmed) return null;
-
-  if (candidate.eligibility.eligible && assessment.paperEntryEligible) {
-    return assessment.paperTradeScore;
-  }
-
-  // Fallback path: strict eligibility.eligible is structurally always false
-  // whenever downsideRisk is null (every branch that nulls it also pushes a
-  // hard failure in canonical-trade-framework.ts) — so requiring it here
-  // would make this branch dead code for exactly the candidates it exists
-  // for. visibilityState==="verified_price_discovery" is the same flag the
-  // site's own display override uses: the ONLY hard failure is the
-  // historical-deviation one, and it's fully explained by the move itself.
-  // Anything excluded for any other reason (bad entryQuality, real excessive
-  // downside, unsupported security type, etc.) is not this case and stays
-  // excluded below.
-  if (candidate.visibilityState !== "verified_price_discovery") return null;
-  if (tf.downsideRisk !== null) return null;
-  const entryQuality = tf.entryQuality ?? 0;
-  if (entryQuality < MIN_FALLBACK_CONTINUATION_ENTRY_QUALITY) return null;
-  const downside = resolveContinuationDownsidePercent(candidate);
-  if (downside === null) return null;
-  // Mirrors paperTradeScore's own formula (breakout score, entryQuality,
-  // downside discipline) so fallback-path scores stay on the same scale as
-  // paperEntryEligible-derived ones instead of a different, incomparable one.
-  const downsideDiscipline = 100 - Math.min(100, downside * 3);
-  return Math.round(Math.max(0, Math.min(100, assessment.score * 0.7 + entryQuality * 0.2 + downsideDiscipline * 0.1)));
 }
 
 // Deliberately NOT derived from req.url's origin. Vercel Cron invokes this
@@ -497,7 +381,8 @@ async function fetchTopCandidates(): Promise<{
   };
   // Same checks as isCanonicalDecision, but gated on visibilityState instead
   // of strict eligibility.eligible — which is structurally always false for
-  // a verified price-discovery candidate (see computeContinuationScore).
+  // a verified price-discovery candidate. Bot v3 still evaluates it through
+  // the same unified decision contract as every other entry path.
   // This is the only path these candidates can reach the bot through at
   // all; isCanonicalDecision above excludes them from `standard` by design.
   const isVerifiedPriceDiscoveryDecision = (
@@ -525,12 +410,7 @@ async function fetchTopCandidates(): Promise<{
     : [];
   return {
     standard: opportunities.filter(isCanonicalDecision),
-    continuation: continuationCandidates
-      .filter(isCanonicalDecision)
-      .filter(
-        (candidate) =>
-          candidate.explosionAssessment?.paperEntryEligible === true,
-      ),
+    continuation: continuationCandidates.filter(isCanonicalDecision),
     priceDiscoveryFallback: opportunities.filter(isVerifiedPriceDiscoveryDecision),
     sourceRunId,
   };
@@ -540,10 +420,16 @@ export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const enabled = process.env.TRADING_BOT_ENABLED === "true";
+  // Management and entry authority are deliberately separate. Missing or
+  // false entry authorization still allows the bot to manage paper positions.
+  const entriesEnabled = process.env.TRADING_BOT_ENTRY_ENABLED === "true";
   const diagnostics = {
     enabled,
+    entriesEnabled,
     alpacaConfigured: alpacaConfigured(),
     paperOnly: true,
+    botLogicVersion: BOT_LOGIC_VERSION,
+    botDecisionVersion: BOT_DECISION_VERSION,
     canonicalFeedVersion: CANONICAL_OPPORTUNITY_VERSION,
     sourceRunId: null as string | null,
     entryWindowOpen: isRegularMarketSession(),
@@ -551,6 +437,8 @@ export async function GET(req: Request) {
     positionsChecked: 0,
     closed: 0,
     candidatesConsidered: 0,
+    candidatesQualified: 0,
+    candidatesAwaitingPersistence: 0,
     opened: 0,
     unfilled: 0,
     errors: 0,
@@ -559,6 +447,10 @@ export async function GET(req: Request) {
     proxShadowWouldReduceSize: 0,
     proxShadowWriteUnavailable: null as string | null,
     proxExecutionAuthority: false,
+    alpacaPositionCount: 0,
+    orphanedAlpacaPositionCount: 0,
+    newPositionsLast24Hours: 0,
+    entryCooldownMinutesRemaining: 0,
   };
 
   if (!enabled || !alpacaConfigured()) {
@@ -573,11 +465,11 @@ export async function GET(req: Request) {
 
   const supabase = getSupabase();
 
-  // Cycle logging is best-effort and must never block or fail real trading
-  // logic — every write here is try/catched on its own and only ever logs a
-  // warning. A row per cycle (bought something or not, and why) is what lets
-  // "correctly found nothing worth buying" stay distinguishable from "quietly
-  // broke," which console logs alone don't survive to look back on.
+  // Cycle logging must never block management of real paper positions. New
+  // entries are stricter: they fail closed when this decision receipt cannot
+  // be created, because an untraceable purchase is not acceptable. A row per
+  // cycle (bought something or not, and why) keeps "correctly found nothing"
+  // distinguishable from "quietly broke."
   let cycleId: string | null = null;
   try {
     const { data: cycleRow, error: cycleInsertError } = await supabase
@@ -585,6 +477,7 @@ export async function GET(req: Request) {
       .insert({
         bot_logic_version: BOT_LOGIC_VERSION,
         entry_window_open: diagnostics.entryWindowOpen,
+        entries_enabled: entriesEnabled,
       })
       .select("id")
       .single();
@@ -600,14 +493,40 @@ export async function GET(req: Request) {
     candidatesConsidered?: number;
     pickedTicker?: string | null;
     pickedIsContinuation?: boolean | null;
+    entryOpened?: boolean;
     skipReason?: string | null;
     error?: string | null;
   }) {
     if (!cycleId) return;
     try {
+      const update = {
+        completed_at: new Date().toISOString(),
+        ...(fields.sourceRunId !== undefined
+          ? { source_run_id: fields.sourceRunId }
+          : {}),
+        ...(fields.openPositionsCount !== undefined
+          ? { open_positions_count: fields.openPositionsCount }
+          : {}),
+        ...(fields.candidatesConsidered !== undefined
+          ? { candidates_considered: fields.candidatesConsidered }
+          : {}),
+        ...(fields.pickedTicker !== undefined
+          ? { picked_ticker: fields.pickedTicker }
+          : {}),
+        ...(fields.pickedIsContinuation !== undefined
+          ? { picked_is_continuation: fields.pickedIsContinuation }
+          : {}),
+        ...(fields.entryOpened !== undefined
+          ? { entry_opened: fields.entryOpened }
+          : {}),
+        ...(fields.skipReason !== undefined
+          ? { skip_reason: fields.skipReason }
+          : {}),
+        ...(fields.error !== undefined ? { error: fields.error } : {}),
+      };
       await supabase
         .from("bot_cycles")
-        .update({ completed_at: new Date().toISOString(), ...fields })
+        .update(update)
         .eq("id", cycleId);
     } catch (err) {
       console.error("[trading-bot] cycle logging update failed (non-blocking):", err);
@@ -615,24 +534,51 @@ export async function GET(req: Request) {
   }
 
   async function logCycleCandidates(
-    candidates: { ticker: string; isContinuation: boolean; score: number; tf: CanonicalOpportunity["tradeFramework"]; picked: boolean }[],
+    candidates: {
+      candidate: CanonicalOpportunity;
+      path: BotEntryPath;
+      decision: BotEntryDecision;
+      picked: boolean;
+    }[],
   ) {
-    if (!cycleId || candidates.length === 0) return;
+    if (!cycleId) return false;
+    // An empty authoritative board is a valid audited result. There are no
+    // candidate receipts to write, but the cycle itself records zero
+    // considered and the no-qualified-candidate skip reason.
+    if (candidates.length === 0) return true;
     try {
-      await supabase.from("bot_cycle_candidates").insert(
+      const { error } = await supabase.from("bot_cycle_candidates").insert(
         candidates.map((c) => ({
           cycle_id: cycleId,
-          ticker: c.ticker,
-          is_continuation: c.isContinuation,
-          score: c.score,
-          entry_quality: c.tf?.entryQuality ?? null,
-          rr_ratio: c.tf?.rrRatio ?? null,
-          downside_percent: c.tf?.downsideRisk ?? null,
+          ticker: c.candidate.ticker,
+          is_continuation: c.path !== "standard",
+          score: c.decision.score,
+          entry_quality: c.candidate.tradeFramework?.entryQuality ?? null,
+          rr_ratio: c.decision.effectiveRr,
+          downside_percent: c.decision.effectiveDownsidePercent,
           picked: c.picked,
+          decision_version: c.decision.version,
+          entry_path: c.path,
+          entry_qualified: c.decision.qualified,
+          fast_entry_eligible: c.decision.fastEntryEligible,
+          rejection_reasons: c.decision.hardFailures,
+          component_scores: c.decision.components,
+          effective_rr_ratio: c.decision.effectiveRr,
+          effective_downside_percent:
+            c.decision.effectiveDownsidePercent,
+          continuation_capacity_percent:
+            c.decision.continuationCapacityPercent,
+          opportunity_score: c.candidate.opportunityScore,
+          relative_volume: c.candidate.relativeVolume,
+          change_from_open_percent: c.candidate.changeFromOpenPercent,
+          signal_state: c.candidate.signalState,
         })),
       );
+      if (error) throw error;
+      return true;
     } catch (err) {
-      console.error("[trading-bot] cycle candidate logging failed (non-blocking):", err);
+      console.error("[trading-bot] cycle candidate logging failed:", err);
+      return false;
     }
   }
 
@@ -685,10 +631,18 @@ export async function GET(req: Request) {
       .eq("status", "open");
     if (openTradesError) throw openTradesError;
 
-    let alpacaPositions: AlpacaPosition[] = [];
-    if ((openTrades ?? []).length > 0) {
-      alpacaPositions = await getPositions();
-    }
+    // Alpaca is the position source of truth. Read it every cycle even when
+    // the database claims zero open trades so an orphaned/manual position can
+    // block duplicate buying instead of remaining invisible to entry logic.
+    const alpacaPositions: AlpacaPosition[] = await getPositions();
+    diagnostics.alpacaPositionCount = alpacaPositions.length;
+    const trackedOpenTickers = new Set(
+      (openTrades ?? []).map((trade) => trade.ticker),
+    );
+    const orphanedAlpacaPositions = alpacaPositions.filter(
+      (position) => !trackedOpenTickers.has(position.symbol),
+    );
+    diagnostics.orphanedAlpacaPositionCount = orphanedAlpacaPositions.length;
     const positionBySymbol = new Map(alpacaPositions.map((p) => [p.symbol, p]));
 
     for (const trade of openTrades ?? []) {
@@ -727,7 +681,14 @@ export async function GET(req: Request) {
       let hitTrailingStop = false;
       if (!stopPaused && gainFromEntry >= MIN_PROFIT_TO_TRAIL_PERCENT) {
         const trailPercent = gainFromEntry >= EXTENDED_GAIN_THRESHOLD_PERCENT ? TIGHT_TRAIL_PERCENT : WIDE_TRAIL_PERCENT;
-        const trailingStopPrice = highWaterMark * (1 - trailPercent / 100);
+        // Once trailing protection activates, its intended trigger cannot sit
+        // below breakeven. Execution can still slip on a fast market order,
+        // but the decision itself no longer willingly turns a winner into a
+        // full hard-stop loss.
+        const trailingStopPrice = Math.max(
+          highWaterMark * (1 - trailPercent / 100),
+          entryPrice * (1 + TRAILING_BREAKEVEN_LOCK_PERCENT / 100),
+        );
         if (currentPrice <= trailingStopPrice) hitTrailingStop = true;
       }
 
@@ -777,22 +738,113 @@ export async function GET(req: Request) {
       }
     }
 
-    // ── 2. Consider a new entry, only if a slot is open ──
-    const { count: openCount } = await supabase
+    // ── 2. Consider a new entry, only after every independent safety gate ──
+    const { count: openCount, error: openCountError } = await supabase
       .from("bot_trades")
       .select("id", { count: "exact", head: true })
       .eq("status", "open");
+    if (openCountError) throw openCountError;
+    const effectiveOpenCount = Math.max(
+      openCount ?? 0,
+      alpacaPositions.length,
+    );
 
-    if (
-      (openCount ?? 0) < MAX_CONCURRENT_POSITIONS &&
-      diagnostics.entryWindowOpen
-    ) {
-      const { standard, continuation, priceDiscoveryFallback, sourceRunId } = await fetchTopCandidates();
+    const rollingEntryStart = new Date(
+      Date.now() - 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { count: recentEntryCount, error: recentEntryCountError } =
+      await supabase
+        .from("bot_trades")
+        .select("id", { count: "exact", head: true })
+        .not("entry_order_id", "is", null)
+        .gte("entry_at", rollingEntryStart);
+    if (recentEntryCountError) throw recentEntryCountError;
+    diagnostics.newPositionsLast24Hours = recentEntryCount ?? 0;
+
+    const { data: latestEntry, error: latestEntryError } = await supabase
+      .from("bot_trades")
+      .select("entry_at")
+      .not("entry_order_id", "is", null)
+      .order("entry_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestEntryError) throw latestEntryError;
+    const minutesSinceLatestEntry = latestEntry?.entry_at
+      ? (Date.now() - new Date(latestEntry.entry_at).getTime()) / 60_000
+      : Number.POSITIVE_INFINITY;
+    diagnostics.entryCooldownMinutesRemaining = Number.isFinite(
+      minutesSinceLatestEntry,
+    )
+      ? Math.max(
+          0,
+          Math.ceil(MIN_MINUTES_BETWEEN_ENTRIES - minutesSinceLatestEntry),
+        )
+      : 0;
+
+    const entrySkipReason = getBotEntryControlSkipReason({
+      entriesEnabled,
+      entryWindowOpen: diagnostics.entryWindowOpen,
+      decisionAuditAvailable: cycleId !== null,
+      orphanedAlpacaPositionCount: orphanedAlpacaPositions.length,
+      openPositionCount: effectiveOpenCount,
+      maxConcurrentPositions: MAX_CONCURRENT_POSITIONS,
+      recentEntryCount: recentEntryCount ?? 0,
+      maxRecentEntries: MAX_NEW_POSITIONS_PER_ROLLING_24_HOURS,
+      minutesSinceLatestEntry,
+      minimumMinutesBetweenEntries: MIN_MINUTES_BETWEEN_ENTRIES,
+    });
+    if (!diagnostics.entryWindowOpen) {
+      diagnostics.entriesDeferredOutsideRegularSession++;
+    }
+
+    const candidateEvaluationAvailable =
+      diagnostics.entryWindowOpen && cycleId !== null;
+
+    if (!candidateEvaluationAvailable) {
+      await finalizeCycle({
+        openPositionsCount: effectiveOpenCount,
+        entryOpened: false,
+        skipReason: entrySkipReason ?? "candidate_evaluation_unavailable",
+      });
+    } else {
+      const {
+        standard,
+        continuation,
+        priceDiscoveryFallback,
+        sourceRunId,
+      } = await fetchTopCandidates();
       diagnostics.sourceRunId = sourceRunId;
-      diagnostics.candidatesConsidered = standard.length + continuation.length + priceDiscoveryFallback.length;
+
+      const candidatesByTicker = new Map<
+        string,
+        { candidate: CanonicalOpportunity; path: BotEntryPath }
+      >();
+      for (const candidate of standard) {
+        candidatesByTicker.set(candidate.ticker, {
+          candidate,
+          path: "standard",
+        });
+      }
+      for (const candidate of continuation) {
+        candidatesByTicker.set(candidate.ticker, {
+          candidate,
+          path: "continuation",
+        });
+      }
+      for (const candidate of priceDiscoveryFallback) {
+        candidatesByTicker.set(candidate.ticker, {
+          candidate,
+          path: "price_discovery",
+        });
+      }
+      const candidateRecords = [...candidatesByTicker.values()];
+      diagnostics.candidatesConsidered = candidateRecords.length;
+
+      // Independent ProX remains observation-only. Its opinion is stored for
+      // later outcome comparison and cannot alter the decisions below.
       const shadow = await recordProxShadowObservations(
         supabase,
-        [...standard, ...continuation, ...priceDiscoveryFallback],
+        candidateRecords.map((record) => record.candidate),
         sourceRunId,
       );
       diagnostics.proxShadowPacketsObserved = shadow.observed;
@@ -800,75 +852,117 @@ export async function GET(req: Request) {
       diagnostics.proxShadowWouldReduceSize = shadow.wouldReduceSize;
       diagnostics.proxShadowWriteUnavailable = shadow.unavailableReason;
 
-      const heldTickers = new Set((openTrades ?? []).map((t) => t.ticker));
-      const continuationTickers = new Set(
-        continuation.map((candidate) => candidate.ticker),
+      const heldTickers = new Set([
+        ...(openTrades ?? []).map((trade) => trade.ticker),
+        ...alpacaPositions.map((position) => position.symbol),
+      ]);
+      const evaluated = candidateRecords.map(({ candidate, path }) => ({
+        candidate,
+        path,
+        decision: evaluateBotEntry(candidate, path),
+      }));
+      const qualified = evaluated.filter(
+        (record) =>
+          record.decision.qualified &&
+          record.decision.score !== null &&
+          !heldTickers.has(record.candidate.ticker),
       );
-      let best: { candidate: CanonicalOpportunity; score: number; isContinuation: boolean } | null = null;
-      const scored: { candidate: CanonicalOpportunity; score: number; isContinuation: boolean }[] = [];
-      for (const candidate of standard) {
-        if (
-          heldTickers.has(candidate.ticker) ||
-          continuationTickers.has(candidate.ticker)
-        ) {
-          continue;
-        }
-        const score = computeBotScore(candidate);
-        if (score === null) continue;
-        scored.push({ candidate, score, isContinuation: false });
-        if (!best || score > best.score) best = { candidate, score, isContinuation: false };
-      }
-      // Considered alongside, not instead of, standard picks — the "safest
-      // probable trade" path stays the default; this only fills in when a
-      // real continuation setup scores higher, or when nothing on the
-      // standard path qualifies at all.
-      for (const candidate of continuation) {
-        if (heldTickers.has(candidate.ticker)) continue;
-        const score = computeContinuationScore(candidate);
-        if (score === null) continue;
-        scored.push({ candidate, score, isContinuation: true });
-        if (!best || score > best.score) best = { candidate, score, isContinuation: true };
-      }
-      // The strongest, most-confirmed movers of the day — verified price
-      // discovery, no measured downsideRisk yet by design. Excluded from
-      // both `standard` (needs a modeled upsideMax) and `continuation` (the
-      // API's own list requires paperEntryEligible, which requires a real
-      // downsideRisk) — this is the only path they can reach the bot
-      // through. computeContinuationScore's fallback branch handles the
-      // ATR-based downside and the remaining real quality checks.
-      for (const candidate of priceDiscoveryFallback) {
-        if (heldTickers.has(candidate.ticker) || continuationTickers.has(candidate.ticker)) continue;
-        const score = computeContinuationScore(candidate);
-        if (score === null) continue;
-        scored.push({ candidate, score, isContinuation: true });
-        if (!best || score > best.score) best = { candidate, score, isContinuation: true };
+      diagnostics.candidatesQualified = qualified.length;
+
+      const persistenceSince = new Date(
+        Date.now() - CANDIDATE_PERSISTENCE_LOOKBACK_MINUTES * 60_000,
+      ).toISOString();
+      const { data: recentCycles, error: recentCyclesError } = await supabase
+        .from("bot_cycles")
+        .select("id")
+        .eq("bot_logic_version", BOT_LOGIC_VERSION)
+        .gte("started_at", persistenceSince)
+        .neq("id", cycleId);
+      if (recentCyclesError) throw recentCyclesError;
+      const recentCycleIds = (recentCycles ?? []).map((cycle) => cycle.id);
+      let persistedTickers = new Set<string>();
+      if (recentCycleIds.length > 0) {
+        const { data: persistedRows, error: persistedRowsError } =
+          await supabase
+            .from("bot_cycle_candidates")
+            .select("ticker")
+            .eq("decision_version", BOT_DECISION_VERSION)
+            .eq("entry_qualified", true)
+            .in("cycle_id", recentCycleIds);
+        if (persistedRowsError) throw persistedRowsError;
+        persistedTickers = new Set(
+          (persistedRows ?? []).map((row) => row.ticker),
+        );
       }
 
-      await logCycleCandidates(
-        scored.map((s) => ({
-          ticker: s.candidate.ticker,
-          isContinuation: s.isContinuation,
-          score: s.score,
-          tf: s.candidate.tradeFramework,
-          picked: best !== null && s.candidate.ticker === best.candidate.ticker && s.isContinuation === best.isContinuation,
+      const ready = qualified.filter(
+        (record) =>
+          isBotCandidateReady(
+            record.decision,
+            persistedTickers.has(record.candidate.ticker),
+          ),
+      );
+      diagnostics.candidatesAwaitingPersistence =
+        qualified.length - ready.length;
+      ready.sort(
+        (a, b) => (b.decision.score ?? 0) - (a.decision.score ?? 0),
+      );
+      const best = ready[0] ?? null;
+
+      const candidateAuditWritten = await logCycleCandidates(
+        evaluated.map((record) => ({
+          ...record,
+          picked:
+            entrySkipReason === null &&
+            best !== null &&
+            record.candidate.ticker === best.candidate.ticker &&
+            record.path === best.path,
         })),
       );
 
-      if (!best) {
+      if (!candidateAuditWritten) {
         await finalizeCycle({
           sourceRunId,
-          openPositionsCount: openCount ?? null,
+          openPositionsCount: effectiveOpenCount,
           candidatesConsidered: diagnostics.candidatesConsidered,
-          skipReason: "no_eligible_candidate",
+          entryOpened: false,
+          skipReason: "candidate_audit_write_failed",
         });
-      }
-
-      if (best) {
-        const { candidate, score, isContinuation } = best;
-        const tf = candidate.tradeFramework;
-        if (!tf) {
+      } else if (entrySkipReason) {
+        // Entry-disabled, cooldown, capacity, and reconciliation states are
+        // execution gates only. The full decision board above is still
+        // evaluated and persisted so the paper bot can run safely in shadow
+        // mode without losing the evidence needed to validate this version.
+        await finalizeCycle({
+          sourceRunId,
+          openPositionsCount: effectiveOpenCount,
+          candidatesConsidered: diagnostics.candidatesConsidered,
+          entryOpened: false,
+          skipReason: entrySkipReason,
+        });
+      } else if (!best) {
+        await finalizeCycle({
+          sourceRunId,
+          openPositionsCount: effectiveOpenCount,
+          candidatesConsidered: diagnostics.candidatesConsidered,
+          entryOpened: false,
+          skipReason:
+            qualified.length > 0
+              ? "awaiting_candidate_persistence"
+              : "no_entry_qualified_candidate",
+        });
+      } else {
+        const { candidate, decision, path } = best;
+        const score = decision.score;
+        const isContinuation = path !== "standard";
+        const tradeFramework = candidate.tradeFramework;
+        if (
+          score === null ||
+          !tradeFramework ||
+          decision.effectiveDownsidePercent === null
+        ) {
           throw new Error(
-            `Canonical decision for ${candidate.ticker} has no trade framework.`,
+            `Bot v3 decision for ${candidate.ticker} lost required entry evidence.`,
           );
         }
         try {
@@ -881,122 +975,124 @@ export async function GET(req: Request) {
             throw new Error("Alpaca paper account is not active for trading.");
           }
           const equity = Number(account?.equity ?? account?.cash ?? 0);
-          // Continuation entries are a higher-variance bet than the modeled
-          // R:R path (no reliable upside number, just volume + momentum
-          // still confirming) — half the normal size for the same reason
-          // the stop-loss floor exists: real exposure, not a guess dressed
-          // up as precision.
-          const sizePercent = isContinuation ? POSITION_SIZE_PERCENT / 2 : POSITION_SIZE_PERCENT;
-          const positionNotional = Math.round(equity * sizePercent * 100) / 100;
+          const sizePercent = isContinuation
+            ? POSITION_SIZE_PERCENT / 2
+            : POSITION_SIZE_PERCENT;
+          const positionNotional =
+            Math.round(equity * sizePercent * 100) / 100;
           if (!Number.isFinite(positionNotional) || positionNotional <= 0) {
-            throw new Error(`Could not determine a valid position size from account equity (${equity}).`);
+            throw new Error(
+              `Could not determine a valid position size from account equity (${equity}).`,
+            );
           }
 
-          const { order, qty } = await placeBuyOrder(candidate.ticker, positionNotional, candidate.price);
-          const fillResult = order?.id ? await pollForFill(order.id) : ({ filled: false, price: null, qty: null } as const);
+          const { order, qty } = await placeBuyOrder(
+            candidate.ticker,
+            positionNotional,
+            candidate.price,
+          );
+          const fillResult = order?.id
+            ? await pollForFill(order.id)
+            : ({ filled: false, price: null, qty: null } as const);
 
           if (!fillResult.filled) {
-            // Same principle as the exit side: don't record a position that
-            // isn't real. Most likely cause outside regular hours (no
-            // extended_hours flag) is the order just never fills — let the
-            // next cycle try again with a fresh top candidate, rather than
-            // inserting an "open" row for a position that was never actually
-            // bought. (pollForFill already attempted cancelOrder and did a
-            // final post-cancel check itself — reaching here means that
-            // already confirmed no fill happened.)
             diagnostics.unfilled++;
-            console.error(`[trading-bot] buy for ${candidate.ticker} did not fill (order ${order?.id ?? "none"}) — skipped`);
+            console.error(
+              `[trading-bot] buy for ${candidate.ticker} did not fill (order ${order?.id ?? "none"}) — skipped`,
+            );
             await finalizeCycle({
               sourceRunId,
-              openPositionsCount: openCount ?? null,
+              openPositionsCount: effectiveOpenCount,
               candidatesConsidered: diagnostics.candidatesConsidered,
               pickedTicker: candidate.ticker,
               pickedIsContinuation: isContinuation,
+              entryOpened: false,
               skipReason: "buy_unfilled",
             });
-            return NextResponse.json({ success: true, diagnostics, timestamp: new Date().toISOString() });
+            return NextResponse.json({
+              success: true,
+              diagnostics,
+              timestamp: new Date().toISOString(),
+            });
           }
 
           const entryPrice = fillResult.price;
           const now = new Date();
-          // Continuation entries use the real-or-ATR-fallback downside (see
-          // resolveContinuationDownsidePercent) so the stop actually placed
-          // matches the number the entry was scored against — standard
-          // entries keep the original real-downside-only floor unchanged.
-          const stopDownside = isContinuation
-            ? resolveContinuationDownsidePercent(candidate)
-            : effectiveDownsidePercent(tf);
+          const stopDownside = decision.effectiveDownsidePercent;
           const baseTradeRow = {
             ticker: candidate.ticker,
             status: "open",
             entry_order_id: order?.id ?? null,
             entry_price: entryPrice,
             entry_at: now.toISOString(),
-            // Alpaca's own filled_qty (now available from pollForFill) is
-            // ground truth for exactly what was bought, for both notional
-            // and whole-share-fallback orders — falls back to the
-            // whole-share qty, then the originally requested notional, only
-            // if Alpaca didn't report a filled_qty for some reason.
             position_notional: (() => {
               const actualQty = fillResult.qty ?? qty;
-              return actualQty !== null ? Math.round(actualQty * entryPrice * 100) / 100 : positionNotional;
+              return actualQty !== null
+                ? Math.round(actualQty * entryPrice * 100) / 100
+                : positionNotional;
             })(),
-            // Informational only now — the actual sell decision is the
-            // trailing stop below, not this fixed number. Kept so the
-            // viewer can still show "what HT Labs originally modeled."
-            target_price: tf.upsideMax !== null ? entryPrice * (1 + tf.upsideMax / 100) : null,
-            stop_price: stopDownside !== null ? entryPrice * (1 - stopDownside / 100) : null,
+            target_price:
+              tradeFramework.upsideMax !== null
+                ? entryPrice * (1 + tradeFramework.upsideMax / 100)
+                : null,
+            stop_price: entryPrice * (1 - stopDownside / 100),
             high_water_mark: entryPrice,
-            max_hold_until: new Date(now.getTime() + MAX_HOLD_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+            max_hold_until: new Date(
+              now.getTime() + MAX_HOLD_DAYS * 24 * 60 * 60 * 1000,
+            ).toISOString(),
             bot_score: score,
-            entry_snapshot: { ...candidate, isContinuationEntry: isContinuation },
+            entry_snapshot: {
+              ...candidate,
+              isContinuationEntry: isContinuation,
+              botEntryPath: path,
+              botDecision: decision,
+            },
           };
-          // The order already filled on Alpaca by this point — a real
-          // position exists. If bot_logic_version/source_run_id don't exist
-          // yet (migration 0009 not applied), inserting with them would
-          // throw and this position would never get recorded at all, which
-          // means the exit loop above would never know it exists and it
-          // would sit open and unmanaged indefinitely. Falling back to the
-          // original column set guarantees the position always gets tracked
-          // regardless of migration state — the new columns are analytics,
-          // never allowed to block recording a real trade.
+          // A filled paper order must always be tracked, even if optional
+          // analytics columns are temporarily unavailable.
           const { error: insertError } = await supabase
             .from("bot_trades")
-            .insert({ ...baseTradeRow, bot_logic_version: BOT_LOGIC_VERSION, source_run_id: sourceRunId });
+            .insert({
+              ...baseTradeRow,
+              bot_logic_version: BOT_LOGIC_VERSION,
+              source_run_id: sourceRunId,
+            });
           if (insertError) {
-            console.error("[trading-bot] insert with analytics columns failed, retrying without them:", insertError.message);
-            const { error: fallbackInsertError } = await supabase.from("bot_trades").insert(baseTradeRow);
+            console.error(
+              "[trading-bot] insert with analytics columns failed, retrying without them:",
+              insertError.message,
+            );
+            const { error: fallbackInsertError } = await supabase
+              .from("bot_trades")
+              .insert(baseTradeRow);
             if (fallbackInsertError) throw fallbackInsertError;
           }
           diagnostics.opened++;
           await finalizeCycle({
             sourceRunId,
-            openPositionsCount: openCount ?? null,
+            openPositionsCount: effectiveOpenCount,
             candidatesConsidered: diagnostics.candidatesConsidered,
             pickedTicker: candidate.ticker,
             pickedIsContinuation: isContinuation,
+            entryOpened: true,
           });
         } catch (err) {
           diagnostics.errors++;
-          console.error(`[trading-bot] buy order failed for ${candidate.ticker}:`, err);
+          console.error(
+            `[trading-bot] buy order failed for ${candidate.ticker}:`,
+            err,
+          );
           await finalizeCycle({
             sourceRunId,
-            openPositionsCount: openCount ?? null,
+            openPositionsCount: effectiveOpenCount,
             candidatesConsidered: diagnostics.candidatesConsidered,
             pickedTicker: candidate.ticker,
             pickedIsContinuation: isContinuation,
+            entryOpened: false,
             error: err instanceof Error ? err.message : String(err),
           });
         }
       }
-    } else if (
-      (openCount ?? 0) < MAX_CONCURRENT_POSITIONS &&
-      !diagnostics.entryWindowOpen
-    ) {
-      diagnostics.entriesDeferredOutsideRegularSession++;
-      await finalizeCycle({ openPositionsCount: openCount ?? null, skipReason: "outside_session" });
-    } else {
-      await finalizeCycle({ openPositionsCount: openCount ?? null, skipReason: "max_positions" });
     }
 
     return NextResponse.json({ success: true, diagnostics, timestamp: new Date().toISOString() });

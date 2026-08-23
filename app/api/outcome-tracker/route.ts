@@ -152,6 +152,10 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || req.headers.get("authorization") !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const body = await req.json();
     const { signalId, ticker, entryPrice, currentPrice, daysElapsed } = body;

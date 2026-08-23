@@ -34,11 +34,19 @@ const LEVERAGED_SUFFIX = /(?:2L|2S|3L|3S|5L|5S)$/;
 
 export type CryptoAssetPolicyResult = {
   allowed: boolean;
-  reason: "allowed" | "stable_asset" | "wrapped_or_receipt_asset" | "leveraged_asset";
+  reason:
+    | "allowed"
+    | "invalid_asset"
+    | "stable_asset"
+    | "wrapped_or_receipt_asset"
+    | "leveraged_asset";
 };
 
 export function evaluateCryptoAssetPolicy(symbolValue: unknown): CryptoAssetPolicyResult {
   const symbol = String(symbolValue ?? "").trim().toUpperCase();
+  if (!symbol) {
+    return { allowed: false, reason: "invalid_asset" };
+  }
   if (CRYPTO_STABLE_ASSETS.has(symbol)) {
     return { allowed: false, reason: "stable_asset" };
   }
