@@ -30,6 +30,15 @@ export const dynamic = "force-dynamic";
 const RECONCILIATION_STOP_PERCENT = 5;
 const MAX_HOLD_DAYS = 3;
 
+// Same CRON_SECRET bearer-token check used everywhere else in this
+// codebase for internal-only routes — this write endpoint was reachable
+// with no auth at all.
+const CRON_SECRET = process.env.CRON_SECRET;
+function isAuthorized(req: Request) {
+  if (!CRON_SECRET) return false;
+  return req.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
+}
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -37,7 +46,8 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     if (!alpacaConfigured()) {
       return NextResponse.json({ error: "Alpaca is not configured." }, { status: 500 });

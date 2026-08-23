@@ -10,6 +10,15 @@ import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 
+// Real account financial data (entry/exit prices, position sizing, P&L) —
+// was reachable with no auth at all. Same CRON_SECRET bearer-token check
+// already used everywhere else in this codebase for internal-only routes.
+const CRON_SECRET = process.env.CRON_SECRET;
+function isAuthorized(req: Request) {
+  if (!CRON_SECRET) return false;
+  return req.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
+}
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -18,6 +27,7 @@ function getSupabase() {
 }
 
 export async function GET(req: Request) {
+  if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { searchParams } = new URL(req.url);
     const limit = Math.min(200, Math.max(1, Number.parseInt(searchParams.get("limit") ?? "100", 10) || 100));

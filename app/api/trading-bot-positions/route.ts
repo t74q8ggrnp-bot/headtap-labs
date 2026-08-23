@@ -16,6 +16,15 @@ import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 
+// Real account equity, cash, and positions — was reachable with no auth at
+// all. Same CRON_SECRET bearer-token check used everywhere else in this
+// codebase for internal-only routes.
+const CRON_SECRET = process.env.CRON_SECRET;
+function isAuthorized(req: Request) {
+  if (!CRON_SECRET) return false;
+  return req.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
+}
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -23,7 +32,8 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     if (!alpacaConfigured()) {
       return NextResponse.json({ error: "Alpaca is not configured." }, { status: 500 });

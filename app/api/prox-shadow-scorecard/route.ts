@@ -15,6 +15,14 @@ import { getErrorMessage } from "@/lib/error-message";
 
 export const dynamic = "force-dynamic";
 
+// Same CRON_SECRET bearer-token check used everywhere else in this
+// codebase for internal-only routes — this was reachable with no auth.
+const CRON_SECRET = process.env.CRON_SECRET;
+function isAuthorized(req: Request) {
+  if (!CRON_SECRET) return false;
+  return req.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
+}
+
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -55,6 +63,7 @@ function avg(values: number[]): number | null {
 }
 
 export async function GET(req: Request) {
+  if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { searchParams } = new URL(req.url);
     const sinceDays = Math.min(30, Math.max(1, Number.parseInt(searchParams.get("days") ?? "14", 10) || 14));
