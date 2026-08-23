@@ -1922,7 +1922,8 @@ export default function HomeClient({
         />
 
         <footer className="border-t border-orange-500/10 bg-black/60 px-5 py-8">
-          <div className="mx-auto flex max-w-7xl flex-col gap-5 md:flex-row md:items-center md:justify-start">
+          <div className="mx-auto flex max-w-7xl flex-col gap-5">
+            <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-start">
             <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-12 w-auto" />
 
             <p className="text-sm text-zinc-500">
@@ -1930,6 +1931,12 @@ export default function HomeClient({
               signal quality, attention flow, saved AI setups, smart alerts, and
               cloud watchlists in real time. Signals are educational research tools, not financial advice.
             </p>
+            </div>
+            <nav aria-label="Account and legal" className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-black uppercase tracking-[0.12em] text-zinc-500">
+              <Link href="/account" className="transition hover:text-orange-300">Account &amp; Privacy</Link>
+              <Link href="/privacy" className="transition hover:text-orange-300">Privacy Policy</Link>
+              <Link href="/terms" className="transition hover:text-orange-300">Terms of Use</Link>
+            </nav>
           </div>
         </footer>
 

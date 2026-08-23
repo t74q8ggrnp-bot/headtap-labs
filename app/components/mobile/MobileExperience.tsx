@@ -5,6 +5,7 @@
 // sources, same handlers, now passed in as props instead of closed over.
 import type { Session } from "@supabase/supabase-js";
 import Image from "next/image";
+import Link from "next/link";
 import type {
   DecisionTraceDisplay as DecisionTraceModel,
   BullBearAnalysis,
@@ -398,6 +399,19 @@ export default function MobileExperience({
                   {authMessage && <p className="text-xs font-semibold text-zinc-400 text-center">{authMessage}</p>}
                 </div>
               )}
+              <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+                <Link
+                  href="/account"
+                  className="flex items-center justify-between rounded-xl border border-orange-400/20 bg-orange-500/[0.06] px-4 py-3 text-sm font-black text-orange-200"
+                >
+                  <span>Account &amp; Privacy</span>
+                  <span aria-hidden="true">→</span>
+                </Link>
+                <div className="mt-3 flex items-center justify-center gap-5 text-xs font-bold text-zinc-500">
+                  <Link href="/privacy" className="underline decoration-zinc-700 underline-offset-4">Privacy Policy</Link>
+                  <Link href="/terms" className="underline decoration-zinc-700 underline-offset-4">Terms of Use</Link>
+                </div>
+              </div>
             </div>
           )}
         </div>

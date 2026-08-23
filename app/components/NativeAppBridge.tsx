@@ -27,7 +27,9 @@ export default function NativeAppBridge() {
 
     const updateConnection = () => setIsOffline(!navigator.onLine);
     const connectionTimer = window.setTimeout(updateConnection, 0);
-    const startupTimer = window.setTimeout(() => setShowStartup(false), 900);
+    // The native launch screen already covers startup. Keep this bridge only
+    // long enough to prevent a white flash while the first web view paints.
+    const startupTimer = window.setTimeout(() => setShowStartup(false), 400);
     window.addEventListener("online", updateConnection);
     window.addEventListener("offline", updateConnection);
 
