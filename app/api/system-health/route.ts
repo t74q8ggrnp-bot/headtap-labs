@@ -24,6 +24,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
 import { auditCanonicalSpotMomentumFeed } from "@/lib/canonical-feed-integrity";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
+import { getDecisionFrameMarketTimingFreshness } from "@/lib/canonical-decision-frame-policy";
 import { auditTopMoverDispositions } from "@/lib/top-mover-disposition";
 import {
   PROX_PUBLIC_AUTHORITY_CONTRACT,
@@ -471,7 +472,7 @@ export async function GET() {
       // extended hours an illiquid symbol can be processed most recently while
       // its last real bar is hours old. Prove sensor vitality from the freshest
       // provider-time pulse, then use computed_at only as the tie-breaker.
-      .order("market_as_of", { ascending: false })
+      .order("market_as_of", { ascending: false, nullsFirst: false })
       .order("computed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -2051,11 +2052,10 @@ export async function GET() {
       (topDecisionSet.length > 0 &&
         topDecisionSet.every(
           (record) =>
-            isActiveMarketTimestampUsable(record.decisionQuoteAsOf) &&
-            isActiveMarketTimestampUsable(
-              record.proxIntelligence?.pulse?.marketAsOf,
-            ) &&
-            record.scoreContext.proxMarketDataAligned === true,
+            getDecisionFrameMarketTimingFreshness({
+              opportunities: [record],
+              momentumContenders: [],
+            }).fresh,
         ));
     const proxAuthorityRecords = topDecisionSet.filter(
       (record) => record.proxIntelligence !== null,

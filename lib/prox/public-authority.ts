@@ -3,6 +3,7 @@ import { measureMarketTimestampAlignment } from "../market-data-time.ts";
 
 export const PROX_PUBLIC_AUTHORITY_VERSION =
   "prox-public-market-authority-v4-realtime-source-authority";
+export const PROX_UNAVAILABLE_MARKET_ADJUSTMENT = -8;
 
 export const PROX_PUBLIC_AUTHORITY_CONTRACT = {
   version: PROX_PUBLIC_AUTHORITY_VERSION,
@@ -131,7 +132,7 @@ export function evaluateProxPublicAuthority(input: {
       ? sessionPeakDamagePenalty
     : marketConfirmation === null
       ? input.activeMarketSession
-        ? -8
+        ? PROX_UNAVAILABLE_MARKET_ADJUSTMENT
         : 0
       : marketConfirmation >= 75
         ? Math.min(

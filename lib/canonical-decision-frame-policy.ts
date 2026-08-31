@@ -3,6 +3,7 @@ import {
   isActiveMarketTimestampUsable,
   marketTimestampMs,
 } from "./market-data-time";
+import { PROX_UNAVAILABLE_MARKET_ADJUSTMENT } from "./prox/public-authority";
 
 export const CANONICAL_DECISION_FRAME_VERSION =
   "rolling-canonical-decision-frame-v4-source-time-authority";
@@ -34,7 +35,14 @@ type MarketTimedFrameOpportunity = {
   proxIntelligence?: {
     pulse?: { marketAsOf?: unknown } | null;
   } | null;
-  scoreContext?: { proxMarketDataAligned?: unknown } | null;
+  scoreContext?: {
+    proxMarketDataAligned?: unknown;
+    proxMarketAdjustment?: unknown;
+    proxSupportsContinuation?: unknown;
+    peakFailureConfirmed?: unknown;
+    proxDeepSessionRecoveryWithheld?: unknown;
+    proxSevereSessionPeakDamage?: unknown;
+  } | null;
 };
 
 const ACTIVE_MARKET_SESSIONS = new Set([
@@ -68,20 +76,39 @@ export function getDecisionFrameMarketTimingFreshness(
     );
     if (
       !isActiveMarketTimestampUsable(record.decisionQuoteAsOf, now) ||
-      !isActiveMarketTimestampUsable(
-        record.proxIntelligence?.pulse?.marketAsOf,
-        now,
-      ) ||
-      record.scoreContext?.proxMarketDataAligned !== true ||
-      decisionQuoteMs === null ||
-      proxMarketMs === null
+      decisionQuoteMs === null
     ) {
       return { fresh: false, freshUntil: null };
     }
-    const recordExpiryMs = Math.min(
-      decisionQuoteMs + ACTIVE_MARKET_DATA_MAX_AGE_MS,
-      proxMarketMs + ACTIVE_MARKET_DATA_MAX_AGE_MS,
+    const proxTemporalAuthorityReady = Boolean(
+      isActiveMarketTimestampUsable(
+        record.proxIntelligence?.pulse?.marketAsOf,
+        now,
+      ) &&
+        record.scoreContext?.proxMarketDataAligned === true &&
+        proxMarketMs !== null,
     );
+    // The provider-time contract permits a missing/stale/misaligned pulse only
+    // through the documented fail-closed lane: the exact bounded penalty is
+    // applied, while support and every defensive authority action remain off.
+    // This is not a neutral pass and stale ProX facts still cannot act.
+    const proxFailClosed = Boolean(
+      Number(record.scoreContext?.proxMarketAdjustment) ===
+        PROX_UNAVAILABLE_MARKET_ADJUSTMENT &&
+        record.scoreContext?.proxSupportsContinuation === false &&
+        record.scoreContext?.peakFailureConfirmed === false &&
+        record.scoreContext?.proxDeepSessionRecoveryWithheld === false &&
+        record.scoreContext?.proxSevereSessionPeakDamage === false,
+    );
+    if (!proxTemporalAuthorityReady && !proxFailClosed) {
+      return { fresh: false, freshUntil: null };
+    }
+    const recordExpiryMs = proxTemporalAuthorityReady
+      ? Math.min(
+          decisionQuoteMs + ACTIVE_MARKET_DATA_MAX_AGE_MS,
+          (proxMarketMs as number) + ACTIVE_MARKET_DATA_MAX_AGE_MS,
+        )
+      : decisionQuoteMs + ACTIVE_MARKET_DATA_MAX_AGE_MS;
     earliestExpiryMs =
       earliestExpiryMs === null
         ? recordExpiryMs

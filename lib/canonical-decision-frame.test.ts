@@ -70,4 +70,27 @@ test("a cached frame expires when its provider-time evidence expires", () => {
   );
   assert.equal(expired.fresh, false);
   assert.equal(expired.freshUntil, null);
+
+  const failClosed = getDecisionFrameMarketTimingFreshness(
+    {
+      opportunities: [
+        {
+          ...base,
+          proxIntelligence: null,
+          scoreContext: {
+            proxMarketDataAligned: false,
+            proxMarketAdjustment: -8,
+            proxSupportsContinuation: false,
+            peakFailureConfirmed: false,
+            proxDeepSessionRecoveryWithheld: false,
+            proxSevereSessionPeakDamage: false,
+          },
+        },
+      ],
+      momentumContenders: [],
+    },
+    now,
+  );
+  assert.equal(failClosed.fresh, true);
+  assert.equal(failClosed.freshUntil, "2026-08-31T13:44:00.000Z");
 });
