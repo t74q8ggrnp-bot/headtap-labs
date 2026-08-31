@@ -10,6 +10,7 @@ import {
   CANONICAL_DECISION_FRAME_REVALIDATE_SECONDS,
   CANONICAL_DECISION_FRAME_VERSION,
   getDecisionFrameFreshness,
+  getDecisionFrameMarketTimingFreshness,
 } from "@/lib/canonical-decision-frame-policy";
 
 type RollingFrameType = Extract<
@@ -52,13 +53,28 @@ export async function getRollingCanonicalDecisionFrame(
     : await getCachedBeforeCrowdFrame();
   const cachedTimestamp = "timestamp" in cached ? cached.timestamp : null;
   const cachedFreshness = getDecisionFrameFreshness(cachedTimestamp);
-  const payload = cachedFreshness.fresh
+  const cachedMarketTiming = getDecisionFrameMarketTimingFreshness(cached);
+  const payload = cachedFreshness.fresh && cachedMarketTiming.fresh
     ? cached
     : await buildFullFrame(requestedType);
   const decisionAsOf = "timestamp" in payload
     ? payload.timestamp
     : new Date().toISOString();
   const freshness = getDecisionFrameFreshness(decisionAsOf);
+  const marketTiming = getDecisionFrameMarketTimingFreshness(payload);
+  const frameFreshUntilMs = freshness.freshUntil
+    ? new Date(freshness.freshUntil).getTime()
+    : NaN;
+  const marketFreshUntilMs = marketTiming.freshUntil
+    ? new Date(marketTiming.freshUntil).getTime()
+    : NaN;
+  const strictFreshUntil = Number.isFinite(marketFreshUntilMs)
+    ? new Date(
+        Number.isFinite(frameFreshUntilMs)
+          ? Math.min(frameFreshUntilMs, marketFreshUntilMs)
+          : marketFreshUntilMs,
+      ).toISOString()
+    : freshness.freshUntil;
 
   return {
     ...payload,
@@ -66,13 +82,14 @@ export async function getRollingCanonicalDecisionFrame(
       version: CANONICAL_DECISION_FRAME_VERSION,
       decisionAsOf,
       presentedAt: new Date().toISOString(),
-      freshUntil: freshness.freshUntil,
+      freshUntil: strictFreshUntil,
       ageSeconds: Number.isFinite(freshness.ageSeconds)
         ? Number(freshness.ageSeconds.toFixed(1))
         : null,
       maxAgeSeconds: CANONICAL_DECISION_FRAME_MAX_AGE_SECONDS,
-      fresh: freshness.fresh,
-      staleCacheBypassed: !cachedFreshness.fresh,
+      fresh: freshness.fresh && marketTiming.fresh,
+      staleCacheBypassed:
+        !cachedFreshness.fresh || !cachedMarketTiming.fresh,
     },
   };
 }

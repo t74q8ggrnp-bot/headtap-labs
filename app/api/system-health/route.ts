@@ -467,6 +467,11 @@ export async function GET() {
       .select(
         "ticker,market_as_of,computed_at,window_high_price,pullback_from_window_high_percent,minutes_since_window_high",
       )
+      // The sensor intentionally observes liquid and illiquid symbols. During
+      // extended hours an illiquid symbol can be processed most recently while
+      // its last real bar is hours old. Prove sensor vitality from the freshest
+      // provider-time pulse, then use computed_at only as the tie-breaker.
+      .order("market_as_of", { ascending: false })
       .order("computed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
