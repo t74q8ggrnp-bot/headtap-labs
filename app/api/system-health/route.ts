@@ -41,6 +41,7 @@ import {
   assertNoForbiddenProxInputs,
 } from "@/lib/prox/edge-score";
 import { PROX_SHADOW_BOARD_VERSION } from "@/lib/prox/shadow-board";
+import { PROX_OUTCOME_UNAVAILABLE_AFTER_MS } from "@/lib/prox/shadow-outcome-resolution";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
 import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 import {
@@ -1164,16 +1165,26 @@ export async function GET() {
         },
       });
     } else {
-      const overdueCutoff = new Date(
+      const retryPendingCutoff = new Date(
         Date.now() - SHADOW_BOARD_OUTCOME_GRACE_MINUTES * 60_000,
       ).toISOString();
-      const { count: overdueOutcomeCount, error: overdueOutcomeError } =
+      const terminalOverdueCutoff = new Date(
+        Date.now() - PROX_OUTCOME_UNAVAILABLE_AFTER_MS,
+      ).toISOString();
+      const { count: retryPendingOutcomeCount, error: retryPendingError } =
         await supabase
           .from("prox_shadow_board_member_outcome_horizons")
           .select("*", { count: "exact", head: true })
           .eq("complete", false)
-          .lte("target_at", overdueCutoff);
-      if (overdueOutcomeError) throw overdueOutcomeError;
+          .lte("target_at", retryPendingCutoff);
+      if (retryPendingError) throw retryPendingError;
+      const { count: terminalOverdueOutcomeCount, error: terminalOverdueError } =
+        await supabase
+          .from("prox_shadow_board_member_outcome_horizons")
+          .select("*", { count: "exact", head: true })
+          .eq("complete", false)
+          .lte("target_at", terminalOverdueCutoff);
+      if (terminalOverdueError) throw terminalOverdueError;
 
       const ageHours = hoursSince(
         outcomeRun.completed_at ?? outcomeRun.observed_at,
@@ -1181,7 +1192,11 @@ export async function GET() {
       const fresh =
         !activeMarketSession ||
         ageHours <= ACTIVE_MAX_SHADOW_BOARD_OUTCOMES_AGE_HOURS;
-      const outcomesCurrent = (overdueOutcomeCount ?? 0) === 0;
+      // A missing in-session minute remains intentionally retryable for seven
+      // days so halts and transient provider gaps are not mislabeled as zero
+      // returns. Health must use that same terminal contract instead of
+      // calling a valid retry state broken after twelve minutes.
+      const outcomesCurrent = (terminalOverdueOutcomeCount ?? 0) === 0;
       const outcomeDiagnostics =
         outcomeRun.diagnostics &&
         typeof outcomeRun.diagnostics === "object" &&
@@ -1194,10 +1209,12 @@ export async function GET() {
         name: "prox_shadow_board_outcomes",
         ok,
         message: !outcomesCurrent
-          ? "Shadow-board outcome tracking has overdue horizon measurements."
+          ? "Shadow-board outcome tracking has measurements beyond the terminal retry window."
           : !fresh
             ? "Shadow-board outcome tracking is stale during the active market-data session."
-            : "Shadow-board outcome tracking is fresh and covering every active decision.",
+            : (retryPendingOutcomeCount ?? 0) > 0
+              ? "Shadow-board outcome tracking is fresh and explicitly retrying unresolved market bars."
+              : "Shadow-board outcome tracking is fresh and covering every active decision.",
         detail: {
           authority: "shadow_research_only",
           runId: outcomeRun.id,
@@ -1212,7 +1229,11 @@ export async function GET() {
           dueOutcomeCount: outcomeRun.due_outcome_count,
           persistedOutcomeCount: outcomeRun.persisted_outcome_count,
           unavailableOutcomeCount: outcomeRun.unavailable_outcome_count,
-          overdueOutcomeCount: overdueOutcomeCount ?? 0,
+          retryPendingOutcomeCount: retryPendingOutcomeCount ?? 0,
+          terminalOverdueOutcomeCount: terminalOverdueOutcomeCount ?? 0,
+          terminalRetryWindowDays:
+            PROX_OUTCOME_UNAVAILABLE_AFTER_MS / (24 * 60 * 60_000),
+          overdueOutcomeCount: terminalOverdueOutcomeCount ?? 0,
           providerSuccessCount:
             outcomeDiagnostics.providerSuccessCount ?? null,
           providerFailureCount:
