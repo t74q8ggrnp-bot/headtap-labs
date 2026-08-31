@@ -30,12 +30,12 @@ export default function MomentumContenders({
           </p>
         </div>
       ) : (
-        <div className="grid content-start gap-2">
+        <div className="ht-momentum-contender-rows grid flex-1 auto-rows-fr content-stretch gap-2">
           {candidates.map((opportunity, index) => (
               <button
                 key={opportunity.ticker}
                 onClick={() => onSelect(opportunity)}
-                className="flex min-h-[5.5rem] items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-left transition hover:border-violet-400/25 hover:bg-violet-500/[0.04]"
+                className="flex h-full min-h-[5.5rem] items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-left transition hover:border-violet-400/25 hover:bg-violet-500/[0.04]"
               >
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="text-[9px] font-black text-zinc-800 shrink-0">#{index + 2}</span>
@@ -75,43 +75,72 @@ export default function MomentumContenders({
         </div>
       )}
       {radarCandidates.length > 0 && (
-        <div className="mt-4 border-t border-amber-400/10 pt-4">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="text-[8px] font-black uppercase tracking-[0.22em] text-amber-300/70">
-              Momentum Radar · Entry Withheld
-            </p>
-            <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">
-              Observation only
-            </p>
-          </div>
-          <div className="grid content-start gap-2">
-            {radarCandidates.map((opportunity) => (
-              <button
-                key={`radar-${opportunity.ticker}`}
-                onClick={() => onSelect(opportunity)}
-                className="flex min-h-[4.5rem] items-center justify-between gap-3 rounded-xl border border-amber-400/10 bg-amber-500/[0.025] px-4 py-3 text-left transition hover:border-amber-400/25"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-mono text-sm font-black text-white">
-                      {opportunity.ticker}
-                    </span>
-                    <span className="shrink-0 font-mono text-[10px] font-black text-amber-300">
-                      +{opportunity.change.toFixed(1)}%
-                    </span>
-                  </div>
-                  <p className="mt-1 text-[8px] font-bold text-zinc-600">
-                    {opportunity.relativeVolume.toFixed(1)}× vol · No qualifying entry
-                  </p>
-                </div>
-                <p className="shrink-0 text-[8px] font-black uppercase tracking-[0.12em] text-amber-300/70">
-                  Radar
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
+        <MomentumRadar
+          candidates={radarCandidates}
+          onSelect={onSelect}
+          embedded
+        />
       )}
+    </div>
+  );
+}
+
+export function MomentumRadar({
+  candidates,
+  onSelect,
+  embedded = false,
+}: {
+  candidates: Opportunity[];
+  onSelect: (opportunity: Opportunity) => void;
+  embedded?: boolean;
+}) {
+  if (candidates.length === 0) return null;
+
+  return (
+    <div
+      className={
+        embedded
+          ? "mt-4 border-t border-amber-400/10 pt-4"
+          : "border-t border-amber-400/10 bg-amber-500/[0.012] px-5 py-4"
+      }
+    >
+      <div className="mb-2.5 flex items-center justify-between gap-3">
+        <p className="text-[8px] font-black uppercase tracking-[0.22em] text-amber-300/70">
+          Momentum Radar · Entry Withheld
+        </p>
+        <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">
+          Observation only
+        </p>
+      </div>
+      <div
+        className={`grid grid-cols-1 gap-2 ${embedded ? "" : "sm:grid-cols-2 xl:grid-cols-5"}`}
+      >
+        {candidates.map((opportunity) => (
+          <button
+            key={`radar-${opportunity.ticker}`}
+            onClick={() => onSelect(opportunity)}
+            className="flex min-h-[4.5rem] items-center justify-between gap-3 rounded-xl border border-amber-400/10 bg-black/25 px-4 py-3 text-left transition hover:border-amber-400/25 hover:bg-amber-500/[0.035]"
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate font-mono text-sm font-black text-white">
+                  {opportunity.ticker}
+                </span>
+                <span className="shrink-0 font-mono text-[10px] font-black text-amber-300">
+                  {opportunity.change >= 0 ? "+" : ""}
+                  {opportunity.change.toFixed(1)}%
+                </span>
+              </div>
+              <p className="mt-1 text-[8px] font-bold text-zinc-600">
+                {opportunity.relativeVolume.toFixed(1)}× vol · No qualifying entry
+              </p>
+            </div>
+            <p className="shrink-0 text-[8px] font-black uppercase tracking-[0.12em] text-amber-300/70">
+              Radar
+            </p>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

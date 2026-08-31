@@ -7,6 +7,7 @@ import OpportunityMetrics from "./OpportunityMetrics";
 import OpportunityWindow from "./OpportunityWindow";
 import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
 import ProxPulse from "./ProxPulse";
+import HeroPriceChart from "@/app/components/market/HeroPriceChart";
 
 type MobileCardDetailProps = {
   opportunities: Opportunity[];
@@ -52,8 +53,14 @@ export default function MobileCardDetail({
             </p>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
-            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-green-400">Live</span>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${current.displayQuoteLive ? "animate-pulse bg-green-400" : "bg-zinc-600"}`}
+            />
+            <span
+              className={`text-[10px] font-black uppercase tracking-[0.14em] ${current.displayQuoteLive ? "text-green-400" : "text-zinc-500"}`}
+            >
+              {current.displayQuoteLive ? "Live" : "Last verified"}
+            </span>
           </div>
         </div>
 
@@ -78,6 +85,15 @@ export default function MobileCardDetail({
             </span>
           )}
         </div>
+      </div>
+
+      <div className="flex-shrink-0 px-4 pb-3">
+        <HeroPriceChart
+          asset="stock"
+          symbol={current.ticker}
+          accent="orange"
+          compact
+        />
       </div>
 
       <div className="flex-shrink-0 px-4 pb-3">

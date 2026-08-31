@@ -174,6 +174,7 @@ export type CryptoOpportunityFeed = {
     authority: "backend_atomic";
   };
   hero: CryptoOpportunity | null;
+  developingLeader: CryptoOpportunity | null;
   contenders: CryptoOpportunity[];
   radar: CryptoOpportunity[];
   shadowDiscovery: CryptoShadowDiscovery;

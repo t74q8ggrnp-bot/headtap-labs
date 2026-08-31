@@ -30,6 +30,7 @@ import {
   selectProxPatternSignature,
 } from "@/lib/prox/outcome-memory";
 import { PROX_SECURITY_ROUTING_VERSION } from "@/lib/prox/security-routing";
+import { getMarketDataAgeMs } from "@/lib/market-data-time";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -68,8 +69,29 @@ type MarketFeatureRow = {
   pullback_from_window_high_percent: number | null;
   minutes_since_window_high: number | null;
   average_bar_range_percent: number | null;
+  market_as_of: string | null;
   computed_at: string;
 };
+
+async function loadMarketFeatures(
+  supabase: ReturnType<typeof getSupabase>,
+  tickers: string[],
+) {
+  if (tickers.length === 0) return { data: [], error: null };
+  const expanded = await supabase
+    .from("prox_market_features")
+    .select(
+      "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,vwap,price_vs_vwap,window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent,market_as_of,computed_at",
+    )
+    .in("ticker", tickers);
+  if (!expanded.error) return expanded;
+  return supabase
+    .from("prox_market_features")
+    .select(
+      "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,vwap,price_vs_vwap,window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent,computed_at",
+    )
+    .in("ticker", tickers);
+}
 
 type EventLinkRow = {
   ticker: string;
@@ -408,14 +430,7 @@ export async function GET(request: Request) {
 
     const [featuresResult, episodesResult, calibrationsResult, eventEvidence] =
       await Promise.all([
-        tickers.length > 0
-          ? supabase
-              .from("prox_market_features")
-              .select(
-                "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,vwap,price_vs_vwap,window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent,computed_at",
-              )
-              .in("ticker", tickers)
-          : Promise.resolve({ data: [], error: null }),
+        loadMarketFeatures(supabase, tickers),
         tickers.length > 0
           ? supabase
               .from("prox_research_episodes")
@@ -542,12 +557,14 @@ export async function GET(request: Request) {
           intradayBars: history.intraday,
         });
         structureByTicker.set(candidate.ticker, structure);
-        const pulseComputedAt = feature?.computed_at
-          ? new Date(feature.computed_at).getTime()
-          : NaN;
-        const pulseAgeMinutes = Number.isFinite(pulseComputedAt)
-          ? Math.max(0, (now.getTime() - pulseComputedAt) / 60_000)
-          : null;
+        const pulseSourceAgeMs = getMarketDataAgeMs(
+          feature?.market_as_of,
+          now,
+        );
+        const pulseAgeMinutes =
+          pulseSourceAgeMs === null
+            ? null
+            : Math.max(0, pulseSourceAgeMs / 60_000);
         const observationAgeMinutes = Math.max(
           0,
           (now.getTime() - new Date(candidate.observed_at).getTime()) / 60_000,
@@ -658,6 +675,7 @@ export async function GET(request: Request) {
           sourceObservationId: member.sourceObservationId,
           sourceObservedAt: member.sourceObservedAt,
           pulseComputedAt: feature?.computed_at ?? null,
+          pulseMarketAsOf: feature?.market_as_of ?? null,
           previousCloseChangePercent: finite(
             observation.raw_full_day_change_percent,
           ),

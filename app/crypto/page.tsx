@@ -4,6 +4,7 @@ import { useRef, useState, type TouchEvent } from "react";
 import type { CryptoOpportunity } from "@/lib/crypto/contracts";
 import { useCryptoOpportunityFeed } from "@/app/hooks/useCryptoOpportunityFeed";
 import CryptoProxPulse from "@/app/components/crypto/CryptoProxPulse";
+import HeroPriceChart from "@/app/components/market/HeroPriceChart";
 
 const PULL_REFRESH_THRESHOLD = 64;
 
@@ -38,32 +39,45 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ScoreRing({ score }: { score: number }) {
+function ScoreRing({
+  score,
+  developing = false,
+}: {
+  score: number;
+  developing?: boolean;
+}) {
   return (
-    <div className="flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border border-cyan-400/25 bg-cyan-500/[0.07] shadow-[0_0_32px_rgba(34,211,238,0.08)]">
-      <span className="font-mono text-3xl font-black text-cyan-300">
+    <div className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border shadow-[0_0_32px_rgba(34,211,238,0.08)] ${developing ? "border-violet-400/25 bg-violet-500/[0.07]" : "border-cyan-400/25 bg-cyan-500/[0.07]"}`}>
+      <span className={`font-mono text-3xl font-black ${developing ? "text-violet-300" : "text-cyan-300"}`}>
         {score}
       </span>
-      <span className="text-[7px] font-black uppercase tracking-[0.16em] text-cyan-600">
-        Crypto score
+      <span className={`text-[7px] font-black uppercase tracking-[0.16em] ${developing ? "text-violet-600" : "text-cyan-600"}`}>
+        {developing ? "Radar score" : "Crypto score"}
       </span>
     </div>
   );
 }
 
-function Hero({ opportunity }: { opportunity: CryptoOpportunity }) {
+function Hero({
+  opportunity,
+  mode = "confirmed",
+}: {
+  opportunity: CryptoOpportunity;
+  mode?: "confirmed" | "developing";
+}) {
+  const developing = mode === "developing";
   return (
-    <section className="overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/[0.08] via-black to-violet-500/[0.05]">
+    <section className={`overflow-hidden rounded-3xl border bg-gradient-to-br via-black ${developing ? "border-violet-400/20 from-violet-500/[0.08] to-amber-500/[0.04]" : "border-cyan-400/20 from-cyan-500/[0.08] to-violet-500/[0.05]"}`}>
       <div className="border-b border-white/8 px-5 py-4 sm:px-7">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
-            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-cyan-300">
-              Crypto Momentum Leader
+            <span className={`h-2 w-2 animate-pulse rounded-full ${developing ? "bg-violet-400" : "bg-cyan-400"}`} />
+            <p className={`text-[10px] font-black uppercase tracking-[0.25em] ${developing ? "text-violet-300" : "text-cyan-300"}`}>
+              {developing ? "Strongest Developing Setup" : "Crypto Momentum Leader"}
             </p>
           </div>
-          <span className="rounded-full border border-cyan-400/20 bg-cyan-500/[0.05] px-3 py-1 text-[9px] font-black uppercase tracking-[0.13em] text-cyan-400">
-            Observation only
+          <span className={`rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-[0.13em] ${developing ? "border-amber-400/25 bg-amber-500/[0.06] text-amber-300" : "border-cyan-400/20 bg-cyan-500/[0.05] text-cyan-400"}`}>
+            {developing ? "Entry withheld" : "Observation only"}
           </span>
         </div>
       </div>
@@ -87,7 +101,10 @@ function Hero({ opportunity }: { opportunity: CryptoOpportunity }) {
                 {opportunity.summary}
               </p>
             </div>
-            <ScoreRing score={opportunity.opportunityScore} />
+            <ScoreRing
+              score={opportunity.opportunityScore}
+              developing={developing}
+            />
           </div>
 
           <div className="mt-5 flex flex-wrap gap-2">
@@ -102,6 +119,16 @@ function Hero({ opportunity }: { opportunity: CryptoOpportunity }) {
                 ⚠ {tag}
               </span>
             ))}
+          </div>
+
+          <div className="mt-6">
+            <HeroPriceChart
+              asset="crypto"
+              symbol={opportunity.symbol}
+              productId={opportunity.productId}
+              accent="cyan"
+              compact
+            />
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -126,7 +153,7 @@ function Hero({ opportunity }: { opportunity: CryptoOpportunity }) {
 
         <div className="rounded-2xl border border-white/8 bg-black/45 p-5">
           <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-600">
-            Why this ranks first
+            {developing ? "Why HT is watching this" : "Why this ranks first"}
           </p>
           <div className="mt-4 space-y-3">
             {Object.entries(opportunity.scoreBreakdown).map(([key, value]) => (
@@ -147,9 +174,9 @@ function Hero({ opportunity }: { opportunity: CryptoOpportunity }) {
             ))}
           </div>
           <p className="mt-5 text-[10px] font-semibold leading-4 text-zinc-600">
-            One backend score combines 24-hour momentum, volume participation,
-            liquidity, peak retention, multi-venue confirmation, and fresh
-            ProX live-tape evidence. It is a research ranking, not a return forecast.
+            {developing
+              ? opportunity.decisionReason
+              : "One backend score combines 24-hour momentum, volume participation, liquidity, peak retention, multi-venue confirmation, and fresh ProX live-tape evidence. It is a research ranking, not a return forecast."}
           </p>
         </div>
       </div>
@@ -312,9 +339,11 @@ export default function CryptoPage() {
             )}
 
             {feed.hero ? (
-              <Hero opportunity={feed.hero} />
+              <Hero opportunity={feed.hero} mode="confirmed" />
+            ) : feed.developingLeader ? (
+              <Hero opportunity={feed.developingLeader} mode="developing" />
             ) : (
-              <div className="rounded-3xl border border-amber-400/20 bg-amber-500/[0.04] px-6 py-20 text-center">
+              <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-6 py-8 text-center">
                 <p className="font-black text-amber-300">No confirmed crypto leader</p>
                 <p className="mt-2 text-sm text-zinc-600">
                   HT will not force a hero when no asset clears every gate.
@@ -322,7 +351,7 @@ export default function CryptoPage() {
               </div>
             )}
 
-            <section className="mt-5">
+            {feed.contenders.length > 0 && <section className="mt-5">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">
                   Backup contenders
@@ -331,24 +360,18 @@ export default function CryptoPage() {
                   Same score · same scan
                 </span>
               </div>
-              {feed.contenders.length > 0 ? (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {feed.contenders.map((opportunity, index) => (
-                    <ContenderCard
-                      key={opportunity.productId}
-                      opportunity={opportunity}
-                      rank={index + 2}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="rounded-2xl border border-white/8 bg-white/[0.02] p-5 text-sm font-semibold text-zinc-600">
-                  No additional assets clear the confirmation gates right now.
-                </p>
-              )}
-            </section>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {feed.contenders.map((opportunity, index) => (
+                  <ContenderCard
+                    key={opportunity.productId}
+                    opportunity={opportunity}
+                    rank={index + 2}
+                  />
+                ))}
+              </div>
+            </section>}
 
-            <section className="mt-5 rounded-3xl border border-violet-400/15 bg-violet-500/[0.025] p-5">
+            {feed.radar.length > 0 && <section className="mt-5 rounded-3xl border border-violet-400/15 bg-violet-500/[0.025] p-5">
               <h2 className="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300">
                 Crypto Momentum Radar
               </h2>
@@ -356,8 +379,7 @@ export default function CryptoPage() {
                 Movement worth monitoring that has not cleared every hero gate.
               </p>
               <div className="mt-4 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-                {feed.radar.length > 0 ? (
-                  feed.radar.map((opportunity) => (
+                {feed.radar.map((opportunity) => (
                     <div
                       key={opportunity.productId}
                       className="flex items-center justify-between rounded-xl border border-white/8 bg-black/40 px-4 py-3"
@@ -372,14 +394,9 @@ export default function CryptoPage() {
                         {opportunity.opportunityScore}
                       </p>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-sm font-semibold text-zinc-700">
-                    Radar is clear right now.
-                  </p>
-                )}
+                  ))}
               </div>
-            </section>
+            </section>}
 
             <footer className="py-6 text-center text-[9px] font-semibold text-zinc-800">
               Research preview only. Crypto markets trade continuously and can

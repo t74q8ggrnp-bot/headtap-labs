@@ -1,5 +1,5 @@
 export const CANONICAL_DECISION_FRAME_VERSION =
-  "rolling-canonical-decision-frame-v3-price-discovery-entry-floor";
+  "rolling-canonical-decision-frame-v4-source-time-authority";
 export const CANONICAL_DECISION_FRAME_REVALIDATE_SECONDS = 60;
 export const CANONICAL_DECISION_FRAME_MAX_AGE_SECONDS = 90;
 

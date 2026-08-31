@@ -5,6 +5,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
+import {
+  resolveSnapshotDisplayPrice,
+  type PolygonSnapshotRow,
+} from "@/lib/polygon-snapshot";
 
 type SignalHistoryRow = {
   id: string;
@@ -28,13 +32,6 @@ type SignalHistoryRow = {
   risk_zone: number | null;
   rr_ratio: number | null;
   decision: string | null;
-};
-
-type PolygonPriceRow = {
-  ticker?: string;
-  lastTrade?: { p?: number };
-  day?: { c?: number };
-  prevDay?: { c?: number };
 };
 
 function getSupabase() {
@@ -99,20 +96,17 @@ export async function GET() {
           ","
         )}&apiKey=${polygonKey}`;
 
-        const res = await fetch(url, { next: { revalidate: 60 } });
+        const res = await fetch(url, { cache: "no-store" });
 
         if (res.ok) {
-          const data = (await res.json()) as { tickers?: PolygonPriceRow[] };
+          const data = (await res.json()) as { tickers?: PolygonSnapshotRow[] };
 
           for (const tickerData of data.tickers ?? []) {
-            const price =
-              tickerData.lastTrade?.p ||
-              tickerData.day?.c ||
-              tickerData.prevDay?.c ||
-              0;
+            const price = resolveSnapshotDisplayPrice(tickerData);
 
-            if (price > 0 && tickerData.ticker) {
-              currentPrices[tickerData.ticker] = Number(price);
+            const ticker = String(tickerData.ticker ?? "").toUpperCase();
+            if (price > 0 && ticker) {
+              currentPrices[ticker] = Number(price);
             }
           }
         }

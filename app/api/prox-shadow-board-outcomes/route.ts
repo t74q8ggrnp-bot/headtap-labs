@@ -22,6 +22,7 @@ import {
   summarizeProxOutcomePath,
   type ProxOutcomeBar,
 } from "@/lib/prox/shadow-outcome-resolution";
+import { selectDueOutcomeMemberIds } from "@/lib/prox/shadow-outcome-scheduler";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -29,13 +30,15 @@ export const maxDuration = 300;
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
 const POLYGON_AGGREGATES_ORIGIN = "https://api.polygon.io/v2/aggs/ticker";
-const ACTIVE_MEMBER_BATCH_LIMIT = 600;
-const TICKER_BATCH_LIMIT = 20;
+const ACTIVE_MEMBER_BATCH_LIMIT = 1200;
+const DUE_HORIZON_BATCH_LIMIT = 4000;
+const TICKER_BATCH_LIMIT = 40;
 const POLYGON_FETCH_CONCURRENCY = 5;
 const WRITE_BATCH_SIZE = 100;
 
 type MemberOutcomeRow = {
   id: string;
+  member_id: string;
   ticker: string;
   trading_date: string;
   market_session: "pre_market" | "regular" | "after_hours" | "closed";
@@ -51,6 +54,9 @@ type MemberOutcomeRow = {
   max_drawdown_percent: number;
   time_to_peak_minutes: number;
   status: "active" | "complete";
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type HorizonRow = {
@@ -228,6 +234,31 @@ async function readMemberHorizons(
   return rows;
 }
 
+async function readActiveMembersById(
+  supabase: ReturnType<typeof getSupabase>,
+  memberOutcomeIds: string[],
+) {
+  const rows: MemberOutcomeRow[] = [];
+  const batchSize = 200;
+  for (let index = 0; index < memberOutcomeIds.length; index += batchSize) {
+    const { data, error } = await supabase
+      .from("prox_shadow_board_member_outcomes")
+      .select("*")
+      .eq("status", "active")
+      .in("id", memberOutcomeIds.slice(index, index + batchSize));
+    if (error) throw error;
+    rows.push(...((data ?? []) as MemberOutcomeRow[]));
+  }
+  const dueOrder = new Map(
+    memberOutcomeIds.map((id, index) => [id, index]),
+  );
+  return rows.sort(
+    (left, right) =>
+      (dueOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (dueOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 function isTerminalHorizon(horizon: HorizonRow) {
   if (!horizon.complete) return false;
   return (
@@ -289,14 +320,36 @@ export async function GET(request: Request) {
   runId = String(run.id);
 
   try {
-    const { data, error: memberError } = await supabase
-      .from("prox_shadow_board_member_outcomes")
-      .select("*")
-      .eq("status", "active")
-      .order("decision_at", { ascending: true })
-      .limit(ACTIVE_MEMBER_BATCH_LIMIT);
-    if (memberError) throw memberError;
-    const activeMembers = (data ?? []) as MemberOutcomeRow[];
+    const { data: dueRows, error: dueError } = await supabase
+      .from("prox_shadow_board_member_outcome_horizons")
+      .select("member_outcome_id,target_at")
+      .eq("complete", false)
+      .lte("target_at", observedAt)
+      .order("target_at", { ascending: true })
+      .limit(DUE_HORIZON_BATCH_LIMIT);
+    if (dueError) throw dueError;
+    const dueMemberIds = selectDueOutcomeMemberIds(
+      dueRows ?? [],
+      ACTIVE_MEMBER_BATCH_LIMIT,
+    );
+    let activeMembers = await readActiveMembersById(
+      supabase,
+      dueMemberIds,
+    );
+    // A quiet cycle can still advance path highs/lows and seed any historical
+    // parent rows that predate inline horizon creation. Due work always wins;
+    // this fallback only runs when no due horizon exists at all.
+    if (activeMembers.length === 0) {
+      const { data, error: memberError } = await supabase
+        .from("prox_shadow_board_member_outcomes")
+        .select("*")
+        .eq("status", "active")
+        .order("latest_observed_at", { ascending: true })
+        .order("decision_at", { ascending: true })
+        .limit(ACTIVE_MEMBER_BATCH_LIMIT);
+      if (memberError) throw memberError;
+      activeMembers = (data ?? []) as MemberOutcomeRow[];
+    }
 
     const selectedTickers = new Set<string>();
     for (const member of activeMembers) {
@@ -328,18 +381,39 @@ export async function GET(request: Request) {
       }
     }
     const tickerBars = new Map<string, ProxOutcomeBar[]>();
+    const providerFailures: Array<{ ticker: string; message: string }> = [];
     await mapWithConcurrency(
       [...selectedTickers],
       POLYGON_FETCH_CONCURRENCY,
       async (ticker) => {
-        const bars = await fetchPolygonMinuteBars({
-          ticker,
-          from: isoDate(earliestDecisionByTicker.get(ticker) ?? observedAt),
-          to: isoDate(now),
-        });
-        tickerBars.set(ticker, bars);
+        try {
+          const bars = await fetchPolygonMinuteBars({
+            ticker,
+            from: isoDate(earliestDecisionByTicker.get(ticker) ?? observedAt),
+            to: isoDate(now),
+          });
+          tickerBars.set(ticker, bars);
+        } catch (error: unknown) {
+          // A single halted, delisted, malformed, or temporarily unavailable
+          // symbol must not erase the complete denominator for every other
+          // ProX decision in this cycle. Its horizons remain pending and are
+          // retried; the provider failure stays explicit in diagnostics.
+          providerFailures.push({
+            ticker,
+            message: getErrorMessage(
+              error,
+              `Polygon historical bars failed for ${ticker}.`,
+            ),
+          });
+        }
       },
     );
+
+    if (selectedTickers.size > 0 && tickerBars.size === 0) {
+      throw new Error(
+        `Polygon historical bars were unavailable for all ${selectedTickers.size} selected outcome tickers.`,
+      );
+    }
 
     const memberUpdates: Array<Record<string, unknown>> = [];
     const dueHorizonUpdates: Array<Record<string, unknown>> = [];
@@ -448,7 +522,11 @@ export async function GET(request: Request) {
         const latestBarIsNewer =
           path && path.latest.timeMs >= new Date(member.latest_observed_at).getTime();
         memberUpdates.push({
-          id: member.id,
+          // Keep the complete existing row in the upsert. A partial row with
+          // only the primary key and changed measurements violates the table's
+          // required member/ticker/decision columns before ON CONFLICT can
+          // update the existing record.
+          ...member,
           latest_price: latestBarIsNewer ? path.latest.close : member.latest_price,
           latest_observed_at: latestBarIsNewer
             ? new Date(path.latest.timeMs).toISOString()
@@ -501,9 +579,14 @@ export async function GET(request: Request) {
       authority: "shadow_research_only",
       priceAuthority: "polygon_historical_minute_bars",
       engineVersion: PROX_SHADOW_BOARD_OUTCOMES_VERSION,
+      dueHorizonSelectionCount: dueRows?.length ?? 0,
+      dueMemberSelectionCount: dueMemberIds.length,
       activeMemberBatchCount: activeMembers.length,
       processedMemberCount: members.length,
       selectedTickerCount: selectedTickers.size,
+      providerSuccessCount: tickerBars.size,
+      providerFailureCount: providerFailures.length,
+      providerFailures,
       historicalBarCount: [...tickerBars.values()].reduce(
         (sum, bars) => sum + bars.length,
         0,
@@ -545,6 +628,7 @@ export async function GET(request: Request) {
     });
   } catch (error: unknown) {
     const message = getErrorMessage(error, "ProX shadow-board outcomes failed.");
+    console.error("[prox-shadow-board-outcomes] run failed:", message);
     if (runId) {
       await supabase
         .from("prox_shadow_board_outcome_runs")

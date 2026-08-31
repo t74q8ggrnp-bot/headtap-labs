@@ -48,13 +48,13 @@ export default function BeforeCrowdCard({
         <OpportunityStory
           opportunity={opportunity}
           framework={framework}
-          dualEngine={dualEngine}
           watched={watched}
           onOpen={onOpen}
           onWatch={onWatch}
         />
         <OpportunityScorePanel
           opportunity={opportunity}
+          dualEngine={dualEngine}
           trace={trace}
           narrative={opportunity.whyItMatters}
           narrativeLoading={false}

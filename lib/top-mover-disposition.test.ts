@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's built-in TypeScript runner requires source extensions.
-import { auditTopMoverDispositions } from "./top-mover-disposition.ts";
+import { auditTopMoverDispositions, describeTopMoverDisposition, findTopMoverDisposition } from "./top-mover-disposition.ts";
 
 test("requires an explicit outcome for every sampled Polygon mover", () => {
   const audit = auditTopMoverDispositions([
@@ -34,4 +34,20 @@ test("fails when a top mover silently remains pending", () => {
   ]);
   assert.equal(audit.complete, false);
   assert.deepEqual(audit.unresolved, ["UMAL"]);
+});
+
+test("finds and explains a ticker excluded before canonical evaluation", () => {
+  const disposition = findTopMoverDisposition(
+    [
+      {
+        ticker: "IREZ",
+        changePercent: 26.2,
+        status: "excluded",
+        reason: "prior_day_liquidity_below_floor",
+      },
+    ],
+    "irez",
+  );
+  assert.ok(disposition);
+  assert.match(describeTopMoverDisposition(disposition), /liquidity gate/i);
 });

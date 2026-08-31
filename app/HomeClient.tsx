@@ -14,7 +14,9 @@ import BullBearPanel from "./components/opportunity/BullBearPanel";
 import OpportunityStory from "./components/opportunity/OpportunityStory";
 import OpportunityBottomStats from "./components/opportunity/OpportunityBottomStats";
 import OpportunityScorePanel from "./components/opportunity/OpportunityScorePanel";
-import MomentumContenders from "./components/opportunity/MomentumContenders";
+import MomentumContenders, {
+  MomentumRadar,
+} from "./components/opportunity/MomentumContenders";
 import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileExperience from "./components/mobile/MobileExperience";
 import { useMobileAppNavigation } from "./components/MobileAppNavigationContext";
@@ -895,7 +897,7 @@ export default function HomeClient({
 
   }, []);
 
-  // Market context — fetched on mount, refreshed every 5 minutes
+  // Market context — real-time Massive snapshots, refreshed once per minute.
   useEffect(() => {
     const fetchCtx = () => {
       fetch("/api/market-context")
@@ -904,7 +906,7 @@ export default function HomeClient({
         .catch(() => {});
     };
     fetchCtx();
-    const interval = setInterval(fetchCtx, 5 * 60 * 1000);
+    const interval = setInterval(fetchCtx, 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1321,6 +1323,20 @@ export default function HomeClient({
           align-items: start !important;
         }
 
+        section .ht-spot-momentum-columns {
+          align-items: stretch !important;
+        }
+
+        section .ht-spot-momentum-columns > * {
+          align-self: stretch !important;
+          height: 100% !important;
+          min-height: 0 !important;
+        }
+
+        section .ht-momentum-contender-rows {
+          align-items: stretch !important;
+        }
+
         section [class*="rounded-[1.5rem]"],
         section [class*="rounded-[2rem]"],
         section [class*="rounded-[34px]"] {
@@ -1563,6 +1579,9 @@ export default function HomeClient({
                     <Link href="/crypto" className="text-cyan-400 transition hover:text-white">
                       Crypto
                     </Link>
+                    <Link href="/paper" className="transition hover:text-white">
+                      Paper
+                    </Link>
                     <button
                       type="button"
                       onClick={() => document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth" })}
@@ -1711,37 +1730,34 @@ export default function HomeClient({
                             <span className="text-[10px] font-black text-zinc-600">{mounted && canonicalLastUpdated ? canonicalLastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}</span>
                           </div>
 
-                          <div className="grid grid-cols-1 xl:grid-cols-[1.7fr_1fr] divide-y xl:divide-y-0 xl:divide-x divide-white/[0.06]">
-
-                            {/* ══ MAJOR LEFT — Story + Advanced Data, one unified panel ══ */}
-                            <div className="grid grid-cols-1 divide-y divide-white/[0.06] lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-                              {apiHero && (
-                                <OpportunityStory
-                                  opportunity={apiHero}
-                                  framework={smFramework}
-                                  dualEngine={isDualEngineConfirmation}
-                                  watched={watchlist.includes(apiHero.ticker)}
-                                  onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
-                                  onWatch={() => toggleWatchlist(apiHero.ticker)}
-                                />
-                              )}
-                              {apiHero && (
-                                <OpportunityScorePanel
-                                  opportunity={apiHero}
-                                  trace={smTrace}
-                                  narrative={bullBearData?.ticker === heroTicker ? bullBearData.htRead : null}
-                                  narrativeLoading={bullBearLoading}
-                                />
-                              )}
-                            </div>
-
-                            {/* ══ RIGHT — Other Contenders — same canonical ranking, next in line ══ */}
+                          <div className="ht-spot-momentum-columns grid grid-cols-1 divide-y divide-white/[0.06] xl:grid-cols-[0.92fr_0.92fr_1.08fr] xl:divide-x xl:divide-y-0">
+                            {apiHero && (
+                              <OpportunityStory
+                                opportunity={apiHero}
+                                framework={smFramework}
+                                watched={watchlist.includes(apiHero.ticker)}
+                                onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
+                                onWatch={() => toggleWatchlist(apiHero.ticker)}
+                              />
+                            )}
+                            {apiHero && (
+                              <OpportunityScorePanel
+                                opportunity={apiHero}
+                                dualEngine={isDualEngineConfirmation}
+                                trace={smTrace}
+                                narrative={bullBearData?.ticker === heroTicker ? bullBearData.htRead : null}
+                                narrativeLoading={bullBearLoading}
+                              />
+                            )}
                             <MomentumContenders
                               candidates={apiMomentumRunnersUp}
-                              radarCandidates={apiMomentumRadar}
                               onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
                             />
                           </div>
+                          <MomentumRadar
+                            candidates={apiMomentumRadar}
+                            onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
+                          />
                           {/* ── Bottom strip — 4 quick stats ── */}
                           {apiHero && <OpportunityBottomStats opportunity={apiHero} />}
 
@@ -1934,6 +1950,7 @@ export default function HomeClient({
             </div>
             <nav aria-label="Account and legal" className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-black uppercase tracking-[0.12em] text-zinc-500">
               <Link href="/account" className="transition hover:text-orange-300">Account &amp; Privacy</Link>
+              <Link href="/paper" className="transition hover:text-orange-300">Paper Trading</Link>
               <Link href="/privacy" className="transition hover:text-orange-300">Privacy Policy</Link>
               <Link href="/terms" className="transition hover:text-orange-300">Terms of Use</Link>
             </nav>

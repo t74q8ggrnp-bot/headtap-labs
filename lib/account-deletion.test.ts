@@ -22,6 +22,7 @@ test("account deletion requires the exact explicit confirmation", () => {
 
 test("the deletion manifest is limited to known personal data", () => {
   assert.deepEqual(ACCOUNT_USER_DATA_TABLES, [
+    "paper_accounts",
     "ht_labs_watchlist",
     "ht_signal_memory",
     "ht_market_behavior",

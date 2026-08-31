@@ -11,6 +11,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
+import {
+  average,
+  buildProxEpisodeScorecard,
+  median,
+  type ProxEpisodeHorizon,
+  type ProxEpisodeRepresentative,
+} from "@/lib/prox/shadow-scorecard";
 
 export const dynamic = "force-dynamic";
 
@@ -36,37 +43,10 @@ function finite(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
-function average(values: number[]): number | null {
-  if (values.length === 0) return null;
-  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100;
-}
-
 function rate(hits: number, total: number): number | null {
   if (total === 0) return null;
   return Math.round((hits / total) * 10000) / 100;
 }
-
-type HorizonRow = {
-  member_outcome_id: string;
-  horizon: string;
-  return_percent: number;
-  resolution_state: "measured";
-};
-
-type MemberOutcomeRow = {
-  id: string;
-  member_id: string;
-  max_gain_percent: number;
-  max_drawdown_percent: number;
-  sampled_high_at: string;
-  sampled_low_at: string;
-};
-
-type MemberRow = {
-  id: string;
-  disposition: "selected" | "blocked" | "rejected";
-  role: "hero" | "contender" | "radar" | "none";
-};
 
 async function readInBatches<T>(
   ids: string[],
@@ -80,75 +60,6 @@ async function readInBatches<T>(
   return rows;
 }
 
-function buildProxScorecard(
-  horizonRows: HorizonRow[],
-  outcomeById: Map<string, MemberOutcomeRow>,
-  memberById: Map<string, MemberRow>,
-) {
-  type Group = { returns: number[] };
-  const byDispositionHorizon = new Map<string, Group>();
-  const seenOutcomeIdsByDisposition = new Map<string, Set<string>>();
-
-  for (const horizonRow of horizonRows) {
-    const outcome = outcomeById.get(horizonRow.member_outcome_id);
-    if (!outcome) continue;
-    const member = memberById.get(outcome.member_id);
-    if (!member) continue;
-    const key = `${member.disposition}:${horizonRow.horizon}`;
-    const group = byDispositionHorizon.get(key) ?? { returns: [] };
-    group.returns.push(horizonRow.return_percent);
-    byDispositionHorizon.set(key, group);
-
-    const seen = seenOutcomeIdsByDisposition.get(member.disposition) ?? new Set<string>();
-    seen.add(outcome.id);
-    seenOutcomeIdsByDisposition.set(member.disposition, seen);
-  }
-
-  const byDispositionHorizonResult = [...byDispositionHorizon.entries()].map(
-    ([key, group]) => {
-      const [disposition, horizon] = key.split(":");
-      return {
-        disposition,
-        horizon,
-        sampleSize: group.returns.length,
-        averageReturnPercent: average(group.returns),
-      };
-    },
-  );
-
-  const byDisposition = [...seenOutcomeIdsByDisposition.entries()].map(
-    ([disposition, outcomeIds]) => {
-      const outcomes = [...outcomeIds]
-        .map((id) => outcomeById.get(id))
-        .filter((outcome): outcome is MemberOutcomeRow => Boolean(outcome));
-      const gains = outcomes.map((outcome) => finite(outcome.max_gain_percent) ?? 0);
-      const drawdowns = outcomes.map(
-        (outcome) => finite(outcome.max_drawdown_percent) ?? 0,
-      );
-      const plusFiveBeforeMinusFive = outcomes.filter((outcome) => {
-        const gain = finite(outcome.max_gain_percent) ?? 0;
-        const drawdown = finite(outcome.max_drawdown_percent) ?? 0;
-        if (gain < 5) return false;
-        if (drawdown > -5) return true;
-        return new Date(outcome.sampled_high_at).getTime() <=
-          new Date(outcome.sampled_low_at).getTime();
-      }).length;
-      return {
-        disposition,
-        sampleSize: outcomes.length,
-        averageMaxGainPercent: average(gains),
-        averageMaxDrawdownPercent: average(drawdowns),
-        plusFiveBeforeMinusFiveHitRatePercent: rate(
-          plusFiveBeforeMinusFive,
-          outcomes.length,
-        ),
-      };
-    },
-  );
-
-  return { byDisposition, byDispositionHorizon: byDispositionHorizonResult };
-}
-
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
@@ -157,39 +68,34 @@ export async function GET(req: Request) {
       Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    const { data: horizonData, error: horizonError } = await supabase
-      .from("prox_shadow_board_member_outcome_horizons")
-      .select("member_outcome_id,horizon,return_percent,resolution_state")
-      .eq("complete", true)
-      .eq("resolution_state", "measured")
-      .gte("target_at", windowStart)
+    const { data: episodeData, error: episodeError } = await supabase
+      .from("prox_shadow_board_episode_representatives")
+      .select(
+        "member_outcome_id,member_id,ticker,trading_date,market_session,decision_at,entry_price,max_gain_percent,max_drawdown_percent,sampled_high_at,sampled_low_at,disposition,role",
+      )
+      .gte("decision_at", windowStart)
+      .order("decision_at", { ascending: true })
       .limit(20_000);
-    if (horizonError) throw horizonError;
-    const horizonRows = (horizonData ?? []) as HorizonRow[];
-
-    const outcomeIds = [...new Set(horizonRows.map((row) => row.member_outcome_id))];
-    const outcomeRows = await readInBatches(outcomeIds, async (batch) => {
+    if (episodeError) throw episodeError;
+    const episodes = (episodeData ?? []) as ProxEpisodeRepresentative[];
+    const episodeOutcomeIds = episodes.map(
+      (episode) => episode.member_outcome_id,
+    );
+    const horizonRows = await readInBatches(
+      episodeOutcomeIds,
+      async (batch) => {
       const { data, error } = await supabase
-        .from("prox_shadow_board_member_outcomes")
-        .select("id,member_id,max_gain_percent,max_drawdown_percent,sampled_high_at,sampled_low_at")
-        .in("id", batch);
+        .from("prox_shadow_board_member_outcome_horizons")
+        .select("member_outcome_id,horizon,return_percent,resolution_state")
+        .in("member_outcome_id", batch)
+        .eq("complete", true)
+        .eq("resolution_state", "measured");
       if (error) throw error;
-      return (data ?? []) as MemberOutcomeRow[];
-    });
-    const outcomeById = new Map(outcomeRows.map((row) => [row.id, row]));
+      return (data ?? []) as ProxEpisodeHorizon[];
+      },
+    );
 
-    const memberIds = [...new Set(outcomeRows.map((row) => row.member_id))];
-    const memberRows = await readInBatches(memberIds, async (batch) => {
-      const { data, error } = await supabase
-        .from("prox_shadow_board_members")
-        .select("id,disposition,role")
-        .in("id", batch);
-      if (error) throw error;
-      return (data ?? []) as MemberRow[];
-    });
-    const memberById = new Map(memberRows.map((row) => [row.id, row]));
-
-    const prox = buildProxScorecard(horizonRows, outcomeById, memberById);
+    const prox = buildProxEpisodeScorecard(horizonRows, episodes);
 
     const { data: ledgerData, error: ledgerError } = await supabase
       .from("ht_opportunity_ledger")
@@ -201,13 +107,25 @@ export async function GET(req: Request) {
     if (ledgerError) throw ledgerError;
     const ledgerByRole = new Map<
       string,
-      { gains: number[]; drawdowns: number[]; plusFiveBeforeMinusFive: number; total: number }
+      {
+        gains: number[];
+        drawdowns: number[];
+        plusFiveBeforeMinusFive: number;
+        plusTenBeforeMinusFive: number;
+        total: number;
+      }
     >();
     for (const row of ledgerData ?? []) {
       const role = String(row.first_role ?? "unknown");
       const group =
         ledgerByRole.get(role) ??
-        { gains: [], drawdowns: [], plusFiveBeforeMinusFive: 0, total: 0 };
+        {
+          gains: [],
+          drawdowns: [],
+          plusFiveBeforeMinusFive: 0,
+          plusTenBeforeMinusFive: 0,
+          total: 0,
+        };
       const gain = finite(row.max_gain_percent) ?? 0;
       const drawdown = finite(row.max_drawdown_percent) ?? 0;
       group.gains.push(gain);
@@ -221,15 +139,29 @@ export async function GET(req: Request) {
       ) {
         group.plusFiveBeforeMinusFive += 1;
       }
+      if (
+        gain >= 10 &&
+        (drawdown > -5 ||
+          new Date(row.highest_price_at).getTime() <=
+            new Date(row.lowest_price_at).getTime())
+      ) {
+        group.plusTenBeforeMinusFive += 1;
+      }
       ledgerByRole.set(role, group);
     }
     const canonical = [...ledgerByRole.entries()].map(([role, group]) => ({
       role,
       sampleSize: group.total,
       averageMaxGainPercent: average(group.gains),
+      medianMaxGainPercent: median(group.gains),
       averageMaxDrawdownPercent: average(group.drawdowns),
+      medianMaxDrawdownPercent: median(group.drawdowns),
       plusFiveBeforeMinusFiveHitRatePercent: rate(
         group.plusFiveBeforeMinusFive,
+        group.total,
+      ),
+      plusTenBeforeMinusFiveHitRatePercent: rate(
+        group.plusTenBeforeMinusFive,
         group.total,
       ),
     }));
@@ -238,13 +170,18 @@ export async function GET(req: Request) {
       windowDays: WINDOW_DAYS,
       prox,
       canonical,
+      comparisonMode: "unpaired_parallel_benchmark",
       note:
-        "ProX shadow board has only been tracking outcomes since this endpoint shipped -- early reads will show a thin sample, especially for longer horizons (24h needs a full day to resolve). Not a verdict yet, the instrument that will eventually produce one.",
+        "ProX uses first ticker/date/session/disposition episodes so repeated five-minute frames cannot inflate the sample. Canonical remains an unpaired parallel benchmark, not proof of head-to-head superiority; a same-ticker/same-timestamp comparison is still required before promotion.",
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     return NextResponse.json(
-      { ok: false, error: getErrorMessage(error, "Unknown error.") },
+      {
+        ok: false,
+        error: getErrorMessage(error, "Unknown error."),
+        expectedMigration: "0025_prox_shadow_episode_scorecard.sql",
+      },
       { status: 500 },
     );
   }

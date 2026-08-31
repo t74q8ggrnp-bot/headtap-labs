@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's built-in TypeScript test runner requires the source
 // extension while the production bundler resolves the same module extensionless.
-import { findProxOutcomeBarAtTarget, resolveProxOutcomeHorizon, summarizeProxOutcomePath, type ProxOutcomeBar } from "./shadow-outcome-resolution.ts";
+import { findProxOutcomeBarAtTarget, isUsExtendedMarketTimestamp, resolveProxOutcomeHorizon, summarizeProxOutcomePath, type ProxOutcomeBar } from "./shadow-outcome-resolution.ts";
 
 const at = (minute: number) => Date.parse(`2026-08-21T13:${String(minute).padStart(2, "0")}:00.000Z`);
 
@@ -55,4 +55,33 @@ test("computes MFE and MAE from the full observed path instead of the latest sna
   assert.equal(Number(path.maxGainPercent.toFixed(2)), 10);
   assert.equal(Number(path.maxDrawdownPercent.toFixed(2)), -5);
   assert.equal(path.timeToPeakMinutes, 5);
+});
+
+test("terminally excludes a due horizon that lands while US equities are closed", () => {
+  assert.equal(
+    isUsExtendedMarketTimestamp("2026-08-22T14:00:00.000Z"),
+    false,
+  );
+  const resolved = resolveProxOutcomeHorizon({
+    horizon: "24h",
+    targetAt: "2026-08-22T14:00:00.000Z",
+    bars: [],
+    now: new Date("2026-08-22T14:20:00.000Z"),
+  });
+  assert.equal(resolved.state, "unavailable");
+  assert.match(resolved.unavailableReason ?? "", /market was closed/i);
+});
+
+test("keeps a missing in-session bar pending for provider or halt recovery", () => {
+  assert.equal(
+    isUsExtendedMarketTimestamp("2026-08-21T14:00:00.000Z"),
+    true,
+  );
+  const resolved = resolveProxOutcomeHorizon({
+    horizon: "30m",
+    targetAt: "2026-08-21T14:00:00.000Z",
+    bars: [],
+    now: new Date("2026-08-21T15:00:00.000Z"),
+  });
+  assert.equal(resolved.state, "pending");
 });

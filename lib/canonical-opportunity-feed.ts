@@ -254,6 +254,27 @@ export async function buildCanonicalOpportunityFeed({
   const visibleContinuationCandidates = continuationCandidates;
   const withDecisionQuote = <T extends (typeof evaluated)[number]>(candidate: T) =>
     attachOpportunityDisplayQuote(candidate, decisionQuotes);
+  const decisionMarketTimes = decisionCandidates
+    .map((candidate) => candidate.decisionQuoteAsOf)
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite);
+  const marketDataFrame = {
+    authority: "provider_market_timestamp" as const,
+    candidateCount: decisionCandidates.length,
+    timestampedCandidateCount: decisionMarketTimes.length,
+    oldestMarketAsOf:
+      decisionMarketTimes.length > 0
+        ? new Date(Math.min(...decisionMarketTimes)).toISOString()
+        : null,
+    latestMarketAsOf:
+      decisionMarketTimes.length > 0
+        ? new Date(Math.max(...decisionMarketTimes)).toISOString()
+        : null,
+    proxAlignedCount: evaluated.filter(
+      (candidate) => candidate.scoreContext.proxMarketDataAligned === true,
+    ).length,
+  };
 
   return {
     opportunities: visibleOpportunities.map(withDecisionQuote),
@@ -264,6 +285,7 @@ export async function buildCanonicalOpportunityFeed({
       engineVersion: run.engine_version,
       candidateCounts: run.candidate_counts,
     },
+    marketDataFrame,
     diagnostics: {
       runRows: rows.length,
       strategyCandidates: candidates.length,
@@ -281,6 +303,7 @@ export async function buildCanonicalOpportunityFeed({
           candidate.visibilityState === "verified_price_discovery",
       ).length,
       momentumRadar: momentumRadar.length,
+      marketDataFrame,
     },
     momentumRadar: momentumRadar.map(withDecisionQuote),
     momentumContenders: momentumContenders.map(withDecisionQuote),

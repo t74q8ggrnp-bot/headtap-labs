@@ -41,23 +41,35 @@ import {
   assertNoForbiddenProxInputs,
 } from "@/lib/prox/edge-score";
 import { PROX_SHADOW_BOARD_VERSION } from "@/lib/prox/shadow-board";
+import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
+import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
+import {
+  PROX_MICROSTRUCTURE_AUTHORITY,
+  PROX_MICROSTRUCTURE_VERSION,
+} from "@/lib/prox/microstructure";
+import { PAPER_TRADING_CONTRACT_VERSION } from "@/lib/paper-trading/engine";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const ACTIVE_MAX_SIGNAL_AGE_HOURS = 20 / 60;
+const ACTIVE_MAX_SIGNAL_AGE_HOURS = 6 / 60;
 const CLOSED_MAX_SIGNAL_AGE_HOURS = 8;
-const ACTIVE_MAX_PROX_AGE_HOURS = 10 / 60;
-const ACTIVE_MAX_DIRECT_DISCOVERY_AGE_HOURS = 12 / 60;
-const ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS = 12 / 60;
-const ACTIVE_MAX_SHADOW_BOARD_AGE_HOURS = 12 / 60;
+const ACTIVE_MAX_PROX_AGE_HOURS = 3 / 60;
+const ACTIVE_MAX_MICROSTRUCTURE_AGE_HOURS = 3 / 60;
+const ACTIVE_MAX_DIRECT_DISCOVERY_AGE_HOURS = 6 / 60;
+const ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS = 8 / 60;
+const ACTIVE_MAX_SHADOW_BOARD_AGE_HOURS = 6 / 60;
+// Massive Advanced removes the former fifteen-minute market-data delay.
+// Outcome collection still gets a short scheduling grace because Vercel cron
+// and database writes are not an exchange streaming service.
 const ACTIVE_MAX_SHADOW_BOARD_OUTCOMES_AGE_HOURS = 12 / 60;
-const SHADOW_BOARD_OUTCOME_GRACE_MINUTES = 10;
+const SHADOW_BOARD_OUTCOME_GRACE_MINUTES = 12;
 const ACTIVE_MAX_TRANSITION_MEMORY_AGE_HOURS = 12 / 60;
 const ACTIVE_MAX_TRANSITION_CALIBRATION_AGE_HOURS = 22 / 60;
 const ACTIVE_MAX_LEDGER_AGE_HOURS = 12 / 60;
 const MAX_CRYPTO_PROX_AGE_HOURS = 15 / 60;
 const CRYPTO_OUTCOME_GRACE_MINUTES = 10;
+const MAX_PAPER_MATCH_AGE_HOURS = 6 / 60;
 
 type HealthCheck = {
   name: string;
@@ -204,6 +216,25 @@ export async function GET() {
       ? "Polygon API key available."
       : "Missing POLYGON_API_KEY.",
   });
+
+  if (hasPolygonKey) {
+    const entitlement = await probeMassiveRealtimeEntitlement({ force: true });
+    checks.push({
+      name: "massive_realtime_entitlement",
+      ok: entitlement.dataMode === "real_time",
+      message: entitlement.dataMode === "real_time"
+        ? "Massive real-time snapshots, last trades, and NBBO quotes are active."
+        : "The configured Massive key is not proving real-time stock entitlement.",
+      detail: {
+        dataMode: entitlement.dataMode,
+        snapshot: entitlement.snapshot,
+        lastTrade: entitlement.lastTrade,
+        lastQuote: entitlement.lastQuote,
+        checkedAt: entitlement.checkedAt,
+        errors: entitlement.errors,
+      },
+    });
+  }
 
   const supabase = getSupabase();
 
@@ -433,7 +464,7 @@ export async function GET() {
     const expandedProxResult = await supabase
       .from("prox_market_features")
       .select(
-        "ticker,computed_at,window_high_price,pullback_from_window_high_percent,minutes_since_window_high",
+        "ticker,market_as_of,computed_at,window_high_price,pullback_from_window_high_percent,minutes_since_window_high",
       )
       .order("computed_at", { ascending: false })
       .limit(1)
@@ -453,7 +484,13 @@ export async function GET() {
       ? legacyProxResult?.error
       : null;
     if (proxError) throw proxError;
-    const proxAge = hoursSince(proxFeature?.computed_at);
+    const marketTimestampSchemaReady = !expandedProxResult.error;
+    const proxProcessingAge = hoursSince(proxFeature?.computed_at);
+    const proxMarketAge = hoursSince(
+      proxFeature && "market_as_of" in proxFeature
+        ? proxFeature.market_as_of
+        : null,
+    );
     const proxMaxAge = closedWeekend
       ? Infinity
       : activeMarketSession
@@ -461,9 +498,29 @@ export async function GET() {
         : CLOSED_MAX_SIGNAL_AGE_HOURS;
     checks.push({
       name: "prox_market_pulse_freshness",
-      ok: Boolean(proxFeature) && proxAge <= proxMaxAge,
+      ok:
+        Boolean(proxFeature) &&
+        marketTimestampSchemaReady &&
+        proxProcessingAge <= proxMaxAge &&
+        (closedWeekend ||
+          !activeMarketSession ||
+          isActiveMarketTimestampUsable(
+            proxFeature && "market_as_of" in proxFeature
+              ? proxFeature.market_as_of
+              : null,
+          )),
       message:
-        proxFeature && proxAge <= proxMaxAge
+        !marketTimestampSchemaReady
+          ? "ProX market source timestamps are unavailable; run migration 0026."
+        : proxFeature &&
+            proxProcessingAge <= proxMaxAge &&
+            (closedWeekend ||
+              !activeMarketSession ||
+              isActiveMarketTimestampUsable(
+                "market_as_of" in proxFeature
+                  ? proxFeature.market_as_of
+                  : null,
+              ))
           ? closedWeekend
             ? "Latest ProX market pulse is retained for the closed weekend."
             : "ProX market pulse is fresh."
@@ -471,9 +528,16 @@ export async function GET() {
       detail: proxFeature
         ? {
             ticker: proxFeature.ticker,
+            marketAsOf:
+              "market_as_of" in proxFeature
+                ? proxFeature.market_as_of
+                : null,
             computedAt: proxFeature.computed_at,
-            ageMinutes: Number.isFinite(proxAge)
-              ? Number((proxAge * 60).toFixed(1))
+            sourceAgeMinutes: Number.isFinite(proxMarketAge)
+              ? Number((proxMarketAge * 60).toFixed(1))
+              : null,
+            processingAgeMinutes: Number.isFinite(proxProcessingAge)
+              ? Number((proxProcessingAge * 60).toFixed(1))
               : null,
             maxAgeMinutes: Number.isFinite(proxMaxAge)
               ? Number((proxMaxAge * 60).toFixed(1))
@@ -490,6 +554,7 @@ export async function GET() {
               "minutes_since_window_high" in proxFeature
                 ? proxFeature.minutes_since_window_high
                 : null,
+            marketTimestampSchemaReady,
           }
         : null,
     });
@@ -498,6 +563,157 @@ export async function GET() {
       name: "prox_market_pulse_freshness",
       ok: false,
       message: "Could not verify ProX market pulse freshness.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Massive Advanced NBBO and consolidated prints are captured in a
+  // separate append-only ProX evidence lane. This proves direct provider
+  // coverage and timestamps without turning the evidence into a score.
+  try {
+    const { data: microstructureRun, error: microstructureRunError } =
+      await supabase
+        .from("prox_realtime_microstructure_runs")
+        .select(
+          "id,started_at,completed_at,status,market_session,source_data_mode,candidate_count,expected_observation_count,persisted_observation_count,quote_observation_count,trade_observation_count,provider_error_count,truncated_tape_count,latest_market_as_of,complete,engine_version,authority,diagnostics",
+        )
+        .eq("engine_version", PROX_MICROSTRUCTURE_VERSION)
+        .eq("status", "success")
+        .eq("complete", true)
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (microstructureRunError) throw microstructureRunError;
+
+    if (!microstructureRun) {
+      checks.push({
+        name: "prox_realtime_microstructure_observations",
+        ok: !activeMarketSession,
+        message: activeMarketSession
+          ? "ProX has no completed real-time quote/tape observation cycle."
+          : "ProX real-time microstructure schema is ready and awaiting the next active session.",
+        detail: {
+          activeMarketSession,
+          engineVersion: PROX_MICROSTRUCTURE_VERSION,
+          authority: PROX_MICROSTRUCTURE_AUTHORITY,
+        },
+      });
+    } else {
+      const { data: microstructureObservations, error: observationReadError } =
+        await supabase
+          .from("prox_realtime_microstructure_observations")
+          .select("ticker,market_as_of,quote_as_of,trade_as_of")
+          .eq("run_id", microstructureRun.id);
+      if (observationReadError) throw observationReadError;
+
+      const expectedCount = Number(
+        microstructureRun.expected_observation_count,
+      );
+      const persistedCount = Number(
+        microstructureRun.persisted_observation_count,
+      );
+      const quoteCount = Number(microstructureRun.quote_observation_count);
+      const providerErrorCount = Number(
+        microstructureRun.provider_error_count,
+      );
+      const ageHours = hoursSince(
+        microstructureRun.completed_at ?? microstructureRun.started_at,
+      );
+      const quoteCoverage =
+        expectedCount > 0 ? quoteCount / expectedCount : 0;
+      const freshSourceRows = (microstructureObservations ?? []).filter(
+        (row) =>
+          !activeMarketSession ||
+          isActiveMarketTimestampUsable(row.market_as_of),
+      );
+      const sourceFreshCoverage =
+        expectedCount > 0 ? freshSourceRows.length / expectedCount : 0;
+      const exactCoverage =
+        expectedCount > 0 &&
+        expectedCount === persistedCount &&
+        persistedCount === (microstructureObservations?.length ?? 0);
+      const sourceFresh =
+        !activeMarketSession ||
+        sourceFreshCoverage >= 0.8;
+      const processingFresh =
+        !activeMarketSession ||
+        ageHours <= ACTIVE_MAX_MICROSTRUCTURE_AGE_HOURS;
+      const healthy =
+        microstructureRun.complete === true &&
+        microstructureRun.authority === PROX_MICROSTRUCTURE_AUTHORITY &&
+        microstructureRun.source_data_mode === "real_time" &&
+        exactCoverage &&
+        providerErrorCount === 0 &&
+        quoteCoverage >= 0.8 &&
+        sourceFresh &&
+        processingFresh;
+
+      checks.push({
+        name: "prox_realtime_microstructure_observations",
+        ok: healthy,
+        message:
+          microstructureRun.authority !== PROX_MICROSTRUCTURE_AUTHORITY
+            ? "ProX quote/tape evidence escaped its shadow-only authority contract."
+            : microstructureRun.source_data_mode !== "real_time"
+              ? "ProX quote/tape observations are not using Massive real-time data."
+              : !exactCoverage
+                ? "ProX quote/tape receipt does not exactly match persisted observations."
+                : providerErrorCount > 0
+                  ? "One or more direct quote/tape provider reads failed."
+                  : quoteCoverage < 0.8
+                    ? "Direct NBBO coverage fell below 80% of the research set."
+                    : !sourceFresh
+                      ? "ProX quote/tape provider timestamps are stale."
+                      : !processingFresh
+                        ? "ProX quote/tape collection is stale."
+                        : activeMarketSession
+                          ? "ProX is preserving fresh Massive NBBO and trade-tape evidence without changing scores."
+                          : "Latest ProX quote/tape evidence is retained outside the active session.",
+        detail: {
+          runId: microstructureRun.id,
+          engineVersion: microstructureRun.engine_version,
+          authority: microstructureRun.authority,
+          sourceDataMode: microstructureRun.source_data_mode,
+          marketSession: microstructureRun.market_session,
+          expectedCount,
+          persistedCount,
+          actualCount: microstructureObservations?.length ?? 0,
+          quoteObservationCount: quoteCount,
+          tradeObservationCount: Number(
+            microstructureRun.trade_observation_count,
+          ),
+          quoteCoveragePercent: Number((quoteCoverage * 100).toFixed(1)),
+          freshSourceCoveragePercent: Number(
+            (sourceFreshCoverage * 100).toFixed(1),
+          ),
+          staleSourceTickers: (microstructureObservations ?? [])
+            .filter(
+              (row) =>
+                activeMarketSession &&
+                !isActiveMarketTimestampUsable(row.market_as_of),
+            )
+            .slice(0, 10)
+            .map((row) => row.ticker),
+          providerErrorCount,
+          truncatedTapeCount: Number(
+            microstructureRun.truncated_tape_count,
+          ),
+          latestMarketAsOf: microstructureRun.latest_market_as_of,
+          completedAt: microstructureRun.completed_at,
+          processingAgeMinutes: Number.isFinite(ageHours)
+            ? Number((ageHours * 60).toFixed(1))
+            : null,
+          scoringChanged: false,
+          executionAuthority: "none",
+        },
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_realtime_microstructure_observations",
+      ok: false,
+      message:
+        "ProX quote/tape evidence is unavailable; run migration 0027 before deploying.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
@@ -925,7 +1141,7 @@ export async function GET() {
     const { data: outcomeRun, error: outcomeRunError } = await supabase
       .from("prox_shadow_board_outcome_runs")
       .select(
-        "id,observed_at,completed_at,status,complete,active_member_count,updated_member_count,due_outcome_count,persisted_outcome_count,unavailable_outcome_count,engine_version",
+        "id,observed_at,completed_at,status,complete,active_member_count,updated_member_count,due_outcome_count,persisted_outcome_count,unavailable_outcome_count,engine_version,diagnostics",
       )
       .eq("engine_version", PROX_SHADOW_BOARD_OUTCOMES_VERSION)
       .eq("status", "success")
@@ -966,6 +1182,12 @@ export async function GET() {
         !activeMarketSession ||
         ageHours <= ACTIVE_MAX_SHADOW_BOARD_OUTCOMES_AGE_HOURS;
       const outcomesCurrent = (overdueOutcomeCount ?? 0) === 0;
+      const outcomeDiagnostics =
+        outcomeRun.diagnostics &&
+        typeof outcomeRun.diagnostics === "object" &&
+        !Array.isArray(outcomeRun.diagnostics)
+          ? (outcomeRun.diagnostics as Record<string, unknown>)
+          : {};
       const ok = fresh && outcomesCurrent;
 
       checks.push({
@@ -991,6 +1213,12 @@ export async function GET() {
           persistedOutcomeCount: outcomeRun.persisted_outcome_count,
           unavailableOutcomeCount: outcomeRun.unavailable_outcome_count,
           overdueOutcomeCount: overdueOutcomeCount ?? 0,
+          providerSuccessCount:
+            outcomeDiagnostics.providerSuccessCount ?? null,
+          providerFailureCount:
+            outcomeDiagnostics.providerFailureCount ?? null,
+          episodeScorecardMigration:
+            "0025_prox_shadow_episode_scorecard.sql",
         },
       });
     }
@@ -1003,6 +1231,44 @@ export async function GET() {
       detail: getErrorMessage(
         err,
         "Unknown Pro X shadow-board outcome health-check error.",
+      ),
+    });
+  }
+
+  // The scorecard must count de-correlated ticker episodes rather than every
+  // five-minute board frame. This view is read-only and has no scoring,
+  // ranking, public, or execution authority.
+  try {
+    const scorecardWindowStart = new Date(
+      Date.now() - 14 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const { count: episodeCount, error: episodeError } = await supabase
+      .from("prox_shadow_board_episode_representatives")
+      .select("*", { count: "exact", head: true })
+      .gte("decision_at", scorecardWindowStart);
+    if (episodeError) throw episodeError;
+    checks.push({
+      name: "prox_shadow_episode_scorecard",
+      ok: true,
+      message:
+        "ProX shadow scorecards use de-correlated ticker/session/disposition episodes.",
+      detail: {
+        authority: "shadow_research_only",
+        windowDays: 14,
+        episodeCount: episodeCount ?? 0,
+        episodeDefinition:
+          "first_ticker_date_session_disposition_decision",
+      },
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "prox_shadow_episode_scorecard",
+      ok: false,
+      message:
+        "ProX shadow scorecard episode de-correlation is unavailable; run migration 0025 before deploying.",
+      detail: getErrorMessage(
+        err,
+        "Unknown ProX shadow episode scorecard health-check error.",
       ),
     });
   }
@@ -1510,6 +1776,90 @@ export async function GET() {
     });
   }
 
+  try {
+    const [
+      accountSchema,
+      positionSchema,
+      orderSchema,
+      fillSchema,
+      latestMatch,
+    ] = await Promise.all([
+      supabase.from("paper_accounts").select("*", { count: "exact", head: true }),
+      supabase.from("paper_positions").select("*", { count: "exact", head: true }),
+      supabase.from("paper_orders").select("*", { count: "exact", head: true }),
+      supabase.from("paper_fills").select("*", { count: "exact", head: true }),
+      supabase
+        .from("paper_match_runs")
+        .select("id,started_at,completed_at,status,market_session,examined_count,filled_count,expired_count,rejected_count,skipped_count,diagnostics")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    const schemaError = [
+      accountSchema.error,
+      positionSchema.error,
+      orderSchema.error,
+      fillSchema.error,
+      latestMatch.error,
+    ].find(Boolean);
+    if (schemaError) throw schemaError;
+
+    const match = latestMatch.data;
+    const ageHours = hoursSince(match?.completed_at ?? match?.started_at);
+    const matcherHealthy = Boolean(
+      match &&
+      match.status === "success" &&
+      match.completed_at &&
+      ageHours <= MAX_PAPER_MATCH_AGE_HOURS,
+    );
+    checks.push({
+      name: "paper_trading_contract_and_matcher",
+      ok: matcherHealthy,
+      message: !match
+        ? "Paper Trading schema is ready, but the scheduled matcher has no heartbeat yet."
+        : match.status !== "success"
+          ? "The latest Paper Trading matcher run did not complete successfully."
+          : ageHours > MAX_PAPER_MATCH_AGE_HOURS
+            ? "The Paper Trading matcher heartbeat is stale."
+            : "Paper Trading v2 and its scheduled order matcher are healthy.",
+      detail: {
+        contractVersion: PAPER_TRADING_CONTRACT_VERSION,
+        accountCount: accountSchema.count ?? 0,
+        positionCount: positionSchema.count ?? 0,
+        orderCount: orderSchema.count ?? 0,
+        fillCount: fillSchema.count ?? 0,
+        matcherRun: match ? {
+          id: match.id,
+          status: match.status,
+          marketSession: match.market_session,
+          examined: match.examined_count,
+          filled: match.filled_count,
+          expired: match.expired_count,
+          rejected: match.rejected_count,
+          skipped: match.skipped_count,
+          completedAt: match.completed_at,
+          ageMinutes: Number.isFinite(ageHours)
+            ? Number((ageHours * 60).toFixed(1))
+            : null,
+          maxAgeMinutes: MAX_PAPER_MATCH_AGE_HOURS * 60,
+          authority:
+            match.diagnostics && typeof match.diagnostics === "object" &&
+            "authority" in match.diagnostics
+              ? match.diagnostics.authority
+              : null,
+        } : null,
+      },
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "paper_trading_contract_and_matcher",
+      ok: false,
+      message:
+        "Paper Trading health receipts are unavailable; apply migrations 0024 and 0028 before syncing iOS.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   let latestSignal: {
     ticker?: string;
     scanned_at?: string;
@@ -1670,6 +2020,17 @@ export async function GET() {
     const directQuoteCoverage =
       !activeMarketSession ||
       (topDecisionSet.length > 0 && liveQuoteCount === topDecisionSet.length);
+    const marketTimestampCoverage =
+      !activeMarketSession ||
+      (topDecisionSet.length > 0 &&
+        topDecisionSet.every(
+          (record) =>
+            isActiveMarketTimestampUsable(record.decisionQuoteAsOf) &&
+            isActiveMarketTimestampUsable(
+              record.proxIntelligence?.pulse?.marketAsOf,
+            ) &&
+            record.scoreContext.proxMarketDataAligned === true,
+        ));
     const proxAuthorityRecords = topDecisionSet.filter(
       (record) => record.proxIntelligence !== null,
     );
@@ -1695,11 +2056,13 @@ export async function GET() {
       );
     checks.push({
       name: "canonical_opportunity_atomicity",
-      ok: audit.ok && feed.decisionFrame.fresh,
+      ok: audit.ok && feed.decisionFrame.fresh && marketTimestampCoverage,
       message: !audit.ok
         ? "Canonical Spot Momentum contains a quote, eligibility, rank, or radar-authority mismatch."
         : !feed.decisionFrame.fresh
           ? "The rolling canonical decision frame exceeded its strict freshness window."
+        : !marketTimestampCoverage
+          ? "Canonical and ProX market facts are stale, missing, or refer to different market moments."
         : directQuoteCoverage
           ? "Canonical Spot Momentum scoring, ranking, and display use one fresh rolling decision frame."
           : "Canonical Spot Momentum remains atomic; unavailable direct quote refreshes retain the fresh promoted-run decision.",
@@ -1713,6 +2076,15 @@ export async function GET() {
         topDecisionCount: topDecisionSet.length,
         liveDecisionQuoteCount: liveQuoteCount,
         directQuoteCoverage,
+        marketTimestampCoverage,
+        marketTimestamps: topDecisionSet.slice(0, 6).map((record) => ({
+          ticker: record.ticker,
+          canonicalMarketAsOf: record.decisionQuoteAsOf ?? null,
+          proxMarketAsOf: record.proxIntelligence?.pulse?.marketAsOf ?? null,
+          aligned: record.scoreContext.proxMarketDataAligned ?? false,
+          skewSeconds:
+            record.scoreContext.proxMarketDataSkewSeconds ?? null,
+        })),
         canonicalFallbackCount: topDecisionSet.length - liveQuoteCount,
         issues: audit.issues.slice(0, 20),
       },

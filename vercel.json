@@ -2,11 +2,11 @@
   "crons": [
     {
       "path": "/api/signal-writer",
-      "schedule": "*/5 8-23 * * 1-5"
+      "schedule": "*/2 8-23 * * 1-5"
     },
     {
       "path": "/api/signal-writer",
-      "schedule": "*/5 0 * * 2-6"
+      "schedule": "*/2 0 * * 2-6"
     },
     {
       "path": "/api/shadow-retrieval",
@@ -26,11 +26,11 @@
     },
     {
       "path": "/api/opportunity-ledger",
-      "schedule": "4-59/5 8-23 * * 1-5"
+      "schedule": "1-59/2 8-23 * * 1-5"
     },
     {
       "path": "/api/opportunity-ledger",
-      "schedule": "4-59/5 0 * * 2-6"
+      "schedule": "1-59/2 0 * * 2-6"
     },
     {
       "path": "/api/prox-sec-connector",
@@ -38,15 +38,27 @@
     },
     {
       "path": "/api/prox-market-sensor",
-      "schedule": "*/2 * * * *"
+      "schedule": "* 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/prox-market-sensor",
+      "schedule": "* 0 * * 2-6"
+    },
+    {
+      "path": "/api/prox-market-microstructure",
+      "schedule": "* 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/prox-market-microstructure",
+      "schedule": "* 0 * * 2-6"
     },
     {
       "path": "/api/prox-market-discovery",
-      "schedule": "2-59/5 8-23 * * 1-5"
+      "schedule": "1-59/2 8-23 * * 1-5"
     },
     {
       "path": "/api/prox-market-discovery",
-      "schedule": "2-59/5 0 * * 2-6"
+      "schedule": "1-59/2 0 * * 2-6"
     },
     {
       "path": "/api/prox-outcome-memory",
@@ -58,19 +70,19 @@
     },
     {
       "path": "/api/prox-shadow-board",
-      "schedule": "5-59/5 8-23 * * 1-5"
+      "schedule": "*/2 8-23 * * 1-5"
     },
     {
       "path": "/api/prox-shadow-board",
-      "schedule": "5-59/5 0 * * 2-6"
+      "schedule": "*/2 0 * * 2-6"
     },
     {
       "path": "/api/prox-shadow-board-outcomes",
-      "schedule": "6-59/5 8-23 * * 1-5"
+      "schedule": "4-59/5 8-23 * * 1-5"
     },
     {
       "path": "/api/prox-shadow-board-outcomes",
-      "schedule": "6-59/5 0 * * 2-6"
+      "schedule": "4-59/5 0 * * 2-6"
     },
     {
       "path": "/api/prox-transition-calibration",
@@ -82,11 +94,19 @@
     },
     {
       "path": "/api/prox-intelligence",
-      "schedule": "1-59/2 * * * *"
+      "schedule": "* 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/prox-intelligence",
+      "schedule": "* 0 * * 2-6"
     },
     {
       "path": "/api/crypto/prox-sensor",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/paper-trading/match",
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/trading-bot",

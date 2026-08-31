@@ -30,6 +30,7 @@ const candidate = {
   retrievedForCatalyst: false,
   retrievedForReclaim: false,
   securityType: "CS",
+  sourceMarketDataAsOf: "2026-08-13T14:00:00.000Z",
 };
 
 test("a quote flip is applied before authority evaluation", () => {
@@ -63,5 +64,20 @@ test("a stale active-session quote cannot replace the promoted candidate", () =>
   assert.equal(updated.price, candidate.price);
   assert.equal(updated.change, candidate.change);
   assert.equal(updated.decisionQuoteLive, false);
-  assert.equal(updated.decisionQuoteAsOf, null);
+  assert.equal(
+    updated.decisionQuoteAsOf,
+    candidate.sourceMarketDataAsOf,
+  );
+});
+
+test("a closed-session quote updates the verified price without claiming it is live", () => {
+  const updated = applyOpportunityDecisionQuote(
+    { ...candidate, scanSession: "closed" },
+    { price: 10.8, change: 8, asOf: "2026-08-13T23:59:00.000Z" },
+    new Date("2026-08-16T14:00:00.000Z"),
+  );
+  assert.equal(updated.price, 10.8);
+  assert.equal(updated.change, 8);
+  assert.equal(updated.decisionQuoteLive, false);
+  assert.equal(updated.decisionQuoteAsOf, "2026-08-13T23:59:00.000Z");
 });

@@ -2,22 +2,56 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotDisplayPrice,
+  resolveSnapshotTimestampMs,
 } from "@/lib/polygon-snapshot";
+import {
+  fetchMassiveLastQuote,
+  fetchMassiveLastTrade,
+  fetchMassiveStockSnapshot,
+} from "@/lib/massive-stocks";
 
 async function getPolygonQuote(symbol: string) {
-  const apiKey = process.env.POLYGON_API_KEY;
-  if (!apiKey) throw new Error("Missing POLYGON_API_KEY");
-  const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}?apiKey=${apiKey}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Polygon quote failed for ${symbol}: ${res.status}`);
-  const data = await res.json();
-  const t = data?.ticker;
+  const [t, liveTrade, liveQuote] = await Promise.all([
+    fetchMassiveStockSnapshot(symbol),
+    fetchMassiveLastTrade(symbol),
+    fetchMassiveLastQuote(symbol),
+  ]);
   if (!t) throw new Error(`No ticker data from Polygon for ${symbol}`);
-  const price = resolveSnapshotDisplayPrice(t);
+  const snapshotPrice = resolveSnapshotDisplayPrice(t);
+  const snapshotTimestampMs = resolveSnapshotTimestampMs(t);
+  const tradeTimestampMs = liveTrade ? Date.parse(liveTrade.timestamp) : null;
+  const useLiveTrade = Boolean(
+    liveTrade &&
+      tradeTimestampMs !== null &&
+      (snapshotTimestampMs === null || tradeTimestampMs >= snapshotTimestampMs),
+  );
+  const price = useLiveTrade ? liveTrade!.price : snapshotPrice;
   const prevClose = Number(t?.prevDay?.c || 0);
   const change = resolveSnapshotChangePercent(t, price);
   if (!price) throw new Error(`Polygon returned no price for ${symbol}`);
-  return { symbol, c: price, dp: change, pc: prevClose, high: Number(t?.day?.h || 0), low: Number(t?.day?.l || 0), open: Number(t?.day?.o || 0), volume: Number(t?.day?.v || 0), source: "polygon" };
+  const marketTimestampMs = Math.max(
+    snapshotTimestampMs ?? 0,
+    tradeTimestampMs ?? 0,
+  );
+  return {
+    symbol,
+    c: price,
+    dp: change,
+    pc: prevClose,
+    high: Number(t?.day?.h || 0),
+    low: Number(t?.day?.l || 0),
+    open: Number(t?.day?.o || 0),
+    volume: Number(t?.day?.v || 0),
+    bid: liveQuote?.bid ?? null,
+    ask: liveQuote?.ask ?? null,
+    asOf: marketTimestampMs > 0
+      ? new Date(marketTimestampMs).toISOString()
+      : null,
+    dataMode: liveTrade && liveQuote ? "real_time" : "delayed",
+    source: liveTrade && liveQuote
+      ? "massive_polygon_realtime"
+      : "massive_polygon_snapshot",
+  };
 }
 
 async function getFinnhubQuote(symbol: string) {
@@ -28,7 +62,7 @@ async function getFinnhubQuote(symbol: string) {
   const data = await res.json();
   const price = Number(data.c || 0);
   if (!price) throw new Error(`Finnhub returned no price for ${symbol}`);
-  return { symbol, c: price, dp: Number(data.dp || 0), pc: Number(data.pc || 0), high: Number(data.h || 0), low: Number(data.l || 0), open: Number(data.o || 0), volume: 0, source: "finnhub" };
+  return { symbol, c: price, dp: Number(data.dp || 0), pc: Number(data.pc || 0), high: Number(data.h || 0), low: Number(data.l || 0), open: Number(data.o || 0), volume: 0, dataMode: "delayed", source: "finnhub" };
 }
 
 async function getYahooQuote(symbol: string) {
@@ -41,7 +75,7 @@ async function getYahooQuote(symbol: string) {
   const price = Number(meta?.regularMarketPrice || 0);
   const prevClose = Number(meta?.chartPreviousClose || meta?.previousClose || 0);
   const change = price && prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
-  return { symbol, c: price, dp: change, pc: prevClose, high: 0, low: 0, open: 0, volume: 0, source: "yahoo" };
+  return { symbol, c: price, dp: change, pc: prevClose, high: 0, low: 0, open: 0, volume: 0, dataMode: "delayed", source: "yahoo" };
 }
 
 export async function GET(req: Request) {

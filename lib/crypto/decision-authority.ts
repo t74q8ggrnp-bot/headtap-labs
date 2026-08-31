@@ -209,14 +209,20 @@ export function rankCryptoDecisionFrame(opportunities: CryptoOpportunity[]) {
       right.dollarVolume24h - left.dollarVolume24h,
   );
   const qualified = ranked.filter((opportunity) => opportunity.eligible);
-  const radar = ranked
+  const rankedRadar = ranked
     .filter((opportunity) => opportunity.radarEligible)
     .slice(0, 6);
+  const developingLeader = qualified.length === 0
+    ? rankedRadar[0] ?? null
+    : null;
+  const radar = developingLeader ? rankedRadar.slice(1) : rankedRadar;
   return {
     evaluated: ranked,
     hero: qualified[0] ?? null,
+    developingLeader,
     contenders: qualified.slice(1, 6),
     radar,
+    radarProducts: rankedRadar.length,
     authorityEligibleProducts: qualified.length,
     withheldProducts: ranked.filter(
       (opportunity) => opportunity.decisionState !== "qualified",

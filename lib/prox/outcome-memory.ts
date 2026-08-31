@@ -9,7 +9,7 @@ export const PROX_CALIBRATION_VERSION =
   "prox-pattern-calibration-v2-security-routed";
 export const PROX_OUTCOME_MODE = "shadow_research" as const;
 export const PROX_SHADOW_BOARD_OUTCOMES_VERSION =
-  "prox-shadow-board-outcomes-v2-historical-bars";
+  "prox-shadow-board-outcomes-v3-due-first-market-sessions";
 
 export type ProxOutcomeHorizon =
   | "5m"

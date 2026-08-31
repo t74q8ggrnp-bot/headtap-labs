@@ -28,6 +28,7 @@ import {
   type ProxInstrumentLane,
   type ProxSecurityMetadataState,
 } from "@/lib/prox/security-routing";
+import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -442,6 +443,15 @@ export async function GET(request: Request) {
   const observedAt = now.toISOString();
   const minute = observationMinute(now);
   const marketClock = getProxEasternMarketClock(now);
+  if (marketClock.session === "closed") {
+    return NextResponse.json({
+      success: true,
+      skipped: "market_closed",
+      engineVersion: PROX_MARKET_DISCOVERY_VERSION,
+      authority: "shadow_research_only",
+      timestamp: observedAt,
+    });
+  }
   let runId: string | null = null;
 
   const { data: run, error: runError } = await supabase
@@ -487,9 +497,10 @@ export async function GET(request: Request) {
   runId = String(run.id);
 
   try {
-    const [snapshot, splitResult] = await Promise.all([
+    const [snapshot, splitResult, entitlement] = await Promise.all([
       fetchPolygonSnapshot(),
       fetchPolygonSplits(),
+      probeMassiveRealtimeEntitlement(),
     ]);
     await persistCorporateActions(supabase, splitResult.actions, observedAt);
     const actionMap = buildCurrentActionMap(
@@ -646,6 +657,10 @@ export async function GET(request: Request) {
       securityRoutingVersion: PROX_SECURITY_ROUTING_VERSION,
       marketSession: marketClock.session,
       expectedVolumeFraction: marketClock.expectedVolumeFraction,
+      marketDataProvider: "massive_polygon",
+      marketDataMode: entitlement.dataMode,
+      realtimeLastTrade: entitlement.lastTrade,
+      realtimeLastQuote: entitlement.lastQuote,
       splitFeedError: splitResult.error,
       securityMetadata: {
         cacheHits: securityMetadata.cacheHits,

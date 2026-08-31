@@ -153,9 +153,31 @@ test("publishes exactly one hero and no more than five qualified contenders", ()
   }));
   const frame = rankCryptoDecisionFrame(opportunities);
   assert.equal(frame.hero?.symbol, "TEST0");
+  assert.equal(frame.developingLeader, null);
   assert.equal(frame.contenders.length, 5);
   assert.deepEqual(
     frame.contenders.map((item) => item.symbol),
     ["TEST1", "TEST2", "TEST3", "TEST4", "TEST5"],
   );
+});
+
+test("publishes the strongest backend-ranked radar name as developing, not qualified", () => {
+  const opportunities = Array.from({ length: 4 }, (_, index) => ({
+    ...base,
+    productId: `RADAR${index}-USD`,
+    symbol: `RADAR${index}`,
+    opportunityScore: 70 - index,
+    eligible: false,
+    radarEligible: true,
+    decisionState: "radar" as const,
+  }));
+  const frame = rankCryptoDecisionFrame(opportunities);
+  assert.equal(frame.hero, null);
+  assert.equal(frame.developingLeader?.symbol, "RADAR0");
+  assert.equal(frame.developingLeader?.eligible, false);
+  assert.deepEqual(
+    frame.radar.map((item) => item.symbol),
+    ["RADAR1", "RADAR2", "RADAR3"],
+  );
+  assert.equal(frame.radarProducts, 4);
 });

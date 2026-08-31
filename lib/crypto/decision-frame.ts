@@ -19,6 +19,7 @@ function isCryptoOpportunityFeed(value: unknown): value is CryptoOpportunityFeed
     feed.success === true &&
     feed.methodologyVersion === "crypto-momentum-v3-prox-authority" &&
     feed.decisionFrame?.version === "crypto-decision-frame-v1" &&
+    (feed.developingLeader === null || typeof feed.developingLeader === "object") &&
     Array.isArray(feed.contenders) &&
     Array.isArray(feed.radar),
   );
@@ -75,6 +76,7 @@ export function makeCryptoFrameSafeForStaleDisplay(
   const freshness = withCryptoFrameFreshness(feed, now, "stale_fallback");
   const previous = [
     ...(freshness.hero ? [freshness.hero] : []),
+    ...(freshness.developingLeader ? [freshness.developingLeader] : []),
     ...freshness.contenders,
     ...freshness.radar,
   ];
@@ -100,8 +102,9 @@ export function makeCryptoFrameSafeForStaleDisplay(
   return {
     ...freshness,
     hero: null,
+    developingLeader: radar[0] ?? null,
     contenders: [],
-    radar,
+    radar: radar.slice(1),
     decisionFrame: {
       ...freshness.decisionFrame,
       fresh: false,

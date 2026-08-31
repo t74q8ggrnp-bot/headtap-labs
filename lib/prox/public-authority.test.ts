@@ -14,7 +14,10 @@ const pulse = {
   volumeAcceleration: 1.5,
   priceVsVwap: 2,
   averageBarRangePercent: 2,
+  marketAsOf: "2026-08-28T14:00:00.000Z",
 };
+
+const decisionMarketDataAsOf = "2026-08-28T14:01:00.000Z";
 
 test("healthy live tape has bounded support authority", () => {
   const decision = evaluateProxPublicAuthority({
@@ -22,6 +25,7 @@ test("healthy live tape has bounded support authority", () => {
     marketConfirmation: 100,
     sessionPeakPullbackPercent: 1,
     activeSessionChangePercent: 20,
+    decisionMarketDataAsOf,
     pulse,
   });
   assert.equal(
@@ -38,6 +42,7 @@ test("ordinary weak tape is bounded and does not become a hard failure", () => {
     marketConfirmation: 20,
     sessionPeakPullbackPercent: 5,
     activeSessionChangePercent: 10,
+    decisionMarketDataAsOf,
     pulse: { ...pulse, state: "weakening" },
   });
   assert.equal(
@@ -54,6 +59,7 @@ test("confirmed post-peak deterioration blocks eligibility", () => {
     marketConfirmation: 80,
     sessionPeakPullbackPercent: 12,
     activeSessionChangePercent: -2,
+    decisionMarketDataAsOf,
     pulse: {
       ...pulse,
       velocity1m: -1,
@@ -73,6 +79,7 @@ test("stale or missing pulse cannot manufacture support", () => {
     marketConfirmation: 100,
     sessionPeakPullbackPercent: 0,
     activeSessionChangePercent: 10,
+    decisionMarketDataAsOf,
     pulse: { ...pulse, fresh: false, state: "stale" },
   });
   assert.equal(stale.marketConfirmation, null);
@@ -86,6 +93,7 @@ test("a local bounce cannot erase severe full-session structure damage", () => {
     marketConfirmation: 100,
     sessionPeakPullbackPercent: 44.8,
     activeSessionChangePercent: -31.2,
+    decisionMarketDataAsOf,
     pulse: {
       ...pulse,
       velocity1m: 0.6,
@@ -108,10 +116,42 @@ test("a strong runner slightly below its open is not treated as burnt out", () =
   const decision = evaluateProxPublicAuthority({
     activeMarketSession: true,
     marketConfirmation: 74,
-    sessionPeakPullbackPercent: 30,
+    sessionPeakPullbackPercent: 15,
     activeSessionChangePercent: -3,
+    decisionMarketDataAsOf,
     pulse: { ...pulse, pullbackFromWindowHighPercent: 3 },
   });
   assert.equal(decision.deepSessionRecoveryWithheld, false);
   assert.equal(decision.supportsContinuation, true);
+});
+
+test("severe session peak damage lowers rank without inventing a hard failure", () => {
+  const decision = evaluateProxPublicAuthority({
+    activeMarketSession: true,
+    marketConfirmation: 95,
+    sessionPeakPullbackPercent: 30,
+    activeSessionChangePercent: 25,
+    decisionMarketDataAsOf,
+    pulse: { ...pulse, pullbackFromWindowHighPercent: 2 },
+  });
+  assert.equal(decision.peakFailureConfirmed, false);
+  assert.equal(decision.deepSessionRecoveryWithheld, false);
+  assert.equal(decision.severeSessionPeakDamage, true);
+  assert.equal(decision.supportsContinuation, false);
+  assert.ok(decision.rankAdjustment <= -6);
+});
+
+test("misaligned canonical and ProX market timestamps cannot manufacture support", () => {
+  const decision = evaluateProxPublicAuthority({
+    activeMarketSession: true,
+    marketConfirmation: 100,
+    sessionPeakPullbackPercent: 1,
+    activeSessionChangePercent: 20,
+    decisionMarketDataAsOf: "2026-08-28T13:40:00.000Z",
+    pulse,
+  });
+  assert.equal(decision.marketDataAligned, false);
+  assert.equal(decision.marketConfirmation, null);
+  assert.equal(decision.supportsContinuation, false);
+  assert.equal(decision.rankAdjustment, -8);
 });

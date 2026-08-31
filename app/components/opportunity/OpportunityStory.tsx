@@ -1,15 +1,12 @@
+import HeroPriceChart from "@/app/components/market/HeroPriceChart";
+import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
+import type { Opportunity } from "@/lib/opportunity-model";
 import OpportunityWindow from "./OpportunityWindow";
 import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
-import {
-  getOpportunityPresentation,
-  type Opportunity,
-} from "@/lib/opportunity-model";
-import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
 
 type OpportunityStoryProps = {
   opportunity: Opportunity;
   framework: TradeFrameworkDisplay | null;
-  dualEngine: boolean;
   watched: boolean;
   onOpen: () => void;
   onWatch: () => void;
@@ -18,31 +15,11 @@ type OpportunityStoryProps = {
 export default function OpportunityStory({
   opportunity,
   framework,
-  dualEngine,
   watched,
   onOpen,
   onWatch,
 }: OpportunityStoryProps) {
-  const view = getOpportunityPresentation(opportunity);
   const explosion = opportunity.explosionAssessment;
-  const catalyst = opportunity.catalystTags[0] ?? null;
-  const catalystPlay = opportunity.catalystScore >= 20 || Boolean(catalyst);
-  const selectionLabel =
-    opportunity.freshnessLabel === "Last Verified Signal"
-      ? "Last Trading Session"
-      : catalystPlay
-        ? catalyst ?? "Catalyst Watch"
-        : opportunity.change >= 3
-          ? "Momentum Leader"
-          : opportunity.stage;
-  const crowdBadge =
-    view.positionLabel === "VERIFIED"
-      ? "Last Verified"
-      : view.positionLabel === "EARLY"
-        ? "Pre-Crowd"
-        : view.positionLabel === "BUILDING"
-          ? "Crowd Building"
-          : "Crowd Arrived";
 
   return (
     <div className="p-5 flex flex-col gap-4">
@@ -63,74 +40,24 @@ export default function OpportunityStory({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[10px] font-black text-zinc-500">
-            {selectionLabel}
-          </span>
-          <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-black ${view.positionLabel === "EARLY" ? "border-green-400/20 text-green-500" : "border-zinc-800 text-zinc-600"}`}>
-            {crowdBadge}
-          </span>
-          {catalystPlay && catalyst && (
-            <span className="rounded-full border border-orange-400/30 bg-orange-500/[0.07] px-2.5 py-0.5 text-[10px] font-black text-orange-300">
-              ⚡ {catalyst}
-            </span>
-          )}
-          {dualEngine && (
-            <span className="rounded-full border border-amber-400/20 bg-amber-500/[0.05] px-2.5 py-0.5 text-[10px] font-black text-amber-400">
-              ⚡ Dual Engine Confirmation
-            </span>
-          )}
-        </div>
-        {opportunity.riskTags.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-            {opportunity.riskTags.map((tag) => (
-              <span key={tag} className="rounded-full border border-red-400/25 bg-red-500/[0.06] px-2.5 py-0.5 text-[9px] font-black text-red-300">
-                ⚠ {tag}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
-      <p className="text-sm font-semibold text-zinc-400 leading-5">{opportunity.whyItMatters}</p>
-      {explosion && (
-        <div className="rounded-xl border border-orange-400/20 bg-orange-500/[0.05] p-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-orange-300">
-              {explosion.label}
-            </p>
-            <p className="font-mono text-sm font-black text-orange-200">
-              {explosion.score}/100
-            </p>
-          </div>
-          <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-400">
-            {explosion.summary}
-          </p>
-          {explosion.state === "price_discovery" && (
-            <p className="mt-2 text-[10px] font-bold leading-4 text-zinc-500">
-              Scenario ranges below are recalculated from observed conditions,
-              not presented as promised targets.
-            </p>
-          )}
-        </div>
-      )}
-      {framework && opportunity.eligibility?.eligible && (
+      {explosion?.state === "price_discovery" ? (
+        <PriceDiscoveryWindow assessment={explosion} compact />
+      ) : framework && opportunity.eligibility?.eligible ? (
         <OpportunityWindow framework={framework} />
-      )}
-      {explosion?.state === "price_discovery" && (
-        <PriceDiscoveryWindow assessment={explosion} />
-      )}
+      ) : null}
 
-      {opportunity.signals.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {opportunity.signals.slice(0, 4).map((signal, index) => (
-            <div key={`${signal}-${index}`} className="flex gap-2">
-              <span className="text-violet-400/40 text-xs shrink-0 mt-0.5">▸</span>
-              <p className="text-[11px] font-semibold text-zinc-600 leading-4">{signal}</p>
-            </div>
-          ))}
-        </div>
-      )}
+      <HeroPriceChart
+        asset="stock"
+        symbol={opportunity.ticker}
+        accent={opportunity.strategy === "before_the_crowd" ? "orange" : "violet"}
+        compact
+      />
+
+      <p className="text-[11px] font-semibold leading-5 text-zinc-500">
+        {opportunity.whyItMatters}
+      </p>
 
       <div className="flex items-center gap-2.5 mt-auto pt-1">
         <button onClick={onOpen} className="rounded-xl border border-violet-400/30 bg-violet-500/[0.07] px-4 py-2.5 text-xs font-black text-violet-300 hover:bg-violet-500/12 transition">

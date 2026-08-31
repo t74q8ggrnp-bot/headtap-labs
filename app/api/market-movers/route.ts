@@ -8,6 +8,7 @@ import {
 } from "@/lib/polygon-snapshot";
 import { getErrorMessage } from "@/lib/error-message";
 import { hydrateSnapshotLeaders } from "@/lib/intraday-snapshot-hydration";
+import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 
 export const dynamic = "force-dynamic";
 
@@ -45,9 +46,10 @@ export async function GET() {
     }
 
     const base = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks";
-    const [gainersRes, losersRes] = await Promise.allSettled([
+    const [gainersRes, losersRes, entitlementResult] = await Promise.allSettled([
       fetch(`${base}/gainers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" }),
       fetch(`${base}/losers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" }),
+      probeMassiveRealtimeEntitlement(),
     ]);
     let tickers: PolygonSnapshotRow[] = [];
 
@@ -115,6 +117,10 @@ export async function GET() {
       movers,
       count: movers.length,
       source,
+      provider: "massive_polygon",
+      dataMode: entitlementResult.status === "fulfilled"
+        ? entitlementResult.value.dataMode
+        : "unavailable",
       hydrated: hydratedLeaders.size,
       timestamp: new Date().toISOString(),
     });

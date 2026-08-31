@@ -4,9 +4,11 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotPrice,
+  resolveSnapshotTimestampMs,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
 import { getErrorMessage } from "@/lib/error-message";
+import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +24,10 @@ export async function GET() {
     const tickers = ["SPY", "QQQ", "IWM", "VIXY"];
     const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${tickers.join(",")}&apiKey=${POLYGON_KEY}`;
 
-    const res = await fetch(url, { cache: "no-store" });
+    const [res, entitlement] = await Promise.all([
+      fetch(url, { cache: "no-store" }),
+      probeMassiveRealtimeEntitlement(),
+    ]);
 
     if (!res.ok) {
       return NextResponse.json({ error: `Polygon failed: ${res.status}` }, { status: 500 });
@@ -54,6 +59,9 @@ export async function GET() {
         price: Number(price.toFixed(2)),
         change: Number(Number(change).toFixed(2)),
         rvol: rvol !== null ? Number(rvol.toFixed(2)) : null,
+        asOf: resolveSnapshotTimestampMs(t)
+          ? new Date(resolveSnapshotTimestampMs(t)!).toISOString()
+          : null,
       };
     };
 
@@ -78,6 +86,9 @@ export async function GET() {
       moodColor,
       volumeEnv,
       avgRvol: Number(avgRvol.toFixed(2)),
+      provider: "massive_polygon",
+      dataMode: entitlement.dataMode,
+      providerCheckedAt: entitlement.checkedAt,
       timestamp: new Date().toISOString(),
     });
 

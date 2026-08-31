@@ -31,6 +31,15 @@ server pipeline and are transported through `lib/opportunity-model.ts`.
 An unevaluated watchlist ticker is labeled `Not ranked`; the browser must not
 manufacture a score for it.
 
+## Crypto display authority
+
+`lib/crypto/decision-authority.ts` owns the backend-ranked crypto hero,
+developing leader, contenders, and radar order. When no asset is qualified,
+the backend may publish its highest-ranked radar observation as
+`developingLeader`; that record remains entry-withheld and cannot be relabeled
+as a confirmed hero by the browser. Crypto clients may format these roles but
+may not select a replacement, sort them again, or change eligibility.
+
 ## Independent ProX shadow owner
 
 `app/api/prox-shadow-board/route.ts` owns the separate, research-only ProX
@@ -52,6 +61,18 @@ deep-session-recovery withholding. This pulse is not the independent ProX Edge
 board, cannot consume or publish the independent Edge Score, and cannot create
 a second public score. `lib/canonical-opportunity.ts` remains the final owner of
 the single public HT Labs decision.
+
+Freshness is owned by provider market time, not server processing time.
+`market_data_as_of` and `market_as_of` must be present, usable, and aligned
+before the bounded pulse can support or hard-block a canonical decision.
+`scanned_at` and `computed_at` remain processing/audit timestamps only. Severe
+full-session peak damage may apply the versioned ordinary rank penalty; it does
+not become a hard rejection without confirmed deterioration.
+
+Verified Massive Advanced transport supplies real-time stock snapshots, last
+trades, NBBO quotes, and second aggregates. Transport freshness may determine
+whether an existing decision contract can act, but it does not grant the data
+provider, browser, chart, or UI any scoring or eligibility authority.
 
 ## Legacy local intelligence still in `app/page.tsx`
 

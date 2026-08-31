@@ -3,6 +3,26 @@ import type { ProxOutcomeHorizon } from "@/lib/prox/outcome-memory";
 export const PROX_OUTCOME_BAR_TOLERANCE_MS = 10 * 60_000;
 export const PROX_OUTCOME_UNAVAILABLE_AFTER_MS = 7 * 24 * 60 * 60_000;
 
+export function isUsExtendedMarketTimestamp(value: string | number | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return false;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  if (["Sat", "Sun"].includes(weekday) || !Number.isFinite(hour + minute)) {
+    return false;
+  }
+  const easternMinute = hour * 60 + minute;
+  return easternMinute >= 4 * 60 && easternMinute <= 20 * 60;
+}
+
 export type ProxOutcomeBar = {
   timeMs: number;
   open: number;
@@ -100,6 +120,20 @@ export function resolveProxOutcomeHorizon({
       measuredAt: new Date(bar.timeMs).toISOString(),
       measuredPrice: bar.close,
       unavailableReason: null,
+    };
+  }
+  if (
+    now.getTime() - targetMs >= PROX_OUTCOME_BAR_TOLERANCE_MS &&
+    !isUsExtendedMarketTimestamp(targetAt)
+  ) {
+    return {
+      horizon,
+      targetAt,
+      state: "unavailable",
+      measuredAt: null,
+      measuredPrice: null,
+      unavailableReason:
+        "The US equity market was closed at the target timestamp.",
     };
   }
   if (now.getTime() - targetMs >= unavailableAfterMs) {

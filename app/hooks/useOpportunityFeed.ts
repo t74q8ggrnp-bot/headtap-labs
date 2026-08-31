@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { normalizeOpportunity, type Opportunity } from "@/lib/opportunity-model";
+import { HT_REFRESH_RATES_MS } from "@/lib/runtime-capabilities";
 
 export type OpportunityPayload = {
   opportunities?: unknown[];
@@ -121,14 +122,16 @@ export function useOpportunityFeed(initial: InitialOpportunityFeeds) {
   // Canonical decisions are page-critical data. Load them immediately when
   // the server could not provide first-paint data. When the server already
   // supplied the canonical snapshot, keep first paint stable and begin the
-  // normal refresh cadence one minute later.
+  // Massive Advanced keeps the backend frame current throughout extended
+  // hours. Poll twice per minute so the browser picks up each promoted frame
+  // without attempting to rank or calculate anything locally.
   useEffect(() => {
     const initialLoad = needsInitialLoad
       ? window.setTimeout(() => void refresh(), 0)
       : null;
     const interval = window.setInterval(() => {
       void refresh();
-    }, 60 * 1000);
+    }, HT_REFRESH_RATES_MS.homeDecisions);
     return () => {
       if (initialLoad !== null) window.clearTimeout(initialLoad);
       window.clearInterval(interval);

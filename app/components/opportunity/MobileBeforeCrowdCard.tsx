@@ -7,6 +7,7 @@ import DecisionTrace from "./DecisionTrace";
 import OpportunityMetrics from "./OpportunityMetrics";
 import OpportunityWindow from "./OpportunityWindow";
 import ProxPulse from "./ProxPulse";
+import HeroPriceChart from "@/app/components/market/HeroPriceChart";
 
 type MobileBeforeCrowdCardProps = {
   opportunity: Opportunity;
@@ -69,6 +70,10 @@ export default function MobileBeforeCrowdCard({
             </span>
           ))}
         </div>
+      </div>
+
+      <div className="border-b border-white/8 px-4 py-4">
+        <HeroPriceChart asset="stock" symbol={opportunity.ticker} accent="orange" compact />
       </div>
 
       <div className="border-b border-white/8 px-5 py-4">

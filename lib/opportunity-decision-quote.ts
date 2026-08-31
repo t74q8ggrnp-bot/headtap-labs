@@ -1,6 +1,9 @@
 import type { OpportunityCandidate } from "@/lib/canonical-opportunity";
+// @ts-expect-error Node's built-in TypeScript runner requires source extensions.
+import { ACTIVE_MARKET_DATA_MAX_AGE_MS, isActiveMarketTimestampUsable } from "./market-data-time.ts";
 
-export const ACTIVE_DECISION_QUOTE_MAX_AGE_MS = 20 * 60 * 1000;
+export const ACTIVE_DECISION_QUOTE_MAX_AGE_MS =
+  ACTIVE_MARKET_DATA_MAX_AGE_MS;
 
 export type OpportunityDecisionQuote = {
   price: number;
@@ -34,12 +37,10 @@ function isUsableDecisionQuote(
 
   if (!ACTIVE_QUOTE_SESSIONS.has(candidate.scanSession)) return true;
 
-  const timestamp = new Date(quote.asOf).getTime();
-  const ageMs = now.getTime() - timestamp;
-  return (
-    Number.isFinite(timestamp) &&
-    ageMs >= -5 * 60 * 1000 &&
-    ageMs <= ACTIVE_DECISION_QUOTE_MAX_AGE_MS
+  return isActiveMarketTimestampUsable(
+    quote.asOf,
+    now,
+    ACTIVE_DECISION_QUOTE_MAX_AGE_MS,
   );
 }
 
@@ -57,7 +58,7 @@ export function applyOpportunityDecisionQuote(
     return {
       ...candidate,
       decisionQuoteLive: false,
-      decisionQuoteAsOf: null,
+      decisionQuoteAsOf: candidate.sourceMarketDataAsOf,
     };
   }
 
@@ -82,7 +83,9 @@ export function applyOpportunityDecisionQuote(
     changeFromOpenPercent,
     sessionHighPrice: sessionHigh > 0 ? sessionHigh : null,
     pullbackFromSessionHighPercent,
-    decisionQuoteLive: true,
+    // A closed-session quote can still improve the retained verified price,
+    // but processing it now must never relabel old market data as "Live".
+    decisionQuoteLive: ACTIVE_QUOTE_SESSIONS.has(candidate.scanSession),
     decisionQuoteAsOf: quote.asOf,
   };
 }

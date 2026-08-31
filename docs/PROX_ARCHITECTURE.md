@@ -68,12 +68,13 @@ clear error if the tables/seed rows aren't there yet).
 
 ## Update — Phase 3 and Phase 4, partial
 
-Verified live against the current Polygon plan before building anything:
-minute and second aggregate bars return 200, but last-trade and last-quote
-return 403 ("not entitled, upgrade required"). That means true tick-by-tick
-WebSocket streaming still needs the plan upgrade plus an always-on worker —
-neither exists yet — but REST-polled minute bars are usable right now, at
-no extra cost.
+Massive Advanced entitlement was verified on 2026-08-30: full snapshots,
+last trades, NBBO quotes, minute aggregates, and second aggregates all return
+success for the dedicated HT Labs key. Vercel still cannot hold a durable
+exchange WebSocket connection, so the production transport uses real-time
+REST data with minute cron sensing and five-second selected-chart refreshes.
+A future always-on worker may add WebSocket ingestion, but its absence no
+longer means the REST facts are fifteen minutes delayed.
 
 - **`app/api/prox-market-sensor/route.ts`** (Phase 3, partial): for tickers
   with a Pro X event, a direct-market research anomaly, or current canonical
@@ -81,8 +82,9 @@ no extra cost.
   bars from Polygon and computes real features — 1-min velocity, 5-min
   acceleration, volume acceleration, VWAP relationship, dollar volume —
   into `prox_market_features` (one upserted row per ticker, latest
-  snapshot only, not a full history yet). Runs every 2 minutes, tighter
-  than the 5-minute canonical cron, per the acceptance criteria. It does not
+  snapshot only, not a full history yet). Runs every minute while U.S.
+  extended-hours trading is active, tighter than the two-minute canonical
+  cron. It does not
   make a canonical decision — it only computes and stores features. Broad
   price-first discovery is supplied by the independent route documented
   below. Turning a feature into a published decision remains the canonical

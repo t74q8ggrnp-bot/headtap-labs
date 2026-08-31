@@ -13,11 +13,12 @@ import {
   getSpotMomentumStrategyScore,
 } from "@/lib/canonical-momentum";
 import { evaluateProxPublicAuthority } from "@/lib/prox/public-authority";
+import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
 
 export { getCanonicalMomentumMagnitude } from "@/lib/canonical-momentum";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v17-price-discovery-entry-floor";
+  "opportunities-v18-temporal-peak-damage";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -58,6 +59,7 @@ export type SignalRow = {
   retrieved_for_reclaim?: boolean | null;
   security_type?: string | null;
   scan_run_id?: string | null;
+  market_data_as_of?: string | null;
 };
 
 export type OpportunityCandidate = {
@@ -85,6 +87,7 @@ export type OpportunityCandidate = {
   retrievedForCatalyst: boolean;
   retrievedForReclaim: boolean;
   securityType: string | null;
+  sourceMarketDataAsOf: string | null;
   decisionQuoteLive?: boolean;
   decisionQuoteAsOf?: string | null;
 };
@@ -177,6 +180,10 @@ export function mapSignalRow(row: SignalRow | Record<string, unknown>): Opportun
     retrievedForCatalyst: Boolean(row.retrieved_for_catalyst),
     retrievedForReclaim: Boolean(row.retrieved_for_reclaim),
     securityType: row.security_type ? String(row.security_type) : null,
+    sourceMarketDataAsOf:
+      typeof row.market_data_as_of === "string" && row.market_data_as_of
+        ? row.market_data_as_of
+        : null,
   };
 }
 
@@ -513,12 +520,15 @@ export function evaluateCanonicalOpportunity(
   const sessionPeakPullback = candidate.pullbackFromSessionHighPercent;
   const recentPeakPullback =
     pulse?.pullbackFromWindowHighPercent ?? null;
+  const decisionMarketDataAsOf =
+    candidate.decisionQuoteAsOf ?? candidate.sourceMarketDataAsOf;
   const proxAuthority = evaluateProxPublicAuthority({
     activeMarketSession: isActiveMarketSession(),
     marketConfirmation:
       proxIntelligence?.scores.marketConfirmation ?? null,
     sessionPeakPullbackPercent: sessionPeakPullback,
     activeSessionChangePercent: activeSessionChange,
+    decisionMarketDataAsOf,
     pulse,
   });
   const peakFailureConfirmed = proxAuthority.peakFailureConfirmed;
@@ -558,6 +568,14 @@ export function evaluateCanonicalOpportunity(
   ) {
     rejectionReasons.push(
       "Signal is too old to qualify during an active market session.",
+    );
+  }
+  if (
+    isActiveMarketSession() &&
+    !isActiveMarketTimestampUsable(decisionMarketDataAsOf)
+  ) {
+    rejectionReasons.push(
+      "Provider market data is missing or stale for the active session.",
     );
   }
 
@@ -780,6 +798,12 @@ export function evaluateCanonicalOpportunity(
   else if (extremeMomentum) riskTags.push("Extreme Momentum");
   if (sessionReclaim) riskTags.push("Reclaiming Prior Close");
   if (peakFailureConfirmed) riskTags.push("Post-Peak Weakness");
+  if (
+    proxAuthority.severeSessionPeakDamage &&
+    !peakFailureConfirmed
+  ) {
+    riskTags.push("Deep Session Pullback");
+  }
   if (proxAuthority.deepSessionRecoveryWithheld) {
     riskTags.push("Session Reclaim Required");
   }
@@ -837,6 +861,11 @@ export function evaluateCanonicalOpportunity(
     ...(peakFailureConfirmed
       ? ["ProX detects confirmed post-peak deterioration"]
       : []),
+    ...(proxAuthority.severeSessionPeakDamage && !peakFailureConfirmed
+      ? [
+          `Deep session pullback ${proxAuthority.observedPeakPullbackPercent.toFixed(1)}% below the high`,
+        ]
+      : []),
   ];
   const whyItMatters =
     peakFailureConfirmed
@@ -855,6 +884,8 @@ export function evaluateCanonicalOpportunity(
   const whatChanged =
     peakFailureConfirmed
       ? "The pullback from the recent high is now accompanied by weakening price structure, not merely distance from the high."
+      : proxAuthority.severeSessionPeakDamage
+      ? "Short-window momentum is present, but the stock remains materially below its full-session high, so ProX reduced—not rejected—the rank."
       : sessionReclaim
       ? `Price recovered from the current-day open with ${candidate.relativeVolume.toFixed(1)}x relative volume.`
       : candidate.catalystScore >= 20 && candidate.state
@@ -869,6 +900,8 @@ export function evaluateCanonicalOpportunity(
   const riskNote =
     (peakFailureConfirmed
       ? "Price is below its recent peak and the live tape confirms deterioration through acceleration, VWAP, time, or selling-volume evidence. HT will wait for a real reclaim before restoring conviction."
+      : proxAuthority.severeSessionPeakDamage
+      ? "The move is still positive, but full-session peak damage is severe enough that a local bounce cannot receive a continuation boost yet."
       : momentumRadarEligible
       ? "Momentum and volume are real, but the conventional structure does not provide at least 1:1 modeled risk/reward here. This is a no-chase radar read, not an entry-ready call."
       : priceDiscoveryVisibilityOverride
@@ -953,6 +986,13 @@ export function evaluateCanonicalOpportunity(
       proxAuthorityVersion: proxAuthority.authorityVersion,
       proxDeepSessionRecoveryWithheld:
         proxAuthority.deepSessionRecoveryWithheld,
+      proxSevereSessionPeakDamage:
+        proxAuthority.severeSessionPeakDamage,
+      proxSessionPeakDamagePenalty:
+        proxAuthority.sessionPeakDamagePenalty,
+      proxMarketDataAligned: proxAuthority.marketDataAligned,
+      proxMarketDataSkewSeconds:
+        proxAuthority.marketDataSkewSeconds,
       proxStructuralRecoveryThresholdPercent:
         proxAuthority.structuralRecoveryThresholdPercent,
       momentumFusion: "previous_close_anchor_session_context_v2",

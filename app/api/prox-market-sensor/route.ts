@@ -6,12 +6,10 @@
 // monitor price and price anomaly -> investigate the pulse, without granting
 // execution authority.
 //
-// REST-polled 1-minute bars via Polygon's aggs endpoint — verified live
-// against the current plan (minute/second aggs return 200; last-trade and
-// last-quote return 403 "not entitled"). This is real progress on Phase 3
-// within the current paid tier, not the full always-on WebSocket sensor
-// the complete spec describes — that still needs the plan upgrade plus
-// an always-on worker, neither of which exist yet.
+// REST-polled real-time 1-minute bars via Massive Advanced. Vercel route
+// handlers cannot hold a durable exchange WebSocket, so this bounded sensor
+// runs every minute while U.S. extended-hours trading is active. The provider
+// entitlement is independently proven by system health.
 //
 // Reads canonical tickers to decide what to monitor. The resulting market
 // pulse can inform HT Labs opportunity ranking, but this route has no order
@@ -19,6 +17,8 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
+import { getProxEasternMarketClock } from "@/lib/prox/market-discovery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -286,8 +286,15 @@ function computeFeatures(ticker: string, bars: Bar[]) {
     minutes_since_window_high: Number(minutesSinceWindowHigh.toFixed(1)),
     average_bar_range_percent: Number(averageBarRangePercent.toFixed(3)),
     bar_count: bars.length,
+    market_as_of: new Date(last.t).toISOString(),
     computed_at: new Date().toISOString(),
   };
+}
+
+function omitMarketTimestamp<T extends Record<string, unknown>>(features: T) {
+  const { market_as_of: _marketAsOf, ...legacyFeatures } = features;
+  void _marketAsOf;
+  return legacyFeatures;
 }
 
 function omitPeakRetentionFeatures<T extends Record<string, unknown>>(
@@ -320,11 +327,36 @@ async function supportsPeakRetentionColumns(
   return !error;
 }
 
+async function supportsMarketTimestampColumn(
+  supabase: ReturnType<typeof getSupabase>,
+  table: "prox_market_features" | "prox_market_feature_history",
+) {
+  const { error } = await supabase
+    .from(table)
+    .select("market_as_of")
+    .limit(1);
+  return !error;
+}
+
 export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!POLYGON_KEY) return NextResponse.json({ error: "Missing POLYGON_API_KEY" }, { status: 500 });
 
+  const marketClock = getProxEasternMarketClock();
+  if (marketClock.session === "closed") {
+    return NextResponse.json({
+      success: true,
+      skipped: "market_closed",
+      authority: "bounded_market_pulse",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   const diagnostics = {
+    marketDataProvider: "massive_polygon",
+    marketDataMode: "unavailable" as "real_time" | "delayed" | "unavailable",
+    realtimeLastTrade: false,
+    realtimeLastQuote: false,
     tickersConsidered: 0,
     eventTickers: 0,
     canonicalTickers: 0,
@@ -336,16 +368,32 @@ export async function GET(req: Request) {
     historyUnavailable: null as string | null,
     peakRetentionSchemaReady: false,
     peakRetentionHistorySchemaReady: false,
+    marketTimestampSchemaReady: false,
+    marketTimestampHistorySchemaReady: false,
     skippedNoBars: 0,
     errors: 0,
   };
 
   try {
     const supabase = getSupabase();
-    const [peakRetentionSchemaReady, peakRetentionHistorySchemaReady] =
+    const entitlement = await probeMassiveRealtimeEntitlement();
+    diagnostics.marketDataMode = entitlement.dataMode;
+    diagnostics.realtimeLastTrade = entitlement.lastTrade;
+    diagnostics.realtimeLastQuote = entitlement.lastQuote;
+    const [
+      peakRetentionSchemaReady,
+      peakRetentionHistorySchemaReady,
+      marketTimestampSchemaReady,
+      marketTimestampHistorySchemaReady,
+    ] =
       await Promise.all([
         supportsPeakRetentionColumns(supabase, "prox_market_features"),
         supportsPeakRetentionColumns(
+          supabase,
+          "prox_market_feature_history",
+        ),
+        supportsMarketTimestampColumn(supabase, "prox_market_features"),
+        supportsMarketTimestampColumn(
           supabase,
           "prox_market_feature_history",
         ),
@@ -353,6 +401,9 @@ export async function GET(req: Request) {
     diagnostics.peakRetentionSchemaReady = peakRetentionSchemaReady;
     diagnostics.peakRetentionHistorySchemaReady =
       peakRetentionHistorySchemaReady;
+    diagnostics.marketTimestampSchemaReady = marketTimestampSchemaReady;
+    diagnostics.marketTimestampHistorySchemaReady =
+      marketTimestampHistorySchemaReady;
     const [eventTickers, canonicalTickers, directDiscovery] = await Promise.all([
       fetchRecentEventTickers(supabase),
       fetchCanonicalOpportunityTickers(supabase),
@@ -405,9 +456,14 @@ export async function GET(req: Request) {
     const WRITE_CHUNK_SIZE = 25;
     for (let i = 0; i < computedFeatures.length; i += WRITE_CHUNK_SIZE) {
       const chunk = computedFeatures.slice(i, i + WRITE_CHUNK_SIZE);
-      const latestRows = chunk.map((features) =>
-        peakRetentionSchemaReady ? features : omitPeakRetentionFeatures(features),
-      );
+      const latestRows = chunk.map((features) => {
+        const peakCompatible = peakRetentionSchemaReady
+          ? features
+          : omitPeakRetentionFeatures(features);
+        return marketTimestampSchemaReady
+          ? peakCompatible
+          : omitMarketTimestamp(peakCompatible);
+      });
       const { error } = await supabase
         .from("prox_market_features")
         .upsert(latestRows, { onConflict: "ticker" });
@@ -423,11 +479,14 @@ export async function GET(req: Request) {
       // 0005 is applied, history failure is reported but never allowed to
       // disrupt the existing live pulse.
       if (!diagnostics.historyUnavailable) {
-        const historyRows = chunk.map((features) =>
-          peakRetentionHistorySchemaReady
+        const historyRows = chunk.map((features) => {
+          const peakCompatible = peakRetentionHistorySchemaReady
             ? features
-            : omitPeakRetentionFeatures(features),
-        );
+            : omitPeakRetentionFeatures(features);
+          return marketTimestampHistorySchemaReady
+            ? peakCompatible
+            : omitMarketTimestamp(peakCompatible);
+        });
         const { error: historyError } = await supabase
           .from("prox_market_feature_history")
           .upsert(historyRows, {

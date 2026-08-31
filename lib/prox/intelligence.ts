@@ -9,9 +9,13 @@ import {
   type ProxTransitionComparisonEvidence,
 } from "@/lib/prox/transition-calibration";
 import { PROX_PUBLIC_AUTHORITY_CONTRACT } from "@/lib/prox/public-authority";
+import {
+  getMarketDataAgeMs,
+  isActiveMarketTimestampUsable,
+} from "@/lib/market-data-time";
 
 export const PROX_INTELLIGENCE_VERSION =
-  "prox-intelligence-v5-session-recovery-contract";
+  "prox-intelligence-v6-source-time-authority";
 export const PROX_PACKET_MODE = "bounded_public_market" as const;
 
 const EVENT_LOOKBACK_HOURS = 72;
@@ -81,6 +85,8 @@ export type ProxIntelligencePacket = {
   pulse: {
     computedAt: string;
     ageSeconds: number;
+    marketAsOf: string | null;
+    sourceAgeSeconds: number | null;
     fresh: boolean;
     price: number | null;
     velocity1m: number | null;
@@ -154,6 +160,7 @@ type MarketFeatureRow = {
   pullback_from_window_high_percent?: unknown;
   minutes_since_window_high?: unknown;
   average_bar_range_percent?: unknown;
+  market_as_of?: unknown;
   computed_at?: unknown;
 };
 
@@ -283,9 +290,13 @@ function buildPacket(args: {
   const contradictions = contradictionCount(event?.contradictions);
 
   const pulseComputedAt = stringValue(market?.computed_at);
+  const pulseMarketAsOf = stringValue(market?.market_as_of);
   const pulseAgeMinutes = isoAgeMinutes(pulseComputedAt, nowMs);
   const pulseAgeSeconds =
     pulseAgeMinutes === null ? null : Math.round(pulseAgeMinutes * 60);
+  const sourceAgeMs = getMarketDataAgeMs(pulseMarketAsOf, nowMs);
+  const sourceAgeSeconds =
+    sourceAgeMs === null ? null : Math.round(sourceAgeMs / 1000);
   const velocity1m = finiteNumber(market?.velocity_1m);
   const acceleration5m = finiteNumber(market?.acceleration_5m);
   const volumeAcceleration = finiteNumber(market?.volume_acceleration);
@@ -300,10 +311,16 @@ function buildPacket(args: {
   const averageBarRangePercent = finiteNumber(
     market?.average_bar_range_percent,
   );
-  const pulseFresh =
-    pulseAgeMinutes !== null && pulseAgeMinutes <= PULSE_FRESH_MINUTES;
+  const pulseFresh = Boolean(
+    pulseAgeMinutes !== null &&
+      pulseAgeMinutes <= PULSE_FRESH_MINUTES &&
+      isActiveMarketTimestampUsable(pulseMarketAsOf, nowMs),
+  );
   const pulseStale =
-    pulseAgeMinutes !== null && pulseAgeMinutes > PULSE_STALE_MINUTES;
+    Boolean(market) &&
+    (pulseAgeMinutes === null ||
+      pulseAgeMinutes > PULSE_STALE_MINUTES ||
+      !isActiveMarketTimestampUsable(pulseMarketAsOf, nowMs));
 
   const verificationScore =
     verificationState === "verified"
@@ -355,7 +372,7 @@ function buildPacket(args: {
     ? clamp(((pullbackFromWindowHighPercent ?? 0) - 4) * 4, 0, 35)
     : 0;
   const marketConfirmation =
-    pulseAgeMinutes !== null && !pulseStale
+    pulseFresh
       ? clamp(
           50 +
             (velocity1m ?? 0) * 8 +
@@ -403,6 +420,9 @@ function buildPacket(args: {
   if (recentEvent && matchConfidence < 90) riskFlags.push("weak_entity_match");
   if (recentEvent && !market) riskFlags.push("market_pulse_missing");
   if (pulseStale) riskFlags.push("market_pulse_stale");
+  if (market && !pulseMarketAsOf) {
+    riskFlags.push("market_source_timestamp_missing");
+  }
   if ((velocity1m ?? 0) <= -4) riskFlags.push("rapid_1m_breakdown");
   if ((acceleration5m ?? 0) <= -6) riskFlags.push("negative_5m_acceleration");
   if ((priceVsVwap ?? 0) <= -3) riskFlags.push("price_below_vwap");
@@ -477,7 +497,7 @@ function buildPacket(args: {
       : pulseStale
         ? "stale_pulse"
         : "active";
-  const snapshotKey = `${PROX_INTELLIGENCE_VERSION}:${ticker}:${eventId ?? "none"}:${pulseComputedAt ?? "none"}`;
+  const snapshotKey = `${PROX_INTELLIGENCE_VERSION}:${ticker}:${eventId ?? "none"}:${pulseMarketAsOf ?? "no-source-time"}:${pulseComputedAt ?? "none"}`;
 
   return {
     packetId: null,
@@ -509,6 +529,8 @@ function buildPacket(args: {
       ? {
           computedAt: pulseComputedAt,
           ageSeconds: pulseAgeSeconds,
+          marketAsOf: pulseMarketAsOf,
+          sourceAgeSeconds,
           fresh: pulseFresh,
           price: finiteNumber(market.price),
           velocity1m,
@@ -551,6 +573,13 @@ function buildPacket(args: {
         value: round(evidenceConfidence),
         impact: evidenceConfidence >= 70 ? "supportive" : "neutral",
         reason: "Source credibility, deterministic entity match, verification, and evidence depth.",
+      },
+      {
+        factor: "market_source_time",
+        value: pulseMarketAsOf,
+        impact: pulseFresh ? "supportive" : "defensive",
+        reason:
+          "Provider market time, not server processing time, controls whether the ProX pulse may confirm the live tape.",
       },
       {
         factor: "market_confirmation",
@@ -753,10 +782,18 @@ export async function loadProxIntelligencePackets(
     const expandedMarketResult = await supabase
       .from("prox_market_features")
       .select(
-        "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,price_vs_vwap,dollar_volume,window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent,computed_at",
+        "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,price_vs_vwap,dollar_volume,window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent,market_as_of,computed_at",
       )
       .in("ticker", tickers);
-    const legacyMarketResult = expandedMarketResult.error
+    const peakMarketResult = expandedMarketResult.error
+      ? await supabase
+          .from("prox_market_features")
+          .select(
+            "ticker,price,velocity_1m,acceleration_5m,volume_acceleration,price_vs_vwap,dollar_volume,window_high_price,pullback_from_window_high_percent,minutes_since_window_high,average_bar_range_percent,computed_at",
+          )
+          .in("ticker", tickers)
+      : null;
+    const legacyMarketResult = peakMarketResult?.error
       ? await supabase
           .from("prox_market_features")
           .select(
@@ -765,10 +802,14 @@ export async function loadProxIntelligencePackets(
           .in("ticker", tickers)
       : null;
     const marketData = expandedMarketResult.error
-      ? legacyMarketResult?.data
+      ? peakMarketResult?.error
+        ? legacyMarketResult?.data
+        : peakMarketResult?.data
       : expandedMarketResult.data;
     const marketError = expandedMarketResult.error
-      ? legacyMarketResult?.error
+      ? peakMarketResult?.error
+        ? legacyMarketResult?.error
+        : peakMarketResult?.error
       : null;
     const marketByTicker = new Map<string, MarketFeatureRow>();
     if (!marketError) {

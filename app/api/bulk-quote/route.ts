@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotDisplayPrice,
+  resolveSnapshotTimestampMs,
 } from "@/lib/polygon-snapshot";
+import {
+  probeMassiveRealtimeEntitlement,
+  type MassiveStocksDataMode,
+} from "@/lib/massive-stocks";
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 
@@ -16,6 +21,8 @@ type Quote = {
   prevVolume: number;
   prevClose: number;
   avgVolume: number; // 10-day avg — use this as the relative volume denominator
+  asOf: string | null;
+  dataMode: MassiveStocksDataMode | "fallback";
 };
 
 function getLastTradingDate(): string {
@@ -55,7 +62,10 @@ async function fetchPolygonGroupedDaily(
   return out;
 }
 
-async function fetchPolygonSnapshot(symbols: string[]): Promise<Record<string, Quote>> {
+async function fetchPolygonSnapshot(
+  symbols: string[],
+  dataMode: MassiveStocksDataMode,
+): Promise<Record<string, Quote>> {
   const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${symbols.join(",")}&apiKey=${POLYGON_KEY}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Snapshot failed: ${res.status}`);
@@ -82,6 +92,10 @@ async function fetchPolygonSnapshot(symbols: string[]): Promise<Record<string, Q
         // Use prevDay.v as initial avgVolume proxy — Yahoo will overwrite
         // with the real 10-day average for any ticker it covers.
         avgVolume: prevDayVolume,
+        asOf: resolveSnapshotTimestampMs(t)
+          ? new Date(resolveSnapshotTimestampMs(t)!).toISOString()
+          : null,
+        dataMode,
       };
     }
   }
@@ -114,6 +128,8 @@ async function fetchYahooBulk(symbols: string[]): Promise<Record<string, Quote>>
       prevVolume: prevClose > 0 ? avgVol : 0, // prevVolume kept for back-compat
       prevClose,
       avgVolume: avgVol, // real 10-day average — use this for rvol
+      asOf: null,
+      dataMode: "fallback",
     };
   }
   return result;
@@ -154,12 +170,22 @@ export async function POST(req: Request) {
     if (!symbols.length) return NextResponse.json({ error: "No symbols" }, { status: 400 });
 
     const merged: Record<string, Quote> = {};
+    const entitlement = POLYGON_KEY
+      ? await probeMassiveRealtimeEntitlement()
+      : null;
 
     if (POLYGON_KEY) {
-      // Primary: Polygon snapshot (real-time price + today/prev day volume)
+      // Primary: Massive/Polygon snapshot. The entitlement probe proves
+      // whether this key receives the real-time or delayed version.
       for (let i = 0; i < symbols.length; i += 100) {
         try {
-          Object.assign(merged, await fetchPolygonSnapshot(symbols.slice(i, i + 100)));
+          Object.assign(
+            merged,
+            await fetchPolygonSnapshot(
+              symbols.slice(i, i + 100),
+              entitlement?.dataMode ?? "unavailable",
+            ),
+          );
         } catch {}
       }
 
@@ -183,6 +209,8 @@ export async function POST(req: Request) {
                 prevVolume: prev?.volume || 0,
                 prevClose,
                 avgVolume: prev?.volume || 0, // will be overwritten by Yahoo enrichment
+                asOf: null,
+                dataMode: "fallback",
               };
             }
           }
@@ -203,7 +231,12 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ quotes: merged });
+    return NextResponse.json({
+      quotes: merged,
+      provider: "massive_polygon",
+      dataMode: entitlement?.dataMode ?? "unavailable",
+      entitlementCheckedAt: entitlement?.checkedAt ?? null,
+    });
   } catch {
     return NextResponse.json({ error: "Failed", quotes: {} }, { status: 500 });
   }

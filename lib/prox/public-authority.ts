@@ -1,5 +1,8 @@
+// @ts-expect-error Node's built-in TypeScript runner requires source extensions.
+import { measureMarketTimestampAlignment } from "../market-data-time.ts";
+
 export const PROX_PUBLIC_AUTHORITY_VERSION =
-  "prox-public-market-authority-v2";
+  "prox-public-market-authority-v4-realtime-source-authority";
 
 export const PROX_PUBLIC_AUTHORITY_CONTRACT = {
   version: PROX_PUBLIC_AUTHORITY_VERSION,
@@ -26,6 +29,7 @@ type ProxAuthorityPulse = {
   volumeAcceleration: number | null;
   priceVsVwap: number | null;
   averageBarRangePercent: number | null;
+  marketAsOf: string | null;
 };
 
 export type ProxPublicAuthorityDecision = {
@@ -34,7 +38,11 @@ export type ProxPublicAuthorityDecision = {
   structuralRecoveryThresholdPercent: number;
   livePeakFailureEvidence: number;
   observedPeakPullbackPercent: number;
+  marketDataAligned: boolean;
+  marketDataSkewSeconds: number | null;
   peakFailureConfirmed: boolean;
+  severeSessionPeakDamage: boolean;
+  sessionPeakDamagePenalty: number;
   deepSessionRecoveryWithheld: boolean;
   supportsContinuation: boolean;
   rankAdjustment: number;
@@ -45,11 +53,19 @@ export function evaluateProxPublicAuthority(input: {
   marketConfirmation: number | null;
   sessionPeakPullbackPercent: number | null;
   activeSessionChangePercent: number | null;
+  decisionMarketDataAsOf: string | null;
   pulse: ProxAuthorityPulse | null | undefined;
 }): ProxPublicAuthorityDecision {
   const pulse = input.pulse;
+  const timestampAlignment = measureMarketTimestampAlignment(
+    input.decisionMarketDataAsOf,
+    pulse?.marketAsOf,
+  );
+  const temporalAuthorityReady = Boolean(
+    pulse?.fresh === true && timestampAlignment.aligned,
+  );
   const marketConfirmation =
-    pulse?.fresh === true && Number.isFinite(input.marketConfirmation)
+    temporalAuthorityReady && Number.isFinite(input.marketConfirmation)
       ? input.marketConfirmation
       : null;
   const livePeakFailureEvidence = [
@@ -64,18 +80,34 @@ export function evaluateProxPublicAuthority(input: {
     pulse?.pullbackFromWindowHighPercent ?? 0,
   );
   const peakFailureConfirmed = Boolean(
-    pulse?.fresh === true &&
-      (pulse.peakFailureConfirmed ||
+    temporalAuthorityReady &&
+      (pulse?.peakFailureConfirmed ||
         ((input.sessionPeakPullbackPercent ?? 0) >=
-          pulse.peakFailureThresholdPercent &&
+          (pulse?.peakFailureThresholdPercent ?? Number.POSITIVE_INFINITY) &&
           livePeakFailureEvidence >= 2)),
   );
   const structuralRecoveryThresholdPercent = Math.max(
     20,
     Math.min(35, (pulse?.averageBarRangePercent ?? 0) * 4),
   );
+  const severeSessionPeakDamage = Boolean(
+    temporalAuthorityReady &&
+      (input.sessionPeakPullbackPercent ?? 0) >=
+        structuralRecoveryThresholdPercent,
+  );
+  const sessionPeakDamagePenalty = severeSessionPeakDamage
+    ? Math.max(
+        PROX_PUBLIC_AUTHORITY_CONTRACT.maximumOrdinaryPenalty,
+        -6 -
+          Math.round(
+            ((input.sessionPeakPullbackPercent ?? 0) -
+              structuralRecoveryThresholdPercent) /
+              3,
+          ),
+      )
+    : 0;
   const deepSessionRecoveryWithheld = Boolean(
-    pulse?.fresh === true &&
+    temporalAuthorityReady &&
       !peakFailureConfirmed &&
       (input.sessionPeakPullbackPercent ?? 0) >=
         structuralRecoveryThresholdPercent &&
@@ -83,17 +115,20 @@ export function evaluateProxPublicAuthority(input: {
       input.activeSessionChangePercent <= -5,
   );
   const supportsContinuation = Boolean(
-    pulse?.fresh === true &&
+    temporalAuthorityReady &&
       !peakFailureConfirmed &&
       !deepSessionRecoveryWithheld &&
+      !severeSessionPeakDamage &&
       marketConfirmation !== null &&
       marketConfirmation >= 55 &&
-      (pulse.state === "expanding" || pulse.state === "stable"),
+      (pulse?.state === "expanding" || pulse?.state === "stable"),
   );
   const rankAdjustment = peakFailureConfirmed
     ? -Math.min(30, 15 + Math.round(observedPeakPullbackPercent))
     : deepSessionRecoveryWithheld
       ? PROX_PUBLIC_AUTHORITY_CONTRACT.maximumOrdinaryPenalty
+    : severeSessionPeakDamage
+      ? sessionPeakDamagePenalty
     : marketConfirmation === null
       ? input.activeMarketSession
         ? -8
@@ -117,7 +152,14 @@ export function evaluateProxPublicAuthority(input: {
     structuralRecoveryThresholdPercent,
     livePeakFailureEvidence,
     observedPeakPullbackPercent,
+    marketDataAligned: timestampAlignment.aligned,
+    marketDataSkewSeconds:
+      timestampAlignment.skewMs === null
+        ? null
+        : Math.round(timestampAlignment.skewMs / 1000),
     peakFailureConfirmed,
+    severeSessionPeakDamage,
+    sessionPeakDamagePenalty,
     deepSessionRecoveryWithheld,
     supportsContinuation,
     rankAdjustment,

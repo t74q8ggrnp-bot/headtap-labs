@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CryptoOpportunityFeed } from "@/lib/crypto/contracts";
 import CryptoProxPulse from "@/app/components/crypto/CryptoProxPulse";
+import HeroPriceChart from "@/app/components/market/HeroPriceChart";
 
 type CryptoMomentumPreviewProps = {
   feed: CryptoOpportunityFeed | null;
@@ -23,8 +24,13 @@ export default function CryptoMomentumPreview({
   loading,
   error,
 }: CryptoMomentumPreviewProps) {
-  const hero = feed?.hero ?? null;
+  const confirmedHero = feed?.hero ?? null;
+  const hero = confirmedHero ?? feed?.developingLeader ?? null;
+  const developing = !confirmedHero && Boolean(feed?.developingLeader);
   const contenders = feed?.contenders ?? [];
+  const radar = feed?.radar ?? [];
+  const radarSlots = contenders.length === 0 ? 5 : Math.max(0, 4 - contenders.length);
+  const visibleRadar = radar.slice(0, radarSlots);
 
   return (
     <section className="overflow-hidden rounded-[1.5rem] border border-cyan-400/15 bg-gradient-to-br from-cyan-500/[0.06] via-[#030708] to-violet-500/[0.035]">
@@ -36,7 +42,7 @@ export default function CryptoMomentumPreview({
               24/7 Crypto Momentum
             </p>
             <p className="mt-0.5 text-[9px] font-semibold text-zinc-600">
-              One HT score · centralized-exchange discovery · ProX confirmed
+              One HT score · centralized-exchange discovery · ProX live-tape
             </p>
           </div>
         </div>
@@ -71,7 +77,7 @@ export default function CryptoMomentumPreview({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[9px] font-black uppercase tracking-[0.17em] text-cyan-600">
-                  Crypto leader
+                  {developing ? "Strongest developing setup" : "Crypto leader"}
                 </p>
                 <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                   <p className="text-4xl font-black tracking-[-0.05em] text-white">
@@ -87,15 +93,29 @@ export default function CryptoMomentumPreview({
                 <p className="mt-2 text-xs font-bold leading-5 text-zinc-400">
                   {hero.summary}
                 </p>
+                {developing && (
+                  <span className="mt-2 inline-flex rounded-full border border-amber-400/20 bg-amber-500/[0.06] px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.1em] text-amber-300">
+                    Entry withheld
+                  </span>
+                )}
               </div>
               <div className="shrink-0 text-right">
                 <p className="font-mono text-4xl font-black text-cyan-300">
                   {hero.opportunityScore}
                 </p>
                 <p className="text-[7px] font-black uppercase tracking-[0.14em] text-cyan-700">
-                  HT Crypto
+                  {developing ? "Radar score" : "HT Crypto"}
                 </p>
               </div>
+            </div>
+            <div className="mt-4">
+              <HeroPriceChart
+                asset="crypto"
+                symbol={hero.symbol}
+                productId={hero.productId}
+                accent="cyan"
+                compact
+              />
             </div>
             <div className="mt-4 grid grid-cols-3 gap-2">
               {[
@@ -114,12 +134,14 @@ export default function CryptoMomentumPreview({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/8 bg-black/25 p-3">
+          <div className="flex flex-col rounded-2xl border border-white/8 bg-black/25 p-3">
             <div className="mb-2 flex items-center justify-between px-1">
               <p className="text-[9px] font-black uppercase tracking-[0.17em] text-zinc-600">
-                Other contenders
+                {contenders.length > 0 ? "Other contenders" : "Crypto momentum radar"}
               </p>
-              <p className="text-[8px] font-semibold text-zinc-700">Same atomic decision</p>
+              <p className="text-[8px] font-semibold text-zinc-700">
+                {contenders.length > 0 ? "Same atomic decision" : "Observation only"}
+              </p>
             </div>
             <div className="space-y-1.5">
               {contenders.map((opportunity, index) => (
@@ -146,12 +168,80 @@ export default function CryptoMomentumPreview({
                   </p>
                 </div>
               ))}
-              {contenders.length === 0 && (
-                <p className="rounded-xl border border-white/7 px-3 py-5 text-center text-[10px] font-semibold text-zinc-600">
-                  No backup contender clears the gates right now.
-                </p>
-              )}
             </div>
+
+            {visibleRadar.length > 0 && (
+              <div className={contenders.length > 0 ? "mt-3 border-t border-white/7 pt-3" : ""}>
+                {contenders.length > 0 && (
+                  <div className="mb-2 flex items-center justify-between px-1">
+                    <p className="text-[8px] font-black uppercase tracking-[0.16em] text-violet-400">
+                      Momentum radar
+                    </p>
+                    <p className="text-[7px] font-semibold uppercase tracking-[0.1em] text-zinc-700">
+                      Confirmation pending
+                    </p>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  {visibleRadar.map((opportunity) => (
+                    <div
+                      key={`radar-${opportunity.productId}`}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-violet-400/12 bg-violet-500/[0.025] px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <p className="font-black text-white">{opportunity.symbol}</p>
+                          <p className={`font-mono text-[9px] font-black ${opportunity.change24hPercent >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {opportunity.change24hPercent >= 0 ? "+" : ""}{opportunity.change24hPercent.toFixed(1)}%
+                          </p>
+                        </div>
+                        <p className="mt-0.5 truncate text-[8px] font-bold text-zinc-600">
+                          {opportunity.relativeVolume.toFixed(1)}× RVOL · {opportunity.stage}
+                        </p>
+                        <p className="mt-0.5 text-[7px] font-black uppercase tracking-[0.08em] text-violet-500">
+                          Watched · not confirmed
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-mono text-xl font-black text-violet-300">
+                          {opportunity.opportunityScore}
+                        </p>
+                        <p className="text-[6px] font-black uppercase tracking-[0.12em] text-zinc-700">
+                          Radar score
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {contenders.length === 0 && visibleRadar.length === 0 && feed && (
+              <div className="flex flex-1 flex-col justify-between rounded-xl border border-white/7 bg-white/[0.015] p-4">
+                <div>
+                  <p className="text-xs font-black text-zinc-300">No secondary setup is confirmed</p>
+                  <p className="mt-1 text-[9px] font-semibold leading-4 text-zinc-600">
+                    HT is preserving the confirmation gates instead of manufacturing a backup pick.
+                  </p>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {[
+                    ["Evaluated", `${feed.diagnostics.evaluatedProducts}`],
+                    ["Radar", `${feed.diagnostics.radarProducts}`],
+                    ["ProX coverage", `${feed.diagnostics.proxAvailableProducts}/${feed.diagnostics.proxEvaluatedProducts}`],
+                    ["Healthy venues", `${feed.diagnostics.shadowDiscoveryHealthyVenues}`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-white/6 bg-black/30 px-3 py-2.5">
+                      <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-700">{label}</p>
+                      <p className="mt-1 font-mono text-sm font-black text-cyan-300">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-4 text-[8px] font-semibold text-zinc-700">
+                  {feed.decisionFrame.fresh ? "Current backend cycle verified" : "Showing the last verified backend cycle"}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       ) : (

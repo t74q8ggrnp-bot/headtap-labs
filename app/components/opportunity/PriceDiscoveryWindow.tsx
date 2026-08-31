@@ -2,6 +2,7 @@ import type { ExplosionAssessment } from "@/lib/canonical-opportunity";
 
 type PriceDiscoveryWindowProps = {
   assessment: ExplosionAssessment;
+  compact?: boolean;
 };
 
 const pctRange = (range: { min: number; max: number }) =>
@@ -9,9 +10,85 @@ const pctRange = (range: { min: number; max: number }) =>
 
 export default function PriceDiscoveryWindow({
   assessment,
+  compact = false,
 }: PriceDiscoveryWindowProps) {
   const scenarios = assessment.scenarioBands;
-  if (!scenarios) return null;
+  if (!scenarios) {
+    if (!compact) return null;
+    return (
+      <div className="rounded-xl border border-violet-400/20 bg-violet-500/[0.04] p-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-400">
+            Price Discovery
+          </p>
+          <p className="font-mono text-sm font-black text-violet-300">
+            {assessment.score}/100
+          </p>
+        </div>
+        <p className="mt-2 text-[10px] font-semibold leading-4 text-zinc-500">
+          {assessment.summary}
+        </p>
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-violet-400/20 bg-violet-500/[0.035]">
+        <div className="flex items-center justify-between gap-3 border-b border-white/6 px-3.5 py-2.5">
+          <div className="flex items-center gap-2">
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-400">
+              Price Discovery
+            </p>
+            <span className="rounded-full border border-orange-400/20 px-2 py-0.5 text-[7px] font-black uppercase text-orange-300">
+              Scenario-based
+            </span>
+          </div>
+          <p className="font-mono text-sm font-black text-violet-300">
+            {assessment.score}/100
+          </p>
+        </div>
+
+        <div className="grid grid-cols-3 divide-x divide-white/6">
+          <CompactValue
+            label="Expansion"
+            value={pctRange(scenarios.expansion)}
+            tone="text-green-400"
+          />
+          <CompactValue
+            label="Risk"
+            value={
+              scenarios.structuralRisk !== null
+                ? `-${scenarios.structuralRisk.toFixed(1)}%`
+                : "Unmeasured"
+            }
+            tone={scenarios.structuralRisk !== null ? "text-red-400" : "text-zinc-500"}
+          />
+          <CompactValue
+            label="Scenario R/R"
+            value={
+              scenarios.expansionRr !== null
+                ? `${scenarios.expansionRr.toFixed(1)}:1`
+                : "Unmeasured"
+            }
+            tone={scenarios.expansionRr !== null ? "text-violet-400" : "text-zinc-500"}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-white/6 px-3.5 py-2.5">
+          <p className="text-[8px] font-bold text-zinc-600">
+            Base <span className="font-mono text-zinc-300">{pctRange(scenarios.base)}</span>
+          </p>
+          <p className="text-[8px] font-bold text-zinc-600">
+            Tail <span className="font-mono text-orange-300">{pctRange(scenarios.tail)}</span>
+          </p>
+          <p className="ml-auto text-[7px] font-semibold italic text-zinc-700">
+            Conditional ranges, not targets
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-violet-400/20 bg-black/60">
@@ -83,6 +160,27 @@ export default function PriceDiscoveryWindow({
           conditional scenario, not a promised target.
         </p>
       </div>
+    </div>
+  );
+}
+
+function CompactValue({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+}) {
+  return (
+    <div className="min-w-0 px-2.5 py-3">
+      <p className="truncate text-[7px] font-black uppercase tracking-[0.1em] text-zinc-600">
+        {label}
+      </p>
+      <p className={`mt-1.5 font-mono text-xs font-black leading-tight ${tone}`}>
+        {value}
+      </p>
     </div>
   );
 }

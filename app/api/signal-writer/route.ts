@@ -9,6 +9,7 @@ import {
   resolveSnapshotPrice,
   resolveSnapshotSessionHigh,
   resolveSnapshotSessionOpen,
+  resolveSnapshotTimestampMs,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
 import { getErrorMessage } from "@/lib/error-message";
@@ -16,13 +17,14 @@ import { hydrateSnapshotLeaders } from "@/lib/intraday-snapshot-hydration";
 import { loadSecurityMetadata } from "@/lib/security-metadata";
 import { createClient } from "@supabase/supabase-js";
 import type { TopMoverDisposition } from "@/lib/top-mover-disposition";
+import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const ENGINE_VERSION = "signal-writer-v10-disposition-receipts";
+const ENGINE_VERSION = "signal-writer-v12-massive-realtime";
 
 const RECLAIM_MIN_CHANGE_FROM_OPEN = 5;
 const RECLAIM_MIN_RVOL = 2;
@@ -35,6 +37,7 @@ type Candidate = {
   ticker: string; price: number; changePercent: number; rvol: number; prevVol: number;
   sessionOpenPrice: number | null; changeFromOpenPercent: number | null;
   sessionHighPrice: number | null; pullbackFromSessionHighPercent: number | null;
+  marketDataAsOf: string | null;
   scanSession: string;
   securityType: string | null; retrievedForSm: boolean; retrievedForBtc: boolean;
   retrievedForReclaim: boolean;
@@ -107,6 +110,7 @@ function computeSignal(
   pool: "spot_momentum" | "before_the_crowd",
   includeReclaimColumns: boolean,
   includePeakRetentionColumns: boolean,
+  includeMarketTimestampColumn: boolean,
 ) {
   const move = getFusedMomentumMove(candidate);
   const volumeScore = candidate.rvol > 0 ? clamp(candidate.rvol * 10) : 0;
@@ -184,8 +188,28 @@ function computeSignal(
             candidate.pullbackFromSessionHighPercent,
         }
       : {}),
+    ...(includeMarketTimestampColumn
+      ? { market_data_as_of: candidate.marketDataAsOf }
+      : {}),
     scanned_at: new Date().toISOString(), _oppScore: oppScore, _pool: pool,
   };
+}
+
+async function supportsMarketTimestampColumn(
+  supabase: ReturnType<typeof getSupabase>,
+) {
+  const { error } = await supabase
+    .from("ht_signal_run_rows")
+    .select("market_data_as_of")
+    .limit(1);
+  if (error) {
+    console.warn(
+      "[signal-writer] market timestamp migration is not active; source-time authority remains unavailable:",
+      error.message,
+    );
+    return false;
+  }
+  return true;
 }
 
 async function supportsPeakRetentionColumns(
@@ -246,6 +270,16 @@ export async function GET(req: Request) {
   if (!isAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!POLYGON_KEY) return NextResponse.json({ error: "Missing POLYGON_API_KEY" }, { status: 500 });
 
+  const marketSession = getEasternSession();
+  if (marketSession.name === "closed") {
+    return NextResponse.json({
+      success: true,
+      skipped: "market_closed",
+      engineVersion: ENGINE_VERSION,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   const supabase = getSupabase();
   const startedMs = Date.now();
   const { data: run, error: runError } = await supabase.from("ht_scan_runs")
@@ -254,10 +288,13 @@ export async function GET(req: Request) {
   if (runError || !run) return NextResponse.json({ error: "Failed to create scan run", detail: runError?.message }, { status: 500 });
 
   try {
-    const catalystMap = await readActiveCatalysts(supabase);
+    const [catalystMap, entitlement] = await Promise.all([
+      readActiveCatalysts(supabase),
+      probeMassiveRealtimeEntitlement(),
+    ]);
     const reclaimSchemaReady = await supportsIntradayReclaimColumns(supabase);
     const peakRetentionSchemaReady = await supportsPeakRetentionColumns(supabase);
-    const marketSession = getEasternSession();
+    const marketTimestampSchemaReady = await supportsMarketTimestampColumn(supabase);
     const response = await fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?include_otc=false&apiKey=${POLYGON_KEY}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`Polygon snapshot failed: ${response.status}`);
     const payload = (await response.json()) as { tickers?: PolygonSnapshotRow[] };
@@ -313,6 +350,12 @@ export async function GET(req: Request) {
       const ticker = String(row?.ticker ?? "").toUpperCase();
       if (!ticker) continue;
       const hydrated = hydratedLeaders.get(ticker);
+      const snapshotTimestampMs = resolveSnapshotTimestampMs(row);
+      const marketDataAsOf =
+        hydrated?.latestBarAt ??
+        (snapshotTimestampMs
+          ? new Date(snapshotTimestampMs).toISOString()
+          : null);
       const price = hydrated?.price ?? resolveSnapshotPrice(row);
       const changePercent = resolveSnapshotChangePercent(row, price);
       const sessionOpenPrice =
@@ -393,6 +436,7 @@ export async function GET(req: Request) {
         sessionOpenPrice: sessionOpenPrice > 0 ? sessionOpenPrice : null,
         sessionHighPrice,
         pullbackFromSessionHighPercent,
+        marketDataAsOf,
         changeFromOpenPercent, scanSession: marketSession.name,
         securityType: null,
         retrievedForSm, retrievedForBtc, retrievedForReclaim,
@@ -448,6 +492,7 @@ export async function GET(req: Request) {
         candidate.retrievedForSm ? "spot_momentum" : "before_the_crowd",
         reclaimSchemaReady,
         peakRetentionSchemaReady,
+        marketTimestampSchemaReady,
       ),
       scan_run_id: run.id,
     }));
@@ -477,7 +522,7 @@ export async function GET(req: Request) {
     }
 
     const compatibility = [...rows].sort((a, b) => b._oppScore - a._oppScore).slice(0, 100)
-      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, session_open_price, change_from_open_percent, scan_session, retrieved_for_reclaim, session_high_price, pullback_from_session_high_percent, _oppScore, _pool, ...row }) => {
+      .map(({ scan_run_id, security_type, retrieved_for_sm, retrieved_for_btc, retrieved_for_catalyst, session_open_price, change_from_open_percent, scan_session, retrieved_for_reclaim, session_high_price, pullback_from_session_high_percent, market_data_as_of, _oppScore, _pool, ...row }) => {
         void scan_run_id;
         void security_type;
         void retrieved_for_sm;
@@ -489,6 +534,7 @@ export async function GET(req: Request) {
         void retrieved_for_reclaim;
         void session_high_price;
         void pullback_from_session_high_percent;
+        void market_data_as_of;
         void _oppScore;
         void _pool;
         return row;
@@ -508,6 +554,7 @@ export async function GET(req: Request) {
         retrievedForCatalyst: rows.filter((r) => r.retrieved_for_catalyst).length,
         reclaimSchemaReady,
         peakRetentionSchemaReady,
+        marketTimestampSchemaReady,
         securityMetadataCacheHits: metadata.cacheHits,
         securityMetadataFetched: metadata.fetched,
         securityMetadataFetchFailures: metadata.fetchFailures,
@@ -516,6 +563,10 @@ export async function GET(req: Request) {
         liveLiquidityOverrides,
         hydratedCandidates,
         hydrationCandidatesRequested: hydratedLeaders.size,
+        marketDataProvider: "massive_polygon",
+        marketDataMode: entitlement.dataMode,
+        realtimeLastTrade: entitlement.lastTrade,
+        realtimeLastQuote: entitlement.lastQuote,
         topMoverDispositions: [...topMoverDispositions.values()],
       },
     }).eq("id", run.id);

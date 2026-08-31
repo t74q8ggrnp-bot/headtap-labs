@@ -8,6 +8,7 @@ import OpportunityMetrics from "./OpportunityMetrics";
 import OpportunityWindow from "./OpportunityWindow";
 import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
 import ProxPulse from "./ProxPulse";
+import HeroPriceChart from "@/app/components/market/HeroPriceChart";
 
 type MobileSpotMomentumCardProps = {
   opportunity: Opportunity;
@@ -74,6 +75,10 @@ export default function MobileSpotMomentumCard({
 
       <div className="border-b border-white/8 px-5 py-4">
         <p className="text-sm font-bold leading-5 text-zinc-200">{opportunity.whyItMatters}</p>
+      </div>
+
+      <div className="border-b border-white/8 px-4 py-4">
+        <HeroPriceChart asset="stock" symbol={opportunity.ticker} accent="violet" compact />
       </div>
 
       {framework && <OpportunityWindow framework={framework} compact />}

@@ -20,6 +20,11 @@ import {
   findOpportunityInDecisionFrame,
   getRollingCanonicalDecisionFrame,
 } from "@/lib/canonical-decision-frame";
+import {
+  describeTopMoverDisposition,
+  findTopMoverDisposition,
+  type TopMoverDisposition,
+} from "@/lib/top-mover-disposition";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -38,10 +43,14 @@ function getSupabase() {
 async function getCanonicalSignalRow(
   supabase: ReturnType<typeof getSupabase>,
   ticker: string,
-): Promise<{ row: SignalRow | null; sourceRunId: string | null }> {
+): Promise<{
+  row: SignalRow | null;
+  sourceRunId: string | null;
+  disposition: TopMoverDisposition | null;
+}> {
   const { data: run, error: runError } = await supabase
     .from("ht_scan_runs")
-    .select("id")
+    .select("id,candidate_counts")
     .eq("run_type", "signal_writer_v3")
     .eq("status", "success")
     .eq("promoted", true)
@@ -49,7 +58,7 @@ async function getCanonicalSignalRow(
     .limit(1)
     .maybeSingle();
   if (runError) throw runError;
-  if (!run?.id) return { row: null, sourceRunId: null };
+  if (!run?.id) return { row: null, sourceRunId: null, disposition: null };
 
   const { data: runRow, error: runRowError } = await supabase
     .from("ht_signal_run_rows")
@@ -61,6 +70,11 @@ async function getCanonicalSignalRow(
   return {
     row: (runRow as SignalRow | null) ?? null,
     sourceRunId: String(run.id),
+    disposition: findTopMoverDisposition(
+      (run.candidate_counts as { topMoverDispositions?: unknown } | null)
+        ?.topMoverDispositions,
+      ticker,
+    ),
   };
 }
 
@@ -106,16 +120,58 @@ export async function GET(req: Request) {
       });
     }
 
-    const { row, sourceRunId } = await getCanonicalSignalRow(
+    const { row, sourceRunId, disposition } = await getCanonicalSignalRow(
       supabase,
       ticker,
     );
     if (!row || !sourceRunId) {
+      const dispositionSummary = disposition
+        ? describeTopMoverDisposition(disposition)
+        : null;
+      if (mode === "explain" && disposition) {
+        return NextResponse.json({
+          ticker,
+          explanation: {
+            summary: dispositionSummary,
+            whatChanged:
+              "The ticker was observed by the market-mover audit, but it did not produce a promoted canonical row.",
+            riskNote: dispositionSummary,
+            stage:
+              disposition.status === "excluded"
+                ? "Excluded Before Canonical Evaluation"
+                : "Canonical Pipeline Inconsistency",
+            confidence: "Disposition receipt",
+            signals: [
+              `Market move +${disposition.changePercent.toFixed(1)}%`,
+              disposition.reason,
+            ],
+            eligibility: false,
+            rejectionReasons: [dispositionSummary],
+            dataQualityWarnings:
+              disposition.status === "canonical_candidate"
+                ? [
+                    "The scan receipt says canonical candidate, but the promoted run row is missing.",
+                  ]
+                : [],
+            strategy: "spot_momentum",
+            tier: "scanner",
+            explosionAssessment: null,
+            proxIntelligence: null,
+            verdict: dispositionSummary,
+          },
+          disposition,
+          engineVersion: CANONICAL_OPPORTUNITY_VERSION,
+          sourceTable: "ht_scan_runs.candidate_counts.topMoverDispositions",
+          sourceRunId,
+        });
+      }
       return NextResponse.json({
         ticker,
-        message:
+        message: dispositionSummary ??
           "No data is available for this ticker in the latest promoted canonical signal run.",
+        disposition,
         opportunityScore: 0,
+        sourceRunId,
         engineVersion: CANONICAL_OPPORTUNITY_VERSION,
       });
     }

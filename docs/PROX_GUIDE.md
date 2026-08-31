@@ -54,7 +54,7 @@ HT Labs currently contains two deliberately separate ProX systems. Their
 names and authority must not be conflated:
 
 - **ProX Market Pulse** is the established, bounded live-tape input consumed
-  by the canonical evaluator. `prox-public-market-authority-v2` may apply a
+  by the canonical evaluator. `prox-public-market-authority-v4-realtime-source-authority` may apply a
   bounded rank adjustment, confirm a post-peak eligibility failure, or
   withhold a deep-session recovery until reclaim. It never produces a second
   public score, discovers the canonical universe, or receives execution
@@ -293,6 +293,13 @@ that never graduated. Corporate-action distortions are quarantined. A model or
 weight version is frozen while it is being evaluated; ProX does not rewrite
 its own production rules invisibly during a live session.
 
+Five-minute decision frames remain append-only audit evidence, but they are
+not independent performance samples. Shadow scorecards use the first decision
+for each ticker, trading date, market session, and disposition as the episode
+representative. This prevents one persistent ticker from becoming dozens of
+apparent wins or losses while preserving every underlying decision frame for
+inspection.
+
 ## Canonical comparison
 
 Only after both boards are independently complete may the system compare:
@@ -353,10 +360,45 @@ canonical, position, order, or execution authority.
 
 Shadow-board outcomes are implemented by
 `app/api/prox-shadow-board-outcomes/route.ts` under the versioned
-`prox-shadow-board-outcomes-v2-historical-bars` contract. Migrations
+`prox-shadow-board-outcomes-v3-due-first-market-sessions` contract. Migrations
 `0020_prox_shadow_board_outcomes.sql` and
 `0021_prox_shadow_outcome_resolution.sql` create the complete-denominator
 ledger and its honest resolution states. Each due horizon is measured from a
 verified historical minute bar near that horizon's own timestamp; it may be
 pending or terminally unavailable, but missing evidence is never converted
-into a zero return. Calibration and scorecards consume measured outcomes only.
+into a zero return. Migration `0025_prox_shadow_episode_scorecard.sql` defines
+the de-correlated episode representatives used by scorecards. Calibration and
+scorecards consume measured outcomes only.
+
+Outcome collection selects the oldest due horizons first. A horizon that
+lands outside the US equity extended-hours session is terminally unavailable,
+not a zero return and not a seven-day pending record. Missing in-session bars
+remain pending so a halt or provider gap cannot be silently rewritten.
+
+## Provider-time authority
+
+`scanned_at` and `computed_at` describe HT Labs processing time. They must
+never prove that a market fact is fresh. Migration
+`0026_market_data_timestamp_authority.sql` adds `market_data_as_of` to the
+canonical run row and `market_as_of` to ProX market features. Those provider
+timestamps govern source freshness.
+
+Massive Advanced is the verified stock transport for this contract. During
+U.S. extended-hours trading, source evidence must be no more than five minutes
+old and canonical/ProX provider timestamps must align within two minutes.
+Outside the 4:00 a.m.–8:00 p.m. Eastern equity session, the last verified
+session is retained rather than relabeled as a continuously updating trade.
+
+The bounded public ProX pulse may affect canonical ranking only when:
+
+- both the canonical decision price and ProX feature carry usable provider
+  timestamps;
+- the two provider timestamps are within the versioned alignment tolerance;
+- the source facts are within the active-session freshness limit; and
+- the ProX processing record is also current.
+
+Under `prox-public-market-authority-v4-realtime-source-authority`, a severe
+full-session pullback removes continuation support and applies a bounded rank
+penalty even if a short rolling window is bouncing. Distance below the high
+alone is not a hard failure. Eligibility is blocked only by confirmed
+deterioration or the documented negative-session reclaim rule.

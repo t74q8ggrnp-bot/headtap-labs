@@ -5,7 +5,6 @@
 // /api/opportunities scoring (no local scoring calls in this section), so
 // this is a pure JSX/props extraction with no behavior change.
 import { motion } from "framer-motion";
-import MiniStockChart from "@/app/components/MiniStockChart";
 import {
   getOpportunityPresentation,
   opportunityToStock,
@@ -198,14 +197,6 @@ export default function ScannerGrid({
                     style={{ width: `${attention}%` }}
                   />
                 </div>
-              </div>
-
-              <div className="mt-5 rounded-2xl border border-white/10 bg-gradient-to-r from-orange-500/5 to-orange-900/5 p-3">
-                <MiniStockChart
-                  symbol={opportunity.ticker}
-                  price={opportunity.price}
-                  change={opportunity.change}
-                />
               </div>
 
               <div className="mt-4 rounded-2xl border border-green-500/15 bg-green-500/5 p-4">
