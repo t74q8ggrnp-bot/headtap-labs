@@ -42,7 +42,10 @@ import {
   assertNoForbiddenProxInputs,
 } from "@/lib/prox/edge-score";
 import { PROX_SHADOW_BOARD_VERSION } from "@/lib/prox/shadow-board";
-import { PROX_OUTCOME_UNAVAILABLE_AFTER_MS } from "@/lib/prox/shadow-outcome-resolution";
+import {
+  PROX_OUTCOME_UNAVAILABLE_AFTER_MS,
+  getProxOutcomeTerminalCutoff,
+} from "@/lib/prox/shadow-outcome-resolution";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
 import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 import {
@@ -1174,9 +1177,21 @@ export async function GET() {
       const retryPendingCutoff = new Date(
         Date.now() - SHADOW_BOARD_OUTCOME_GRACE_MINUTES * 60_000,
       ).toISOString();
-      const terminalOverdueCutoff = new Date(
-        Date.now() - PROX_OUTCOME_UNAVAILABLE_AFTER_MS,
-      ).toISOString();
+      // The outcome worker resolves horizons against the immutable `observed_at`
+      // captured at the start of its run. Health must audit that same atomic
+      // coverage frame. Using the later browser-request time creates a race in
+      // which rows cross the seven-day boundary between scheduled runs and are
+      // reported as failures before the worker has been allowed to process them.
+      // Worker freshness remains a separate strict requirement below.
+      const terminalCoverageAsOf = outcomeRun.observed_at;
+      const terminalOverdueCutoff = getProxOutcomeTerminalCutoff(
+        terminalCoverageAsOf,
+      );
+      if (!terminalOverdueCutoff) {
+        throw new Error(
+          "Shadow-board outcome run has an invalid observation timestamp.",
+        );
+      }
       const { count: retryPendingOutcomeCount, error: retryPendingError } =
         await supabase
           .from("prox_shadow_board_member_outcome_horizons")
@@ -1237,6 +1252,8 @@ export async function GET() {
           unavailableOutcomeCount: outcomeRun.unavailable_outcome_count,
           retryPendingOutcomeCount: retryPendingOutcomeCount ?? 0,
           terminalOverdueOutcomeCount: terminalOverdueOutcomeCount ?? 0,
+          terminalCoverageAsOf,
+          terminalOverdueCutoff,
           terminalRetryWindowDays:
             PROX_OUTCOME_UNAVAILABLE_AFTER_MS / (24 * 60 * 60_000),
           overdueOutcomeCount: terminalOverdueOutcomeCount ?? 0,

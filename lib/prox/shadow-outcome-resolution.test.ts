@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's built-in TypeScript test runner requires the source
 // extension while the production bundler resolves the same module extensionless.
-import { findProxOutcomeBarAtTarget, isUsExtendedMarketTimestamp, resolveProxOutcomeHorizon, summarizeProxOutcomePath, type ProxOutcomeBar } from "./shadow-outcome-resolution.ts";
+import { findProxOutcomeBarAtTarget, getProxOutcomeTerminalCutoff, isUsExtendedMarketTimestamp, resolveProxOutcomeHorizon, summarizeProxOutcomePath, type ProxOutcomeBar } from "./shadow-outcome-resolution.ts";
 
 const at = (minute: number) => Date.parse(`2026-08-21T13:${String(minute).padStart(2, "0")}:00.000Z`);
 
@@ -84,4 +84,12 @@ test("keeps a missing in-session bar pending for provider or halt recovery", () 
     now: new Date("2026-08-21T15:00:00.000Z"),
   });
   assert.equal(resolved.state, "pending");
+});
+
+test("anchors terminal health coverage to the worker observation timestamp", () => {
+  assert.equal(
+    getProxOutcomeTerminalCutoff("2026-08-31T23:00:00.000Z"),
+    "2026-08-24T23:00:00.000Z",
+  );
+  assert.equal(getProxOutcomeTerminalCutoff("not-a-date"), null);
 });

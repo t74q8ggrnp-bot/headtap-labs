@@ -3,6 +3,16 @@ import type { ProxOutcomeHorizon } from "@/lib/prox/outcome-memory";
 export const PROX_OUTCOME_BAR_TOLERANCE_MS = 10 * 60_000;
 export const PROX_OUTCOME_UNAVAILABLE_AFTER_MS = 7 * 24 * 60 * 60_000;
 
+export function getProxOutcomeTerminalCutoff(
+  coverageAsOf: string | number | Date,
+) {
+  const asOf =
+    coverageAsOf instanceof Date ? coverageAsOf : new Date(coverageAsOf);
+  const asOfMs = asOf.getTime();
+  if (!Number.isFinite(asOfMs)) return null;
+  return new Date(asOfMs - PROX_OUTCOME_UNAVAILABLE_AFTER_MS).toISOString();
+}
+
 export function isUsExtendedMarketTimestamp(value: string | number | Date) {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) return false;
