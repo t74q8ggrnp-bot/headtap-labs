@@ -15,6 +15,7 @@ import type {
   MarketChartAsset,
   MarketChartResponse,
 } from "@/lib/market-chart";
+import { buildUniformMarketTimeSlots } from "@/lib/market-chart";
 import { HT_REFRESH_RATES_MS } from "@/lib/runtime-capabilities";
 
 type HeroPriceChartProps = {
@@ -27,6 +28,16 @@ type HeroPriceChartProps = {
 };
 
 type ChartMode = "graph" | "candles";
+
+type SeriesDataWriter = {
+  setData: (slots: ReturnType<typeof buildUniformMarketTimeSlots>) => void;
+};
+
+type SavedViewport = {
+  key: string;
+  pointCount: number;
+  range: { from: number; to: number };
+};
 
 const REQUEST_CACHE_MS = 2_000;
 const STOCK_CHART_REFRESH_MS = HT_REFRESH_RATES_MS.selectedStockCharts;
@@ -124,6 +135,11 @@ export default function HeroPriceChart({
   height,
 }: HeroPriceChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null);
+  const chartApiRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const priceWriterRef = useRef<SeriesDataWriter | null>(null);
+  const volumeWriterRef = useRef<SeriesDataWriter | null>(null);
+  const savedViewportRef = useRef<SavedViewport | null>(null);
+  const slotCountRef = useRef(0);
   const [result, setResult] = useState<{
     url: string;
     data: MarketChartResponse | null;
@@ -141,6 +157,16 @@ export default function HeroPriceChart({
   }, [asset, productId, symbol]);
   const data = result?.url === url ? result.data : null;
   const failed = result?.url === url ? result.failed : false;
+  const dataReady = data !== null;
+  const resolvedHeight = height ?? (compact ? 150 : 185);
+  const viewportKey = `${url}:${compact ? "compact" : "full"}:${resolvedHeight}`;
+  const slots = useMemo(
+    () => buildUniformMarketTimeSlots(
+      data?.bars ?? [],
+      asset === "stock" ? 60 : 300,
+    ),
+    [asset, data],
+  );
 
   useEffect(() => {
     let active = true;
@@ -165,7 +191,7 @@ export default function HeroPriceChart({
   }, [asset, url]);
 
   useEffect(() => {
-    if (!chartRef.current || !data) return;
+    if (!chartRef.current || !dataReady) return;
 
     const container = chartRef.current;
     const locale = navigator.language || "en-US";
@@ -176,7 +202,7 @@ export default function HeroPriceChart({
     });
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: height ?? (compact ? 150 : 185),
+      height: resolvedHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#71717a",
@@ -237,15 +263,19 @@ export default function HeroPriceChart({
         priceLineColor: `${palette.line}66`,
         lastValueVisible: true,
       });
-      priceSeries.setData(
-        data.bars.map((bar) => ({
-          time: bar.time as UTCTimestamp,
-          open: bar.open,
-          high: bar.high,
-          low: bar.low,
-          close: bar.close,
-        })),
-      );
+      priceWriterRef.current = {
+        setData: (nextSlots) => priceSeries.setData(
+          nextSlots.map(({ time, bar }) => bar
+            ? {
+                time: time as UTCTimestamp,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+              }
+            : { time: time as UTCTimestamp }),
+        ),
+      };
     } else {
       const priceSeries = chart.addSeries(AreaSeries, {
         lineColor: palette.line,
@@ -256,12 +286,13 @@ export default function HeroPriceChart({
         priceLineColor: `${palette.line}66`,
         lastValueVisible: true,
       });
-      priceSeries.setData(
-        data.bars.map((bar) => ({
-          time: bar.time as UTCTimestamp,
-          value: bar.close,
-        })),
-      );
+      priceWriterRef.current = {
+        setData: (nextSlots) => priceSeries.setData(
+          nextSlots.map(({ time, bar }) => bar
+            ? { time: time as UTCTimestamp, value: bar.close }
+            : { time: time as UTCTimestamp }),
+        ),
+      };
     }
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -273,20 +304,30 @@ export default function HeroPriceChart({
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.78, bottom: 0 },
     });
-    volumeSeries.setData(
-      data.bars.map((bar) => ({
-        time: bar.time as UTCTimestamp,
-        value: bar.volume,
-        color: bar.close >= bar.open
-          ? "rgba(34, 197, 94, 0.28)"
-          : "rgba(239, 68, 68, 0.24)",
-      })),
-    );
-    const visibleBars = compact ? 90 : 180;
-    chart.timeScale().setVisibleLogicalRange({
-      from: Math.max(0, data.bars.length - visibleBars),
-      to: data.bars.length + 2,
-    });
+    volumeWriterRef.current = {
+      setData: (nextSlots) => volumeSeries.setData(
+        nextSlots.map(({ time, bar }) => bar
+          ? {
+              time: time as UTCTimestamp,
+              value: bar.volume,
+              color: bar.close >= bar.open
+                ? "rgba(34, 197, 94, 0.28)"
+                : "rgba(239, 68, 68, 0.24)",
+            }
+          : { time: time as UTCTimestamp }),
+      ),
+    };
+    chartApiRef.current = chart;
+
+    const rememberViewport = (range: { from: number; to: number } | null) => {
+      if (!range) return;
+      savedViewportRef.current = {
+        key: viewportKey,
+        pointCount: slotCountRef.current,
+        range,
+      };
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(rememberViewport);
 
     const resizeObserver = new ResizeObserver(() => {
       chart.applyOptions({ width: container.clientWidth });
@@ -294,12 +335,57 @@ export default function HeroPriceChart({
     resizeObserver.observe(container);
 
     return () => {
+      const range = chart.timeScale().getVisibleLogicalRange();
+      rememberViewport(range);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(rememberViewport);
       resizeObserver.disconnect();
+      chartApiRef.current = null;
+      priceWriterRef.current = null;
+      volumeWriterRef.current = null;
       chart.remove();
     };
-  }, [chartMode, compact, data, height, palette, timeZone]);
+  }, [chartMode, compact, dataReady, palette, resolvedHeight, timeZone, viewportKey]);
 
-  const resolvedHeight = height ?? (compact ? 150 : 185);
+  useEffect(() => {
+    const chart = chartApiRef.current;
+    const priceWriter = priceWriterRef.current;
+    const volumeWriter = volumeWriterRef.current;
+    if (!chart || !priceWriter || !volumeWriter || slots.length === 0) return;
+
+    const previous = savedViewportRef.current?.key === viewportKey
+      ? savedViewportRef.current
+      : null;
+    const previousRange = chart.timeScale().getVisibleLogicalRange() ?? previous?.range;
+    const previousPointCount = previous?.pointCount ?? 0;
+    const wasFollowingLatest = !previousRange || previousPointCount === 0 ||
+      previousRange.to >= previousPointCount - 3;
+
+    slotCountRef.current = slots.length;
+    priceWriter.setData(slots);
+    volumeWriter.setData(slots);
+
+    if (previousRange && !wasFollowingLatest) {
+      chart.timeScale().setVisibleLogicalRange(previousRange);
+    } else {
+      const visibleMinutes = compact ? 90 : 180;
+      const intervalMinutes = asset === "stock" ? 1 : 5;
+      const visiblePoints = Math.max(1, Math.floor(visibleMinutes / intervalMinutes));
+      const to = slots.length + 2;
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, to - visiblePoints),
+        to,
+      });
+    }
+
+    const range = chart.timeScale().getVisibleLogicalRange();
+    if (range) {
+      savedViewportRef.current = {
+        key: viewportKey,
+        pointCount: slots.length,
+        range,
+      };
+    }
+  }, [asset, chartMode, compact, slots, viewportKey]);
 
   const latestTime = data
     ? new Intl.DateTimeFormat("en-US", {

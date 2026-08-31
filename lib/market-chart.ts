@@ -30,6 +30,11 @@ export type MarketChartResponse = {
   bars: MarketChartBar[];
 };
 
+export type MarketChartTimeSlot = {
+  time: number;
+  bar: MarketChartBar | null;
+};
+
 type MarketBarInput = {
   time?: unknown;
   open?: unknown;
@@ -139,6 +144,38 @@ export function mergeMarketBars(
   const merged = new Map(base.map((bar) => [bar.time, bar]));
   for (const bar of replacements) merged.set(bar.time, bar);
   return [...merged.values()].sort((left, right) => left.time - right.time);
+}
+
+export function buildUniformMarketTimeSlots(
+  bars: MarketChartBar[],
+  bucketSeconds: number,
+): MarketChartTimeSlot[] {
+  if (bars.length === 0 || !Number.isFinite(bucketSeconds) || bucketSeconds <= 0) {
+    return [];
+  }
+
+  const sorted = [...bars].sort((left, right) => left.time - right.time);
+  const firstTime = Math.floor(sorted[0].time / bucketSeconds) * bucketSeconds;
+  const lastTime = Math.floor(sorted.at(-1)!.time / bucketSeconds) * bucketSeconds;
+  const slotCount = Math.floor((lastTime - firstTime) / bucketSeconds) + 1;
+
+  // A stock session is at most 960 one-minute slots and the crypto window is
+  // 288 five-minute slots. Guard against malformed provider spans before
+  // allocating an unexpectedly large client-side axis.
+  if (!Number.isSafeInteger(slotCount) || slotCount <= 0 || slotCount > 2_000) {
+    return sorted.map((bar) => ({ time: bar.time, bar }));
+  }
+
+  const barsByTime = new Map<number, MarketChartBar>();
+  for (const bar of sorted) {
+    const time = Math.floor(bar.time / bucketSeconds) * bucketSeconds;
+    barsByTime.set(time, time === bar.time ? bar : { ...bar, time });
+  }
+
+  return Array.from({ length: slotCount }, (_, index) => {
+    const time = firstTime + index * bucketSeconds;
+    return { time, bar: barsByTime.get(time) ?? null };
+  });
 }
 
 export function summarizeMarketBars(

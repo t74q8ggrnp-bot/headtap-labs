@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
-import { easternDateString, mergeMarketBars, normalizeMarketBars, rollupMarketBars, selectLatestEasternSessionBars, summarizeMarketBars } from "./market-chart.ts";
+import { buildUniformMarketTimeSlots, easternDateString, mergeMarketBars, normalizeMarketBars, rollupMarketBars, selectLatestEasternSessionBars, summarizeMarketBars } from "./market-chart.ts";
 
 test("normalizes, validates, orders, and deduplicates provider bars", () => {
   const bars = normalizeMarketBars([
@@ -63,4 +63,22 @@ test("real-time rolled candles replace the same minute from the minute feed", ()
   assert.equal(merged.length, 1);
   assert.equal(merged[0].close, 10.4);
   assert.equal(merged[0].volume, 100);
+});
+
+test("builds an honest uniform time axis without fabricating missing candles", () => {
+  const bars = normalizeMarketBars([
+    { time: 1_700_000_000, open: 10, high: 11, low: 9, close: 10.5, volume: 20 },
+    { time: 1_700_000_180, open: 12, high: 13, low: 11, close: 12.5, volume: 30 },
+  ]);
+  const slots = buildUniformMarketTimeSlots(bars, 60);
+
+  assert.deepEqual(slots.map((slot) => slot.time), [
+    1_699_999_980,
+    1_700_000_040,
+    1_700_000_100,
+    1_700_000_160,
+  ]);
+  assert.equal(slots.filter((slot) => slot.bar !== null).length, 2);
+  assert.equal(slots[1].bar, null);
+  assert.equal(slots[2].bar, null);
 });
