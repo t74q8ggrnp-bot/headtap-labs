@@ -5,6 +5,7 @@ import {
   type OpportunityFeedRequestType,
 } from "@/lib/canonical-opportunity-feed";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
+import { checkApiRateLimit } from "@/lib/api-rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -22,6 +23,21 @@ const OPPORTUNITY_CACHE_HEADERS = {
 };
 
 export async function GET(req: Request) {
+  const rateLimit = checkApiRateLimit(req, {
+    namespace: "public-opportunities",
+    limit: 180,
+    windowMs: 60_000,
+  });
+  const responseHeaders = {
+    ...OPPORTUNITY_CACHE_HEADERS,
+    ...rateLimit.headers,
+  };
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many opportunity requests. Please retry shortly.", opportunities: [] },
+      { status: 429, headers: responseHeaders },
+    );
+  }
   const url = new URL(req.url);
   const requestedType = (url.searchParams.get("type") ??
     "all") as OpportunityFeedRequestType;
@@ -56,7 +72,7 @@ export async function GET(req: Request) {
       delete responsePayload.continuationCandidates;
     }
     return NextResponse.json(responsePayload, {
-      headers: OPPORTUNITY_CACHE_HEADERS,
+      headers: responseHeaders,
     });
   } catch (error: unknown) {
     return NextResponse.json(
@@ -68,7 +84,7 @@ export async function GET(req: Request) {
         opportunities: [],
         engineVersion: CANONICAL_OPPORTUNITY_VERSION,
       },
-      { status: 500 },
+      { status: 500, headers: responseHeaders },
     );
   }
 }

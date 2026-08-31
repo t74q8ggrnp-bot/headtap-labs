@@ -1,243 +1,183 @@
 import { NextResponse } from "next/server";
+import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { buildMarketDataTimingReceipt } from "@/lib/market-data-time";
+import { massiveStocksUrl, probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 import {
   resolveSnapshotChangePercent,
   resolveSnapshotDisplayPrice,
   resolveSnapshotTimestampMs,
+  type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
-import {
-  probeMassiveRealtimeEntitlement,
-  type MassiveStocksDataMode,
-} from "@/lib/massive-stocks";
 
-const POLYGON_KEY = process.env.POLYGON_API_KEY;
+export const dynamic = "force-dynamic";
 
-// avgVolume: 10-day average daily volume — better baseline for relative volume
-// than a single previous day (which can itself be unusual). Populated from
-// Yahoo when available; Polygon snapshot doesn't expose an average volume field.
-type Quote = {
+const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
+const MAX_SYMBOLS = 250;
+const NO_STORE_HEADERS = {
+  "Cache-Control": "private, no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+};
+
+type BulkQuote = {
   price: number;
   change: number;
   volume: number;
   prevVolume: number;
   prevClose: number;
-  avgVolume: number; // 10-day avg — use this as the relative volume denominator
+  avgVolume: number;
+  volumeBaseline: "previous_session_proxy";
   asOf: string | null;
-  dataMode: MassiveStocksDataMode | "fallback";
+  dataMode: "real_time" | "delayed" | "unavailable";
+  source: "massive_polygon_snapshot";
+  timing: ReturnType<typeof buildMarketDataTimingReceipt>;
 };
 
-function getLastTradingDate(): string {
-  const now = new Date();
-  const day = now.getUTCDay();
-  let daysBack = 1;
-  if (day === 0) daysBack = 2;
-  if (day === 1) daysBack = 3;
-  const date = new Date(now);
-  date.setUTCDate(date.getUTCDate() - daysBack);
-  return date.toISOString().split("T")[0];
-}
-
-function getPrevTradingDate(): string {
-  const now = new Date();
-  const day = now.getUTCDay();
-  let daysBack = 2;
-  if (day === 0) daysBack = 3;
-  if (day === 1) daysBack = 4;
-  if (day === 2) daysBack = 4;
-  const date = new Date(now);
-  date.setUTCDate(date.getUTCDate() - daysBack);
-  return date.toISOString().split("T")[0];
-}
-
-async function fetchPolygonGroupedDaily(
-  date: string
-): Promise<Record<string, { close: number; volume: number; open: number }>> {
-  const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${date}?adjusted=true&apiKey=${POLYGON_KEY}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Grouped daily failed: ${res.status}`);
-  const data = await res.json();
-  const out: Record<string, { close: number; volume: number; open: number }> = {};
-  for (const r of data?.results ?? []) {
-    out[r.T] = { close: Number(r.c || 0), volume: Number(r.v || 0), open: Number(r.o || 0) };
-  }
-  return out;
-}
-
-async function fetchPolygonSnapshot(
+async function fetchSnapshotBatch(
   symbols: string[],
-  dataMode: MassiveStocksDataMode,
-): Promise<Record<string, Quote>> {
-  const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${symbols.join(",")}&apiKey=${POLYGON_KEY}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Snapshot failed: ${res.status}`);
-  const data = await res.json();
-  const result: Record<string, Quote> = {};
-  for (const t of data?.tickers ?? []) {
-    const price = resolveSnapshotDisplayPrice(t);
-    const prevClose = Number(t?.prevDay?.c || 0);
-    const change = resolveSnapshotChangePercent(t, price);
-
-    // Volume: current day volume and previous day volume from Polygon.
-    // avgVolume starts at 0 here — Yahoo pass below will fill it in for
-    // tickers that go through the fallback, or we'll use prevDay.v as proxy.
-    const currentVolume = Number(t?.day?.v || 0);
-    const prevDayVolume = Number(t?.prevDay?.v || 0);
-
-    if (price > 0) {
-      result[t.ticker] = {
-        price,
-        change,
-        volume: currentVolume,
-        prevVolume: prevDayVolume,
-        prevClose,
-        // Use prevDay.v as initial avgVolume proxy — Yahoo will overwrite
-        // with the real 10-day average for any ticker it covers.
-        avgVolume: prevDayVolume,
-        asOf: resolveSnapshotTimestampMs(t)
-          ? new Date(resolveSnapshotTimestampMs(t)!).toISOString()
-          : null,
-        dataMode,
-      };
-    }
+  dataMode: BulkQuote["dataMode"],
+): Promise<Record<string, BulkQuote>> {
+  const response = await fetch(
+    massiveStocksUrl(
+      "/v2/snapshot/locale/us/markets/stocks/tickers",
+      { tickers: symbols.join(","), include_otc: false },
+    ),
+    { cache: "no-store", signal: AbortSignal.timeout(12_000) },
+  );
+  if (!response.ok) {
+    throw new Error(`Massive snapshot returned ${response.status}.`);
   }
-  return result;
-}
-
-async function fetchYahooBulk(symbols: string[]): Promise<Record<string, Quote>> {
-  // Request averageDailyVolume10Day explicitly — this is the right baseline
-  // for relative volume. A single previous day's volume can itself be unusual
-  // and would make today look normal when it isn't (or vice versa).
-  const fields = [
-    "regularMarketPrice",
-    "regularMarketChangePercent",
-    "regularMarketVolume",
-    "regularMarketPreviousClose",
-    "averageDailyVolume10Day",
-  ].join(",");
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(",")}&fields=${fields}`;
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" });
-  if (!res.ok) throw new Error("Yahoo failed");
-  const result: Record<string, Quote> = {};
-  for (const q of (await res.json())?.quoteResponse?.result ?? []) {
-    const currentVol = Number(q.regularMarketVolume ?? 0);
-    const avgVol = Number(q.averageDailyVolume10Day ?? 0);
-    const prevClose = Number(q.regularMarketPreviousClose ?? 0);
-    result[q.symbol] = {
-      price: Number(q.regularMarketPrice ?? 0),
-      change: Number(q.regularMarketChangePercent ?? 0),
-      volume: currentVol,
-      prevVolume: prevClose > 0 ? avgVol : 0, // prevVolume kept for back-compat
-      prevClose,
-      avgVolume: avgVol, // real 10-day average — use this for rvol
-      asOf: null,
-      dataMode: "fallback",
+  const receivedAt = new Date();
+  const payload = (await response.json()) as { tickers?: PolygonSnapshotRow[] };
+  const result: Record<string, BulkQuote> = {};
+  for (const row of payload.tickers ?? []) {
+    const symbol = String(row.ticker ?? "").trim().toUpperCase();
+    const price = resolveSnapshotDisplayPrice(row);
+    if (!SYMBOL_PATTERN.test(symbol) || !(price > 0)) continue;
+    const timestampMs = resolveSnapshotTimestampMs(row);
+    const marketAsOf = timestampMs === null
+      ? null
+      : new Date(timestampMs).toISOString();
+    const previousVolume = Number(row.prevDay?.v || 0);
+    result[symbol] = {
+      price,
+      change: resolveSnapshotChangePercent(row, price),
+      volume: Number(row.day?.v || 0),
+      prevVolume: previousVolume,
+      prevClose: Number(row.prevDay?.c || 0),
+      // Compatibility field only. It is explicitly labeled as a previous-
+      // session proxy so the UI cannot mistake it for a measured 10-day mean.
+      avgVolume: previousVolume,
+      volumeBaseline: "previous_session_proxy",
+      asOf: marketAsOf,
+      dataMode,
+      source: "massive_polygon_snapshot",
+      timing: buildMarketDataTimingReceipt({ marketAsOf, receivedAt }),
     };
   }
   return result;
 }
 
-// After Polygon and Yahoo both run, merge avgVolume from Yahoo into Polygon
-// results so every ticker gets the best available volume baseline.
-async function enrichWithYahooAvgVolume(
-  merged: Record<string, Quote>,
-  symbols: string[]
-): Promise<void> {
-  // Only fetch Yahoo avg volume for tickers where avgVolume is still 0 or
-  // where we only have prevDay.v (a single-day proxy). Run in batches of 50.
-  const needsEnrichment = symbols.filter(s => merged[s] && merged[s].avgVolume === merged[s].prevVolume);
-  if (!needsEnrichment.length) return;
-
-  for (let i = 0; i < needsEnrichment.length; i += 50) {
-    const batch = needsEnrichment.slice(i, i + 50);
-    try {
-      const fields = "regularMarketVolume,averageDailyVolume10Day,regularMarketPreviousClose";
-      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${batch.join(",")}&fields=${fields}`;
-      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store" });
-      if (!res.ok) continue;
-      for (const q of (await res.json())?.quoteResponse?.result ?? []) {
-        const avgVol = Number(q.averageDailyVolume10Day ?? 0);
-        if (avgVol > 0 && merged[q.symbol]) {
-          merged[q.symbol].avgVolume = avgVol;
-        }
-      }
-    } catch { /* silent — enrichment is best-effort */ }
+export async function POST(request: Request) {
+  const rateLimit = checkApiRateLimit(request, {
+    namespace: "public-bulk-quote",
+    limit: 30,
+    windowMs: 60_000,
+  });
+  const headers = { ...NO_STORE_HEADERS, ...rateLimit.headers };
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many bulk quote requests.", quotes: {} },
+      { status: 429, headers },
+    );
   }
-}
 
-export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const symbols: string[] = body.symbols ?? [];
-    if (!symbols.length) return NextResponse.json({ error: "No symbols" }, { status: 400 });
-
-    const merged: Record<string, Quote> = {};
-    const entitlement = POLYGON_KEY
-      ? await probeMassiveRealtimeEntitlement()
-      : null;
-
-    if (POLYGON_KEY) {
-      // Primary: Massive/Polygon snapshot. The entitlement probe proves
-      // whether this key receives the real-time or delayed version.
-      for (let i = 0; i < symbols.length; i += 100) {
-        try {
-          Object.assign(
-            merged,
-            await fetchPolygonSnapshot(
-              symbols.slice(i, i + 100),
-              entitlement?.dataMode ?? "unavailable",
-            ),
-          );
-        } catch {}
-      }
-
-      // Fallback for any tickers Polygon missed
-      const missing = symbols.filter(s => !merged[s] || merged[s].price === 0);
-      if (missing.length > 0) {
-        try {
-          const [lastDay, prevDay] = await Promise.all([
-            fetchPolygonGroupedDaily(getLastTradingDate()),
-            fetchPolygonGroupedDaily(getPrevTradingDate()),
-          ]);
-          for (const symbol of missing) {
-            const last = lastDay[symbol];
-            const prev = prevDay[symbol];
-            if (last?.close > 0) {
-              const prevClose = prev?.close || last.open || 0;
-              merged[symbol] = {
-                price: last.close,
-                change: prevClose > 0 ? ((last.close - prevClose) / prevClose) * 100 : 0,
-                volume: last.volume,
-                prevVolume: prev?.volume || 0,
-                prevClose,
-                avgVolume: prev?.volume || 0, // will be overwritten by Yahoo enrichment
-                asOf: null,
-                dataMode: "fallback",
-              };
-            }
-          }
-        } catch (err) { console.warn("Grouped daily failed", err); }
-      }
-
-      // Enrich all Polygon results with Yahoo's 10-day avg volume
-      await enrichWithYahooAvgVolume(merged, symbols);
+    const body = (await request.json()) as { symbols?: unknown };
+    const rawSymbols = Array.isArray(body.symbols) ? body.symbols : [];
+    const symbols = [...new Set(
+      rawSymbols
+        .map((value) => String(value).trim().toUpperCase())
+        .filter((symbol) => SYMBOL_PATTERN.test(symbol)),
+    )].slice(0, MAX_SYMBOLS);
+    if (symbols.length === 0) {
+      return NextResponse.json(
+        { error: "At least one valid stock symbol is required.", quotes: {} },
+        { status: 400, headers },
+      );
     }
 
-    // Full Yahoo fallback for anything still missing
-    const stillMissing = symbols.filter(s => !merged[s] || merged[s].price === 0);
-    if (stillMissing.length > 0) {
-      for (let i = 0; i < stillMissing.length; i += 100) {
-        try {
-          Object.assign(merged, await fetchYahooBulk(stillMissing.slice(i, i + 100)));
-        } catch {}
+    const entitlement = await probeMassiveRealtimeEntitlement();
+    if (!entitlement.snapshot) {
+      console.error("[bulk-quote] Massive snapshot entitlement unavailable", {
+        errors: entitlement.errors,
+      });
+      return NextResponse.json(
+        {
+          error: "Verified Massive snapshot data is unavailable.",
+          quotes: {},
+          provider: "massive_polygon",
+          dataMode: entitlement.dataMode,
+        },
+        { status: 502, headers },
+      );
+    }
+
+    const merged: Record<string, BulkQuote> = {};
+    const errors: string[] = [];
+    for (let index = 0; index < symbols.length; index += 100) {
+      const batch = symbols.slice(index, index + 100);
+      try {
+        Object.assign(
+          merged,
+          await fetchSnapshotBatch(batch, entitlement.dataMode),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        errors.push(message);
+        console.error("[bulk-quote] Massive batch failed", {
+          batchSize: batch.length,
+          message,
+        });
       }
+    }
+
+    const missingSymbols = symbols.filter((symbol) => !merged[symbol]);
+    const degraded = errors.length > 0 || missingSymbols.length > 0;
+    if (Object.keys(merged).length === 0) {
+      return NextResponse.json(
+        {
+          error: "Massive returned no verified quotes.",
+          quotes: {},
+          missingSymbols,
+          provider: "massive_polygon",
+          dataMode: entitlement.dataMode,
+          degraded: true,
+          errors,
+        },
+        { status: 502, headers },
+      );
     }
 
     return NextResponse.json({
       quotes: merged,
+      requestedCount: symbols.length,
+      returnedCount: Object.keys(merged).length,
+      missingSymbols,
       provider: "massive_polygon",
-      dataMode: entitlement?.dataMode ?? "unavailable",
-      entitlementCheckedAt: entitlement?.checkedAt ?? null,
+      dataMode: entitlement.dataMode,
+      degraded,
+      errors,
+      entitlementCheckedAt: entitlement.checkedAt,
+      processedAt: new Date().toISOString(),
+    }, { headers });
+  } catch (error) {
+    console.error("[bulk-quote] Request failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
     });
-  } catch {
-    return NextResponse.json({ error: "Failed", quotes: {} }, { status: 500 });
+    return NextResponse.json(
+      { error: "Bulk quote request failed.", quotes: {} },
+      { status: 500, headers },
+    );
   }
 }

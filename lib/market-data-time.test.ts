@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's built-in TypeScript runner requires source extensions.
-import { getMarketDataAgeMs, isActiveMarketTimestampUsable, measureMarketTimestampAlignment } from "./market-data-time.ts";
+import { buildMarketDataTimingReceipt, getMarketDataAgeMs, isActiveMarketTimestampUsable, measureMarketTimestampAlignment } from "./market-data-time.ts";
 
 test("market freshness is measured from the provider timestamp", () => {
   const now = new Date("2026-08-28T17:30:00.000Z");
@@ -31,4 +31,15 @@ test("canonical and ProX evidence must describe the same market moment", () => {
   assert.equal(aligned.aligned, true);
   assert.equal(misaligned.aligned, false);
   assert.equal(misaligned.skewMs, 3 * 60 * 1000);
+});
+
+test("market observations retain provider, receipt, and processing clocks", () => {
+  const receipt = buildMarketDataTimingReceipt({
+    marketAsOf: "2026-08-31T13:30:00.000Z",
+    receivedAt: new Date("2026-08-31T13:30:01.000Z"),
+    processedAt: new Date("2026-08-31T13:30:01.250Z"),
+  });
+  assert.equal(receipt.dataAgeMs, 1_250);
+  assert.equal(receipt.processingLatencyMs, 250);
+  assert.equal(receipt.marketAsOf, "2026-08-31T13:30:00.000Z");
 });

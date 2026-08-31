@@ -16,6 +16,8 @@ export const maxDuration = 300;
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const OUTCOME_QUERY_LIMIT = 50;
+const DISCOVERY_OUTCOME_QUERY_LIMIT = 1000;
+const DISCOVERY_WRITE_BATCH_SIZE = 100;
 
 type ObservationRole = "hero" | "contender" | "radar";
 type ObservedOpportunity = {
@@ -29,7 +31,7 @@ type PendingOutcomeRow = {
   product_id: string;
   entry_price: number;
 };
-type PendingDiscoveryOutcomeRow = {
+type PendingDiscoveryOutcomeRow = Record<string, unknown> & {
   id: string;
   asset_id: string;
   symbol: string;
@@ -95,6 +97,24 @@ function decisionSnapshot(opportunity: CryptoOpportunity) {
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000).toISOString();
+}
+
+async function writeDiscoveryRowsInBatches(
+  supabase: ReturnType<typeof getSupabase>,
+  rows: PendingDiscoveryOutcomeRow[],
+) {
+  for (
+    let index = 0;
+    index < rows.length;
+    index += DISCOVERY_WRITE_BATCH_SIZE
+  ) {
+    const { error } = await supabase
+      .from("ht_crypto_discovery_observations")
+      .upsert(rows.slice(index, index + DISCOVERY_WRITE_BATCH_SIZE), {
+        onConflict: "id",
+      });
+    if (error) throw error;
+  }
 }
 
 async function persistDecisionFrame({
@@ -223,7 +243,7 @@ async function loadDueDiscoveryOutcomes(
     horizons.map(async ({ horizon, target, price }) => {
       const { data, error } = await supabase
         .from("ht_crypto_discovery_observations")
-        .select("id,asset_id,symbol,entry_price_usd")
+        .select("*")
         .is(price, null)
         .lte(target, nowIso)
         // asset_id changed from a bare "crypto:SYMBOL" format to a
@@ -236,7 +256,7 @@ async function loadDueDiscoveryOutcomes(
         // this only stops chasing outcomes that can't ever be found.
         .like("asset_id", "crypto:%:%")
         .order(target, { ascending: true })
-        .limit(OUTCOME_QUERY_LIMIT);
+        .limit(DISCOVERY_OUTCOME_QUERY_LIMIT);
       if (error) throw error;
       return {
         horizon,
@@ -284,6 +304,7 @@ async function persistDiscoveryOutcomePrices(
   );
   let outcomesUpdated = 0;
   let outcomesUnavailable = 0;
+  const updates: PendingDiscoveryOutcomeRow[] = [];
 
   for (const { row, horizons } of dueById.values()) {
     const currentPrice =
@@ -299,18 +320,19 @@ async function persistDiscoveryOutcomePrices(
       continue;
     }
     const returnPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
-    const update: Record<string, unknown> = { updated_at: observedAt };
+    const update: PendingDiscoveryOutcomeRow = {
+      ...row,
+      updated_at: observedAt,
+    };
     for (const horizon of horizons) {
       update[`price_${horizon}_usd`] = currentPrice;
       update[`return_${horizon}_percent`] = returnPercent;
       outcomesUpdated++;
     }
-    const { error } = await supabase
-      .from("ht_crypto_discovery_observations")
-      .update(update)
-      .eq("id", row.id);
-    if (error) throw error;
+    updates.push(update);
   }
+
+  await writeDiscoveryRowsInBatches(supabase, updates);
 
   return { outcomesUpdated, outcomesUnavailable };
 }
@@ -415,6 +437,36 @@ async function persistShadowDiscovery({
       error: null,
     };
   } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    // Shadow discovery must never fail invisibly. Persist a current receipt so
+    // health reports the active failure instead of looking merely stale.
+    try {
+      await supabase
+        .from("ht_crypto_discovery_runs")
+        .upsert({
+          observed_at: observedAt,
+          observation_minute: observationMinute,
+          expected_candidate_count: feed.shadowDiscovery.candidates.length,
+          persisted_candidate_count: 0,
+          complete: false,
+          observed_assets: feed.shadowDiscovery.candidates.map((candidate) => ({
+            assetId: candidate.assetId,
+            symbol: candidate.symbol,
+            rank: candidate.rank,
+          })),
+          source_diagnostics: {
+            ...feed.shadowDiscovery.diagnostics,
+            persistenceError: errorMessage,
+          },
+          outcomes_updated: 0,
+          outcomes_unavailable: 0,
+          updated_at: observedAt,
+        }, {
+          onConflict: "observation_minute",
+        });
+    } catch {
+      // The caller still receives the original persistence failure below.
+    }
     return {
       schemaReady: false,
       complete: false,
@@ -422,7 +474,7 @@ async function persistShadowDiscovery({
       persisted: 0,
       outcomesUpdated: 0,
       outcomesUnavailable: 0,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     };
   }
 }
@@ -516,7 +568,10 @@ async function collect() {
         rank,
         proxState: opportunity.proxIntelligence?.state ?? null,
       })),
-      feed_diagnostics: feed.diagnostics,
+      feed_diagnostics: {
+        ...feed.diagnostics,
+        shadowDiscovery: discoveryResult,
+      },
       outcomes_updated: outcomeResult.outcomesUpdated,
       updated_at: observedAt,
     }, {

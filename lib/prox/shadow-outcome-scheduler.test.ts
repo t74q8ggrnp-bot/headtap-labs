@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's built-in TypeScript runner requires source extensions.
-import { selectDueOutcomeMemberIds } from "./shadow-outcome-scheduler.ts";
+import { selectDueOutcomeMemberIds, shouldKeepOutcomeMemberComplete } from "./shadow-outcome-scheduler.ts";
 
 test("selects distinct outcome parents by oldest due horizon", () => {
   assert.deepEqual(
@@ -16,4 +16,10 @@ test("selects distinct outcome parents by oldest due horizon", () => {
     ),
     ["old", "middle"],
   );
+});
+
+test("never demotes an already completed parent while resolving old horizons", () => {
+  assert.equal(shouldKeepOutcomeMemberComplete("complete", false), true);
+  assert.equal(shouldKeepOutcomeMemberComplete("active", true), true);
+  assert.equal(shouldKeepOutcomeMemberComplete("active", false), false);
 });

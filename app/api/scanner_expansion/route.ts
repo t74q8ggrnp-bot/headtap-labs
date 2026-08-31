@@ -1,22 +1,20 @@
 import { NextResponse } from "next/server";
+import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { fetchMassiveMarketMovers } from "@/lib/massive-market-movers";
+import {
+  resolveSnapshotChangePercent,
+  resolveSnapshotPrice,
+  resolveSnapshotTimestampMs,
+  type PolygonSnapshotRow,
+} from "@/lib/polygon-snapshot";
+import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 
-// ============================================================
-// HT LABS — EXPANDED SCANNER
-// Pulls broader market data from Yahoo Finance screeners:
-// - Top gainers
-// - Top losers
-// - Most active (unusual volume)
-// Returns normalized ticker list with avgVolume included
-// so relative volume can be computed correctly downstream.
-//
-// Finnhub pattern scanner removed — it returned symbols with
-// no price/volume data and required enrichment that never ran.
-// ============================================================
+export const dynamic = "force-dynamic";
 
 const EXCLUDED = new Set([
-  "SQQQ","TQQQ","SOXS","SOXL","UVXY","SVXY","SPXS","SPXL",
-  "LABD","LABU","TZA","TNA","FAZ","FAS","YANG","YINN",
-  "SDOW","UDOW","ERY","ERX","HIBL","HIBS","DRIP","GUSH",
+  "SQQQ", "TQQQ", "SOXS", "SOXL", "UVXY", "SVXY", "SPXS", "SPXL",
+  "LABD", "LABU", "TZA", "TNA", "FAZ", "FAS", "YANG", "YINN",
+  "SDOW", "UDOW", "ERY", "ERX", "HIBL", "HIBS", "DRIP", "GUSH",
 ]);
 
 type ScannedTicker = {
@@ -25,95 +23,92 @@ type ScannedTicker = {
   change: number;
   changePercent: number;
   volume: number;
-  avgVolume: number; // 10-day average — correct rvol denominator
-  source: string;
+  avgVolume: number;
+  volumeBaseline: "previous_session_proxy";
+  source: "massive_polygon_snapshot_movers";
+  marketAsOf: string | null;
 };
 
-type YahooQuote = {
-  symbol?: string;
-  regularMarketPrice?: number;
-  regularMarketChange?: number;
-  regularMarketChangePercent?: number;
-  regularMarketVolume?: number;
-  averageDailyVolume10Day?: number;
-};
-
-function mapQuote(q: YahooQuote, source: string): ScannedTicker {
+function normalize(row: PolygonSnapshotRow): ScannedTicker | null {
+  const symbol = String(row.ticker ?? "").trim().toUpperCase();
+  const price = resolveSnapshotPrice(row);
+  if (!symbol || EXCLUDED.has(symbol) || price <= 0) return null;
+  const changePercent = resolveSnapshotChangePercent(row, price);
+  const previousClose = Number(row.prevDay?.c ?? 0);
+  const timestampMs = resolveSnapshotTimestampMs(row);
   return {
-    symbol: q.symbol ?? "",
-    price: Number(q.regularMarketPrice ?? 0),
-    change: Number(q.regularMarketChange ?? 0),
-    changePercent: Number(q.regularMarketChangePercent ?? 0),
-    volume: Number(q.regularMarketVolume ?? 0),
-    avgVolume: Number(q.averageDailyVolume10Day ?? 0),
-    source,
+    symbol,
+    price,
+    change: previousClose > 0 ? price - previousClose : 0,
+    changePercent,
+    volume: Math.max(Number(row.day?.v ?? 0), Number(row.min?.av ?? 0)),
+    // Compatibility only. A true time-of-day baseline is a separate phase.
+    avgVolume: Number(row.prevDay?.v ?? 0),
+    volumeBaseline: "previous_session_proxy",
+    source: "massive_polygon_snapshot_movers",
+    marketAsOf: timestampMs ? new Date(timestampMs).toISOString() : null,
   };
 }
 
-async function fetchScreener(scrId: string, count: number, source: string): Promise<ScannedTicker[]> {
-  try {
-    const res = await fetch(
-      `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${scrId}&count=${count}`,
-      {
-        headers: { "User-Agent": "Mozilla/5.0" },
-        cache: "no-store",
-        signal: AbortSignal.timeout(6000),
-      }
+export async function GET(request: Request) {
+  const rateLimit = checkApiRateLimit(request, {
+    namespace: "scanner-expansion",
+    limit: 30,
+    windowMs: 60_000,
+  });
+  const headers = {
+    "Cache-Control": "no-store, max-age=0",
+    ...rateLimit.headers,
+  };
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Scanner expansion rate limit reached.", tickers: [] },
+      { status: 429, headers },
     );
-    if (!res.ok) return [];
-    const data = (await res.json()) as { finance?: { result?: Array<{ quotes?: YahooQuote[] }> } };
-    const quotes = data.finance?.result?.[0]?.quotes ?? [];
-    return quotes
-      .filter((q): q is YahooQuote & { symbol: string } => Boolean(q.symbol && !EXCLUDED.has(q.symbol) && Number(q.regularMarketPrice) > 1))
-      .map((q) => mapQuote(q, source));
-  } catch {
-    return [];
   }
-}
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const type = searchParams.get("type") ?? "all";
-
+  const type = new URL(request.url).searchParams.get("type") ?? "all";
   try {
-    let tickers: ScannedTicker[] = [];
-
-    if (type === "gainers") {
-      tickers = await fetchScreener("day_gainers", 25, "gainers");
-    } else if (type === "active") {
-      tickers = await fetchScreener("most_actives", 25, "most_active");
-    } else if (type === "losers") {
-      tickers = await fetchScreener("day_losers", 15, "losers");
-    } else {
-      // All sources in parallel
-      const [gainers, active, losers] = await Promise.all([
-        fetchScreener("day_gainers", 25, "gainers"),
-        fetchScreener("most_actives", 25, "most_active"),
-        fetchScreener("day_losers", 15, "losers"),
-      ]);
-
-      // Dedupe by symbol — gainers > active > losers priority
-      const seen = new Set<string>();
-      for (const t of [...gainers, ...active, ...losers]) {
-        if (!seen.has(t.symbol)) {
-          seen.add(t.symbol);
-          tickers.push(t);
-        }
+    const [movers, entitlement] = await Promise.all([
+      fetchMassiveMarketMovers(),
+      probeMassiveRealtimeEntitlement(),
+    ]);
+    const sourceRows = type === "gainers"
+      ? movers.gainers
+      : type === "losers"
+        ? movers.losers
+        : [...movers.gainers, ...movers.losers];
+    const unique = new Map<string, ScannedTicker>();
+    for (const row of sourceRows) {
+      const normalized = normalize(row);
+      if (normalized && !unique.has(normalized.symbol)) {
+        unique.set(normalized.symbol, normalized);
       }
     }
-
-    // Sort by absolute % change
-    tickers.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
-
+    const tickers = [...unique.values()];
+    tickers.sort(
+      type === "active"
+        ? (left, right) => right.volume - left.volume
+        : (left, right) => Math.abs(right.changePercent) - Math.abs(left.changePercent),
+    );
+    const degraded = movers.errors.length > 0;
     return NextResponse.json({
       tickers: tickers.slice(0, 50),
       total: tickers.length,
       timestamp: new Date().toISOString(),
-      sources: ["yahoo_gainers", "yahoo_active", "yahoo_losers"],
-    });
-
+      provider: "massive_polygon",
+      dataMode: entitlement.dataMode,
+      authority: "secondary_discovery_only",
+      degraded,
+      degradedReasons: movers.errors,
+    }, { status: degraded && tickers.length === 0 ? 503 : 200, headers });
   } catch (error) {
-    console.error("Scanner expansion error:", error);
-    return NextResponse.json({ error: "Scanner failed", tickers: [] }, { status: 500 });
+    console.error("[scanner-expansion] Massive mover read failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    return NextResponse.json(
+      { error: "Verified mover data is unavailable.", tickers: [] },
+      { status: 503, headers },
+    );
   }
 }

@@ -3,10 +3,16 @@ import {
   resolveSnapshotPrice,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
+import {
+  easternMinuteOfDay,
+  summarizeIntradaySessionBars,
+  type StockSessionName,
+} from "@/lib/intraday-session-bars";
 
 type PolygonAggregate = {
   o?: unknown;
   h?: unknown;
+  l?: unknown;
   c?: unknown;
   v?: unknown;
   t?: unknown;
@@ -17,11 +23,10 @@ export type HydratedSessionSnapshot = {
   currentVolume: number;
   sessionOpenPrice: number | null;
   sessionHighPrice: number | null;
+  sessionLowPrice: number | null;
   changeFromOpenPercent: number | null;
   latestBarAt: string;
 };
-
-type SessionName = "pre_market" | "regular" | "after_hours" | "closed";
 
 const MAX_HYDRATION_CANDIDATES = 120;
 const HYDRATION_CONCURRENCY = 15;
@@ -40,28 +45,10 @@ function easternDateString(date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
-function easternMinuteOfDay(timestamp: number): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date(timestamp));
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
-  return hour * 60 + minute;
-}
-
-function activeSessionStart(session: SessionName): number {
-  if (session === "regular") return 570;
-  if (session === "after_hours") return 960;
-  return 240;
-}
-
-async function fetchHydratedSessionSnapshot(
+export async function fetchHydratedSessionSnapshot(
   ticker: string,
   apiKey: string,
-  session: SessionName,
+  session: StockSessionName,
 ): Promise<HydratedSessionSnapshot | null> {
   const today = easternDateString();
   const url =
@@ -81,6 +68,7 @@ async function fetchHydratedSessionSnapshot(
     .map((row) => ({
       open: Number(row.o),
       high: Number(row.h),
+      low: Number(row.l),
       close: Number(row.c),
       volume: Number(row.v),
       timestamp: Number(row.t),
@@ -98,38 +86,7 @@ async function fetchHydratedSessionSnapshot(
     });
   if (bars.length === 0) return null;
 
-  const startMinute = activeSessionStart(session);
-  const activeBars = bars.filter(
-    (bar) => easternMinuteOfDay(bar.timestamp) >= startMinute,
-  );
-  const sessionBars = activeBars.length > 0 ? activeBars : bars;
-  const latest = bars[bars.length - 1];
-  const sessionOpen = sessionBars[0]?.open;
-  const sessionHigh = sessionBars.reduce(
-    (highest, bar) =>
-      Number.isFinite(bar.high) ? Math.max(highest, bar.high) : highest,
-    latest.close,
-  );
-  const currentVolume = bars.reduce(
-    (total, bar) =>
-      total + (Number.isFinite(bar.volume) ? Math.max(0, bar.volume) : 0),
-    0,
-  );
-  const validOpen = Number.isFinite(sessionOpen) && sessionOpen > 0
-    ? sessionOpen
-    : null;
-
-  return {
-    price: latest.close,
-    currentVolume,
-    sessionOpenPrice: validOpen,
-    sessionHighPrice: Number.isFinite(sessionHigh) ? sessionHigh : latest.close,
-    changeFromOpenPercent:
-      validOpen === null
-        ? null
-        : ((latest.close - validOpen) / validOpen) * 100,
-    latestBarAt: new Date(latest.timestamp).toISOString(),
-  };
+  return summarizeIntradaySessionBars(bars, session);
 }
 
 /**
@@ -141,7 +98,7 @@ async function fetchHydratedSessionSnapshot(
 export async function hydrateSnapshotLeaders(
   rows: PolygonSnapshotRow[],
   apiKey: string,
-  session: SessionName,
+  session: StockSessionName,
   options: { maxCandidates?: number; includeCompleteRows?: boolean } = {},
 ): Promise<Map<string, HydratedSessionSnapshot>> {
   if (session === "closed") return new Map();

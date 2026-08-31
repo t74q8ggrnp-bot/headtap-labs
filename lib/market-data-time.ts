@@ -20,6 +20,34 @@ export function getMarketDataAgeMs(
   return nowMs - timestamp;
 }
 
+export type MarketDataTimingReceipt = {
+  marketAsOf: string | null;
+  receivedAt: string;
+  processedAt: string;
+  dataAgeMs: number | null;
+  processingLatencyMs: number;
+};
+
+export function buildMarketDataTimingReceipt(input: {
+  marketAsOf: string | null | undefined;
+  receivedAt: Date;
+  processedAt?: Date;
+}): MarketDataTimingReceipt {
+  const processedAt = input.processedAt ?? new Date();
+  return {
+    marketAsOf: marketTimestampMs(input.marketAsOf) === null
+      ? null
+      : String(input.marketAsOf),
+    receivedAt: input.receivedAt.toISOString(),
+    processedAt: processedAt.toISOString(),
+    dataAgeMs: getMarketDataAgeMs(input.marketAsOf, processedAt),
+    processingLatencyMs: Math.max(
+      0,
+      processedAt.getTime() - input.receivedAt.getTime(),
+    ),
+  };
+}
+
 export function isActiveMarketTimestampUsable(
   value: unknown,
   now: Date | number = new Date(),

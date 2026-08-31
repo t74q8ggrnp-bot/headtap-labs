@@ -9,6 +9,7 @@ import {
   type MarketChartBar,
   type MarketChartResponse,
 } from "@/lib/market-chart";
+import { checkApiRateLimit } from "@/lib/api-rate-limit";
 
 const POLYGON_ORIGIN = "https://api.polygon.io";
 const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
@@ -29,13 +30,23 @@ type PolygonPayload = {
   results?: unknown;
 };
 
-const errorResponse = (message: string, status: number) =>
-  Response.json({ success: false, error: message }, { status });
+const errorResponse = (
+  message: string,
+  status: number,
+  headers: Record<string, string> = {},
+) => Response.json(
+  { success: false, error: message },
+  { status, headers: { "Cache-Control": "private, no-store, max-age=0", ...headers } },
+);
 
-function responseWithCache(payload: MarketChartResponse) {
+function responseWithCache(
+  payload: MarketChartResponse,
+  headers: Record<string, string>,
+) {
   return Response.json(payload, {
     headers: {
       "Cache-Control": "private, no-store, max-age=0",
+      ...headers,
     },
   });
 }
@@ -157,6 +168,18 @@ async function fetchCryptoBars(productId: string): Promise<MarketChartBar[]> {
 }
 
 export async function GET(request: Request) {
+  const rateLimit = checkApiRateLimit(request, {
+    namespace: "public-market-chart",
+    limit: 60,
+    windowMs: 60_000,
+  });
+  if (!rateLimit.allowed) {
+    return errorResponse(
+      "Too many chart requests. Please retry shortly.",
+      429,
+      rateLimit.headers,
+    );
+  }
   const searchParams = new URL(request.url).searchParams;
   const asset = searchParams.get("asset")?.trim().toLowerCase() as
     | MarketChartAsset
@@ -167,7 +190,11 @@ export async function GET(request: Request) {
     ? STOCK_PATTERN.test(symbol)
     : asset === "crypto" && CRYPTO_SYMBOL_PATTERN.test(symbol);
   if ((asset !== "stock" && asset !== "crypto") || !validSymbol) {
-    return errorResponse("A valid asset and symbol are required.", 400);
+    return errorResponse(
+      "A valid asset and symbol are required.",
+      400,
+      rateLimit.headers,
+    );
   }
 
   try {
@@ -189,7 +216,11 @@ export async function GET(request: Request) {
     } else {
       productId = searchParams.get("productId")?.trim().toUpperCase() ?? "";
       if (!CRYPTO_PRODUCT_PATTERN.test(productId)) {
-        return errorResponse("A valid USD crypto product is required.", 400);
+        return errorResponse(
+          "A valid USD crypto product is required.",
+          400,
+          rateLimit.headers,
+        );
       }
       bars = await fetchCryptoBars(productId);
       sourceLabel = "Coinbase 5-minute candles";
@@ -199,7 +230,11 @@ export async function GET(request: Request) {
     const summary = summarizeMarketBars(bars);
     const latest = bars.at(-1);
     if (!summary || !latest || bars.length < 2) {
-      return errorResponse("Verified price history is not available yet.", 404);
+      return errorResponse(
+        "Verified price history is not available yet.",
+        404,
+        rateLimit.headers,
+      );
     }
 
     return responseWithCache({
@@ -215,13 +250,17 @@ export async function GET(request: Request) {
       latestAt: new Date(latest.time * 1_000).toISOString(),
       summary,
       bars,
-    });
+    }, rateLimit.headers);
   } catch (error) {
     console.error("Market chart fetch failed", {
       asset,
       symbol,
       message: error instanceof Error ? error.message : "Unknown error",
     });
-    return errorResponse("Verified price history is temporarily unavailable.", 502);
+    return errorResponse(
+      "Verified price history is temporarily unavailable.",
+      502,
+      rateLimit.headers,
+    );
   }
 }

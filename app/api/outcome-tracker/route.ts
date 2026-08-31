@@ -2,36 +2,42 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  fetchMassiveLastTrade,
+  fetchMassiveStockSnapshot,
+} from "@/lib/massive-stocks";
+import { resolveSnapshotDisplayPrice } from "@/lib/polygon-snapshot";
 
-const getSupabase = () => createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) {
+    throw new Error("Server-owned Supabase credentials are unavailable.");
+  }
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+};
 
 async function getCurrentPrice(ticker: string): Promise<number | null> {
   try {
-    const finnhubKey = process.env.FINNHUB_API_KEY;
-    if (finnhubKey) {
-      const res = await fetch(
-        `https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${finnhubKey}`,
-        { cache: "no-store", signal: AbortSignal.timeout(5000) }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data.c && data.c > 0) return data.c;
-      }
+    const [trade, snapshot] = await Promise.all([
+      fetchMassiveLastTrade(ticker),
+      fetchMassiveStockSnapshot(ticker),
+    ]);
+    if (trade?.price && trade.price > 0) return trade.price;
+    if (snapshot) {
+      const price = resolveSnapshotDisplayPrice(snapshot);
+      if (price > 0) return price;
     }
-    const res = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d`,
-      { headers: { "User-Agent": "Mozilla/5.0" }, cache: "no-store", signal: AbortSignal.timeout(5000) }
-    );
-    if (res.ok) {
-      const data = await res.json();
-      const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-      if (price && price > 0) return price;
-    }
+    console.warn("[outcome-tracker] Massive returned no price", { ticker });
     return null;
-  } catch {
+  } catch (error) {
+    console.error("[outcome-tracker] Massive quote failed", {
+      ticker,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
     return null;
   }
 }

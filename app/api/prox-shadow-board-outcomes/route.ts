@@ -22,7 +22,10 @@ import {
   summarizeProxOutcomePath,
   type ProxOutcomeBar,
 } from "@/lib/prox/shadow-outcome-resolution";
-import { selectDueOutcomeMemberIds } from "@/lib/prox/shadow-outcome-scheduler";
+import {
+  selectDueOutcomeMemberIds,
+  shouldKeepOutcomeMemberComplete,
+} from "@/lib/prox/shadow-outcome-scheduler";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -30,10 +33,11 @@ export const maxDuration = 300;
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
 const POLYGON_AGGREGATES_ORIGIN = "https://api.polygon.io/v2/aggs/ticker";
-const ACTIVE_MEMBER_BATCH_LIMIT = 1200;
-const DUE_HORIZON_BATCH_LIMIT = 4000;
-const TICKER_BATCH_LIMIT = 40;
-const POLYGON_FETCH_CONCURRENCY = 5;
+const ACTIVE_MEMBER_BATCH_LIMIT = 5000;
+const DUE_HORIZON_BATCH_LIMIT = 20000;
+const DUE_HORIZON_PAGE_SIZE = 1000;
+const TICKER_BATCH_LIMIT = 500;
+const POLYGON_FETCH_CONCURRENCY = 15;
 const WRITE_BATCH_SIZE = 100;
 
 type MemberOutcomeRow = {
@@ -234,7 +238,34 @@ async function readMemberHorizons(
   return rows;
 }
 
-async function readActiveMembersById(
+async function readDueHorizonReferences(
+  supabase: ReturnType<typeof getSupabase>,
+  observedAt: string,
+) {
+  const rows: Array<{ member_outcome_id: string; target_at: string }> = [];
+  while (rows.length < DUE_HORIZON_BATCH_LIMIT) {
+    const remaining = DUE_HORIZON_BATCH_LIMIT - rows.length;
+    const pageSize = Math.min(DUE_HORIZON_PAGE_SIZE, remaining);
+    const { data, error } = await supabase
+      .from("prox_shadow_board_member_outcome_horizons")
+      .select("member_outcome_id,target_at")
+      .eq("complete", false)
+      .lte("target_at", observedAt)
+      .order("target_at", { ascending: true })
+      .order("member_outcome_id", { ascending: true })
+      .range(rows.length, rows.length + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as Array<{
+      member_outcome_id: string;
+      target_at: string;
+    }>;
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function readMembersById(
   supabase: ReturnType<typeof getSupabase>,
   memberOutcomeIds: string[],
 ) {
@@ -244,7 +275,6 @@ async function readActiveMembersById(
     const { data, error } = await supabase
       .from("prox_shadow_board_member_outcomes")
       .select("*")
-      .eq("status", "active")
       .in("id", memberOutcomeIds.slice(index, index + batchSize));
     if (error) throw error;
     rows.push(...((data ?? []) as MemberOutcomeRow[]));
@@ -320,19 +350,12 @@ export async function GET(request: Request) {
   runId = String(run.id);
 
   try {
-    const { data: dueRows, error: dueError } = await supabase
-      .from("prox_shadow_board_member_outcome_horizons")
-      .select("member_outcome_id,target_at")
-      .eq("complete", false)
-      .lte("target_at", observedAt)
-      .order("target_at", { ascending: true })
-      .limit(DUE_HORIZON_BATCH_LIMIT);
-    if (dueError) throw dueError;
+    const dueRows = await readDueHorizonReferences(supabase, observedAt);
     const dueMemberIds = selectDueOutcomeMemberIds(
       dueRows ?? [],
       ACTIVE_MEMBER_BATCH_LIMIT,
     );
-    let activeMembers = await readActiveMembersById(
+    let activeMembers = await readMembersById(
       supabase,
       dueMemberIds,
     );
@@ -517,8 +540,12 @@ export async function GET(request: Request) {
       const finalHorizonsComplete =
         terminalByHorizon.get("24h") === true &&
         terminalByHorizon.get("next_session") === true;
+      const memberComplete = shouldKeepOutcomeMemberComplete(
+        member.status,
+        finalHorizonsComplete,
+      );
 
-      if (path || finalHorizonsComplete) {
+      if (path || memberComplete) {
         const latestBarIsNewer =
           path && path.latest.timeMs >= new Date(member.latest_observed_at).getTime();
         memberUpdates.push({
@@ -551,8 +578,10 @@ export async function GET(request: Request) {
               ).toFixed(1),
             ),
           ),
-          status: finalHorizonsComplete ? "complete" : "active",
-          completed_at: finalHorizonsComplete ? observedAt : null,
+          status: memberComplete ? "complete" : "active",
+          completed_at: memberComplete
+            ? member.completed_at ?? observedAt
+            : null,
           updated_at: observedAt,
         });
       }

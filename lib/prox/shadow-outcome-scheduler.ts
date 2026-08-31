@@ -23,3 +23,10 @@ export function selectDueOutcomeMemberIds(
   }
   return ids;
 }
+
+export function shouldKeepOutcomeMemberComplete(
+  currentStatus: "active" | "complete",
+  finalHorizonsComplete: boolean,
+) {
+  return currentStatus === "complete" || finalHorizonsComplete;
+}
