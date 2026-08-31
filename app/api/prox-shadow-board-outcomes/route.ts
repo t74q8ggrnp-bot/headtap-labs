@@ -226,7 +226,12 @@ async function readMemberHorizons(
   memberOutcomeIds: string[],
 ) {
   const rows: HorizonRow[] = [];
-  const batchSize = 200;
+  // Supabase/PostgREST caps an unpaginated select at 1,000 rows. Each member
+  // owns multiple horizon rows, so a 200-member IN query can silently truncate
+  // the tail of the result set and leave those horizons permanently pending.
+  // Keep every request safely below that cap so the worker sees and resolves
+  // the complete horizon set for every selected parent.
+  const batchSize = 100;
   for (let index = 0; index < memberOutcomeIds.length; index += batchSize) {
     const { data, error } = await supabase
       .from("prox_shadow_board_member_outcome_horizons")
