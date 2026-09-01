@@ -109,6 +109,22 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/ht-agent/outcomes",
+      "schedule": "* 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/ht-agent/outcomes",
+      "schedule": "* 0 * * 2-6"
+    },
+    {
+      "path": "/api/ht-agent/cycle",
+      "schedule": "*/2 8-23 * * 1-5"
+    },
+    {
+      "path": "/api/ht-agent/cycle",
+      "schedule": "*/2 0 * * 2-6"
+    },
+    {
       "path": "/api/trading-bot",
       "schedule": "*/5 8-23 * * 1-5"
     }

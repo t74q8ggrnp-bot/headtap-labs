@@ -69,6 +69,18 @@ This distinction documents the production boundary approved by the owner on
 2026-08-23. It does not expand either system's authority or change a score,
 threshold, gate, or public field.
 
+### HT Agent Phase 1 paper-only consumer
+
+The product owner explicitly approved HT Agent Phase 1 on 2026-08-31 as a
+paper-only consumer of the independently completed ProX shadow board. Only
+after Canonical and ProX have finalized timestamp-aligned frames may HT Agent
+translate independent ProX evidence into `support`, `warn`, `veto`, or
+`abstain`. This does not promote the independent board into Canonical and does
+not grant ProX execution authority. Canonical still owns detection and
+eligibility, the deterministic Agent risk gate owns paper authorization, and
+only the HT Labs paper ledger can receive an order. ProX may never size,
+submit, or manage an order and may never rewrite a Canonical score.
+
 ## Independent candidate discovery
 
 ProX scans the full available U.S. stock universe directly through its market

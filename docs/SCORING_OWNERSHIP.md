@@ -48,9 +48,14 @@ shadow frame. Its score and rank are produced by `lib/prox/edge-score.ts`,
 ProX discovery and shared raw facts. It cannot read canonical conclusions as
 inputs and it is not a canonical producer.
 
-No desktop, mobile, scanner, watchlist, bot, order, or execution surface is a
+No desktop, mobile, scanner, watchlist, bot, or live-execution surface is a
 consumer of the ProX shadow board. Comparing it with the canonical board is
-permitted only after both atomic frames are complete.
+permitted only after both atomic frames are complete. The owner-approved HT
+Agent Phase 1 is the sole additional consumer: it may translate the completed
+independent opinion into support, warning, veto, or abstention inside a
+paper-only decision. It cannot promote a Canonical-ineligible ticker, alter
+either upstream score, size on ProX authority, or route anywhere except the HT
+Labs paper ledger.
 
 ## Bounded ProX Market Pulse consumer
 

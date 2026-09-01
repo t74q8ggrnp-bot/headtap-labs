@@ -2865,6 +2865,88 @@ export async function GET() {
     });
   }
 
+  // HT Agent is an isolated paper-only consumer. Schema integrity is always
+  // required after migration 0030; cycle freshness is required only for
+  // unlocked active profiles, so Observe-mode onboarding does not make the
+  // market pipeline falsely red before a user starts the Agent.
+  try {
+    if (!supabase) throw new Error("Supabase unavailable");
+    const overdueCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+    const [controlResult, profilesResult, framesResult, decisionsResult, runsResult, agentOrdersResult, overdueOutcomesResult, controlEventsResult] = await Promise.all([
+      supabase.from("ht_agent_global_control").select("kill_switch,policy_version,updated_at").eq("id", "global").single(),
+      supabase.from("ht_agent_profiles").select("id,mode,status,kill_switch"),
+      supabase.from("ht_agent_decision_frames").select("id", { count: "exact", head: true }),
+      supabase.from("ht_agent_decisions").select("id,frame_id", { count: "exact" }).limit(5000),
+      supabase.from("ht_agent_runs").select("id,profile_id,status,mode,started_at,completed_at,decision_count,order_count,diagnostics").order("started_at", { ascending: false }).limit(5000),
+      supabase.from("paper_orders").select("id,ht_agent_decision_id,strategy_source,status", { count: "exact" }).eq("strategy_source", "ht_agent").limit(5000),
+      supabase.from("ht_agent_outcomes").select("id", { count: "exact", head: true }).eq("complete", false).lt("target_at", overdueCutoff),
+      supabase.from("ht_agent_control_events").select("id", { count: "exact", head: true }),
+    ]);
+    const errors = [controlResult.error, profilesResult.error, framesResult.error, decisionsResult.error, runsResult.error, agentOrdersResult.error, overdueOutcomesResult.error, controlEventsResult.error].filter(Boolean);
+    if (errors.length > 0) throw errors[0];
+    const profiles = profilesResult.data ?? [];
+    const activeProfiles = profiles.filter((profile) => profile.status === "active" && profile.kill_switch === false);
+    const cycleRequired = activeProfiles.length > 0;
+    const runs = runsResult.data ?? [];
+    const latestRunsByProfile = new Map<string, (typeof runs)[number]>();
+    for (const run of runs) {
+      if (!latestRunsByProfile.has(run.profile_id)) latestRunsByProfile.set(run.profile_id, run);
+    }
+    const maxCycleAgeHours = isActiveMarketSession() ? 10 / 60 : 24;
+    const cycleFresh = !cycleRequired || activeProfiles.every((profile) => {
+      const latest = latestRunsByProfile.get(profile.id);
+      return latest?.status === "success" && Boolean(latest.completed_at) && hoursSince(latest.completed_at!) <= maxCycleAgeHours;
+    });
+    const decisions = decisionsResult.data ?? [];
+    const decisionFrameComplete = decisions.every((decision) => Boolean(decision.frame_id));
+    const agentOrders = agentOrdersResult.data ?? [];
+    const paperLinkComplete = agentOrders.every((order) => Boolean(order.ht_agent_decision_id));
+    const paperOnly = agentOrders.every((order) => order.strategy_source === "ht_agent");
+    const overdueOutcomeCount = overdueOutcomesResult.count ?? 0;
+    const healthy =
+      controlResult.data?.policy_version === "ht-agent-risk-v1" &&
+      decisionFrameComplete &&
+      paperLinkComplete &&
+      paperOnly &&
+      overdueOutcomeCount === 0 &&
+      cycleFresh;
+    checks.push({
+      name: "ht_agent_phase1",
+      ok: healthy,
+      message: !decisionFrameComplete
+        ? "One or more HT Agent decisions is missing its immutable evidence frame."
+        : !paperLinkComplete || !paperOnly
+          ? "An HT Agent paper order is missing its deterministic decision link."
+          : overdueOutcomeCount > 0
+            ? `HT Agent has ${overdueOutcomeCount} overdue provider-time outcome observations.`
+          : !cycleFresh
+            ? "An unlocked HT Agent profile has no fresh successful decision cycle."
+            : "HT Agent Phase 1 is schema-ready, fail-closed, auditable, and isolated to HT Paper Trading.",
+      detail: {
+        frameVersion: "ht-agent-frame-v1",
+        policyVersion: controlResult.data?.policy_version ?? null,
+        globalKillSwitch: controlResult.data?.kill_switch ?? null,
+        profileCount: profiles.length,
+        unlockedActiveProfileCount: activeProfiles.length,
+        frameCount: framesResult.count ?? 0,
+        decisionCount: decisionsResult.count ?? decisions.length,
+        paperOrderCount: agentOrdersResult.count ?? agentOrders.length,
+        overdueOutcomeCount,
+        latestRuns: activeProfiles.map((profile) => latestRunsByProfile.get(profile.id) ?? null),
+        cycleFresh,
+        executionAuthority: "ht_labs_paper_only",
+        liveBrokerage: false,
+      },
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "ht_agent_phase1",
+      ok: false,
+      message: "HT Agent Phase 1 is unavailable; run migration 0030 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   const hardFailures = checks.filter((check) => !check.ok);
   const ok = hardFailures.length === 0;
 

@@ -1,9 +1,7 @@
-import {
-  ACTIVE_MARKET_DATA_MAX_AGE_MS,
-  isActiveMarketTimestampUsable,
-  marketTimestampMs,
-} from "./market-data-time";
-import { PROX_UNAVAILABLE_MARKET_ADJUSTMENT } from "./prox/public-authority";
+// @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
+import { ACTIVE_MARKET_DATA_MAX_AGE_MS, isActiveMarketTimestampUsable, marketTimestampMs } from "./market-data-time.ts";
+// @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
+import { PROX_UNAVAILABLE_MARKET_ADJUSTMENT } from "./prox/public-authority.ts";
 
 export const CANONICAL_DECISION_FRAME_VERSION =
   "rolling-canonical-decision-frame-v4-source-time-authority";

@@ -23,7 +23,8 @@ export type PaperOrderIntent = {
     | "spot_momentum"
     | "before_crowd"
     | "scanner"
-    | "ticker_detail";
+    | "ticker_detail"
+    | "ht_agent";
 };
 
 export type PaperQuote = {
@@ -94,6 +95,7 @@ const SOURCE_VALUES = new Set<PaperOrderIntent["strategySource"]>([
   "before_crowd",
   "scanner",
   "ticker_detail",
+  "ht_agent",
 ]);
 
 export const PAPER_TRADING_CONTRACT_VERSION = "ht-paper-trading-v2";

@@ -217,6 +217,36 @@ export async function fetchMassiveLastQuoteResult(
   };
 }
 
+export async function fetchMassiveHistoricalQuoteAtOrAfter(
+  symbol: string,
+  target: string | Date,
+  toleranceMs = 60_000,
+): Promise<MassiveLastQuote | null> {
+  const targetMs = (target instanceof Date ? target : new Date(target)).getTime();
+  if (!Number.isFinite(targetMs) || toleranceMs <= 0) return null;
+  const result = await massiveJson(
+    `/v3/quotes/${encodeURIComponent(symbol)}`,
+    {
+      "timestamp.gte": (BigInt(Math.floor(targetMs)) * BigInt(1_000_000)).toString(),
+      "timestamp.lte": (BigInt(Math.floor(targetMs + toleranceMs)) * BigInt(1_000_000)).toString(),
+      sort: "timestamp",
+      order: "asc",
+      limit: 1,
+    },
+  );
+  if (!result.ok || !Array.isArray(result.payload.results)) return null;
+  const quote = result.payload.results[0] as MassiveQuoteResult | undefined;
+  const timestampMs = massiveTimestampMs(quote?.sip_timestamp ?? quote?.t);
+  if (timestampMs === null) return null;
+  return {
+    bid: positiveNumber(quote?.p),
+    ask: positiveNumber(quote?.P),
+    bidSize: positiveNumber(quote?.s),
+    askSize: positiveNumber(quote?.S),
+    timestamp: new Date(timestampMs).toISOString(),
+  };
+}
+
 export async function fetchMassiveRecentTrades(
   symbol: string,
   options: { since: Date; limit?: number },

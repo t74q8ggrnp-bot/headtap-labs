@@ -479,6 +479,7 @@ export default function PaperTradingDashboard() {
               <Link href="/scanner" className="transition hover:text-white">Scanner</Link>
               <Link href="/crypto" className="transition hover:text-white">Crypto</Link>
               <span className="text-orange-300">Paper</span>
+              <Link href="/agent" className="transition hover:text-white">HT Agent</Link>
             </nav>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-semibold text-zinc-500"><span className="h-2 w-2 rounded-full bg-green-400 shadow-[0_0_14px_rgba(74,222,128,0.55)]" />Paper account active</div>
