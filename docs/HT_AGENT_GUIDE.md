@@ -93,6 +93,13 @@ their own target timestamp—not from the worker's current quote. Historical
 NBBO, provider time, unavailable states, DST-aware Eastern day boundaries, and
 the next eligible weekday session close are retained explicitly.
 
+The Agent allows ten minutes for a delayed or sparse verified bar to arrive.
+If no Massive bar exists after that bounded window, the outcome is completed as
+`unavailable` and excluded from performance math; it is never left as an
+unbounded backlog and never converted into a fabricated zero return. Health
+allows two additional one-minute worker cycles before declaring a record
+overdue.
+
 Phase 1 is not considered production-complete until migration 0030 is applied,
 tests and the production build pass, system health is green, no live brokerage
 execution path exists, and at least one decision-to-paper-exit lifecycle is

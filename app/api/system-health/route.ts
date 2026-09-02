@@ -53,6 +53,7 @@ import {
   PROX_MICROSTRUCTURE_VERSION,
 } from "@/lib/prox/microstructure";
 import { PAPER_TRADING_CONTRACT_VERSION } from "@/lib/paper-trading/engine";
+import { HT_AGENT_OUTCOME_HEALTH_GRACE_MS } from "@/lib/ht-agent/outcome-policy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -2875,7 +2876,9 @@ export async function GET() {
   // market pipeline falsely red before a user starts the Agent.
   try {
     if (!supabase) throw new Error("Supabase unavailable");
-    const overdueCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+    const overdueCutoff = new Date(
+      Date.now() - HT_AGENT_OUTCOME_HEALTH_GRACE_MS,
+    ).toISOString();
     const [controlResult, profilesResult, framesResult, decisionsResult, runsResult, agentOrdersResult, overdueOutcomesResult, controlEventsResult] = await Promise.all([
       supabase.from("ht_agent_global_control").select("kill_switch,policy_version,updated_at").eq("id", "global").single(),
       supabase.from("ht_agent_profiles").select("id,mode,status,kill_switch"),
@@ -2948,6 +2951,8 @@ export async function GET() {
         decisionCount: decisionsResult.count ?? decisions.length,
         paperOrderCount: agentOrdersResult.count ?? agentOrders.length,
         overdueOutcomeCount,
+        outcomeMeasurementGraceMinutes:
+          HT_AGENT_OUTCOME_HEALTH_GRACE_MS / 60_000,
         latestRuns: activeProfiles.map((profile) => latestRunsByProfile.get(profile.id) ?? null),
         cycleFresh,
         executionAuthority: "ht_labs_paper_only",

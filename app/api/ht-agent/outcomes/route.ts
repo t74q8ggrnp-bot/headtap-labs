@@ -6,12 +6,11 @@ import {
 } from "@/lib/massive-stocks";
 import {
   findProxOutcomeBarAtTarget,
-  isUsExtendedMarketTimestamp,
   normalizeProxOutcomeBars,
   PROX_OUTCOME_BAR_TOLERANCE_MS,
-  PROX_OUTCOME_UNAVAILABLE_AFTER_MS,
   type ProxOutcomeBar,
 } from "@/lib/prox/shadow-outcome-resolution";
+import { getHtAgentMissingOutcomeReason } from "@/lib/ht-agent/outcome-policy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -116,15 +115,12 @@ export async function GET(request: Request) {
   await mapWithConcurrency(rows, 10, async (row) => {
     const joined = row.ht_agent_decisions;
     const cohort = row.ht_agent_cohort_observations;
-    const targetMs = Date.parse(row.target_at);
     const bar = findProxOutcomeBarAtTarget(barsBySymbol.get(joined.symbol) ?? [], row.target_at);
     if (!bar) {
-      const ageMs = observedAt.getTime() - targetMs;
-      const terminalReason = ageMs >= PROX_OUTCOME_BAR_TOLERANCE_MS && !isUsExtendedMarketTimestamp(row.target_at)
-        ? "The U.S. equity market was closed at the target timestamp."
-        : ageMs >= PROX_OUTCOME_UNAVAILABLE_AFTER_MS
-          ? "No verified Massive market bar exists near the target timestamp."
-          : null;
+      const terminalReason = getHtAgentMissingOutcomeReason({
+        targetAt: row.target_at,
+        observedAt,
+      });
       if (!terminalReason) {
         pending += 1;
         return;
