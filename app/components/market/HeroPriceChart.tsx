@@ -13,6 +13,7 @@ import {
 } from "lightweight-charts";
 import type {
   MarketChartAsset,
+  MarketChartDisplayQuote,
   MarketChartResponse,
 } from "@/lib/market-chart";
 import { buildUniformMarketTimeSlots } from "@/lib/market-chart";
@@ -25,6 +26,7 @@ type HeroPriceChartProps = {
   accent?: "violet" | "orange" | "cyan";
   compact?: boolean;
   height?: number;
+  onQuoteUpdate?: (quote: MarketChartDisplayQuote | null) => void;
 };
 
 type ChartMode = "graph" | "candles";
@@ -133,6 +135,7 @@ export default function HeroPriceChart({
   accent = "violet",
   compact = false,
   height,
+  onQuoteUpdate,
 }: HeroPriceChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null);
   const chartApiRef = useRef<ReturnType<typeof createChart> | null>(null);
@@ -189,6 +192,10 @@ export default function HeroPriceChart({
       window.clearInterval(refreshInterval);
     };
   }, [asset, url]);
+
+  useEffect(() => {
+    onQuoteUpdate?.(data?.displayQuote ?? null);
+  }, [data?.displayQuote, onQuoteUpdate]);
 
   useEffect(() => {
     if (!chartRef.current || !dataReady) return;

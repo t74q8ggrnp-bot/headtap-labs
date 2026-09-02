@@ -1,6 +1,7 @@
 import {
   easternDateString,
   mergeMarketBars,
+  mergeVerifiedTradeIntoBars,
   normalizeMarketBars,
   rollupMarketBars,
   selectLatestEasternSessionBars,
@@ -10,6 +11,17 @@ import {
   type MarketChartResponse,
 } from "@/lib/market-chart";
 import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import {
+  fetchMassiveLastTrade,
+  fetchMassiveStockSnapshot,
+} from "@/lib/massive-stocks";
+import {
+  resolveSnapshotChangePercent,
+  resolveSnapshotDisplayPrice,
+  resolveSnapshotTimestampMs,
+} from "@/lib/polygon-snapshot";
+import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
+import { getStockMarketClock } from "@/lib/stock-market-session";
 
 const POLYGON_ORIGIN = "https://api.polygon.io";
 const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
@@ -54,6 +66,7 @@ function responseWithCache(
 async function fetchStockBars(symbol: string): Promise<{
   bars: MarketChartBar[];
   realTimeSeconds: boolean;
+  displayQuote?: MarketChartResponse["displayQuote"];
 }> {
   const apiKey = process.env.POLYGON_API_KEY;
   if (!apiKey) throw new Error("Stock chart provider is not configured.");
@@ -78,7 +91,7 @@ async function fetchStockBars(symbol: string): Promise<{
     limit: "50000",
     apiKey,
   });
-  const [response, secondResponse] = await Promise.all([
+  const [response, secondResponse, snapshot, lastTrade] = await Promise.all([
     fetch(`${POLYGON_ORIGIN}${path}?${params}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
@@ -87,6 +100,8 @@ async function fetchStockBars(symbol: string): Promise<{
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
     }),
+    fetchMassiveStockSnapshot(symbol),
+    fetchMassiveLastTrade(symbol),
   ]);
   if (!response.ok) {
     throw new Error(`Stock chart provider returned ${response.status}.`);
@@ -125,11 +140,48 @@ async function fetchStockBars(symbol: string): Promise<{
       ),
     );
   }
-  return {
-    bars: selectLatestEasternSessionBars(
+  const snapshotPrice = snapshot ? resolveSnapshotDisplayPrice(snapshot) : 0;
+  const snapshotTimestampMs = snapshot ? resolveSnapshotTimestampMs(snapshot) : null;
+  const tradeTimestampMs = lastTrade ? Date.parse(lastTrade.timestamp) : null;
+  const useTrade = Boolean(
+    lastTrade &&
+      tradeTimestampMs !== null &&
+      Number.isFinite(tradeTimestampMs) &&
+      (snapshotTimestampMs === null || tradeTimestampMs >= snapshotTimestampMs),
+  );
+  const displayPrice = useTrade ? lastTrade!.price : snapshotPrice;
+  const displayAsOfMs = useTrade ? tradeTimestampMs : snapshotTimestampMs;
+  const displayAsOf = displayAsOfMs && displayAsOfMs > 0
+    ? new Date(displayAsOfMs).toISOString()
+    : null;
+  const mergedBars = selectLatestEasternSessionBars(
+    mergeVerifiedTradeIntoBars(
       mergeMarketBars(minuteBars, secondBars),
+      displayPrice > 0 && displayAsOf
+        ? {
+            price: displayPrice,
+            size: useTrade ? lastTrade?.size ?? null : null,
+            timestamp: displayAsOf,
+          }
+        : null,
     ),
+  );
+  const clock = getStockMarketClock();
+  const displayQuote = snapshot && displayPrice > 0 && displayAsOf
+    ? {
+        price: displayPrice,
+        changePercent: resolveSnapshotChangePercent(snapshot, displayPrice),
+        asOf: displayAsOf,
+        live: clock.active && secondResponse.ok && isActiveMarketTimestampUsable(displayAsOf),
+        source: useTrade
+          ? "massive_polygon_last_trade" as const
+          : "massive_polygon_snapshot" as const,
+      }
+    : undefined;
+  return {
+    bars: mergedBars,
     realTimeSeconds: secondResponse.ok,
+    displayQuote,
   };
 }
 
@@ -202,10 +254,12 @@ export async function GET(request: Request) {
     let productId: string | undefined;
     let sourceLabel: string;
     let windowLabel: string;
+    let displayQuote: MarketChartResponse["displayQuote"];
 
     if (asset === "stock") {
       const stockFeed = await fetchStockBars(symbol);
       bars = stockFeed.bars;
+      displayQuote = stockFeed.displayQuote;
       sourceLabel = stockFeed.realTimeSeconds
         ? "Massive real-time minute + second aggregates"
         : "Massive minute aggregates";
@@ -247,6 +301,7 @@ export async function GET(request: Request) {
       dataMode: asset === "stock"
         ? (sourceLabel.includes("real-time") ? "real_time" : "delayed")
         : undefined,
+      ...(displayQuote ? { displayQuote } : {}),
       latestAt: new Date(latest.time * 1_000).toISOString(),
       summary,
       bars,

@@ -51,6 +51,26 @@ duplicate decisions or orders, position-count and position-risk violations,
 daily drawdown and gross-exposure violations, and unavailable buying power.
 There is deliberately no minimum share-price gate.
 
+`ht-agent-risk-v2-tradeability` also requires correctly ordered measurable
+entry/invalidation/target levels, modeled reward/risk of at least 1.5,
+Canonical entry quality of at least 55, and Canonical extension risk no higher
+than 65 for a new paper entry. These are Agent paper-policy gates. They do not
+change Canonical eligibility, ranking, or the one public opportunity score.
+
+## HT Trade Plan
+
+`ht-trade-plan-v1` is the backend-owned presentation contract for one Agent
+decision. It translates the immutable frame and deterministic risk result into
+one paper/research state: `wait`, `paper_entry_eligible`, `manage`, `reduce`,
+`exit`, `avoid`, or `unavailable`. It may show an NBBO entry band,
+confirmation trigger, invalidation, measured targets, reward/risk, chase risk,
+and plain-language confirmation and failure evidence.
+
+The plan defaults to no action. It must not fabricate a level when structure is
+unmeasurable, must never re-rank Canonical candidates, and must never present a
+ProX score as a second public score. The browser only formats the persisted
+plan; it does not derive a replacement status or price level.
+
 ## Research cohorts and evaluation
 
 Each evaluated candidate records three counterfactual cohorts from the same

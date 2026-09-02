@@ -133,8 +133,8 @@ function finiteAgeLimit(value: number) {
 function getSupabase() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey =
-    process.env.SUPABASE_SERVICE_KEY ||
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
@@ -1262,7 +1262,7 @@ export async function GET() {
           providerFailureCount:
             outcomeDiagnostics.providerFailureCount ?? null,
           episodeScorecardMigration:
-            "0025_prox_shadow_episode_scorecard.sql",
+            "0032_repair_prox_shadow_episode_scorecard.sql",
         },
       });
     }
@@ -1286,11 +1286,15 @@ export async function GET() {
     const scorecardWindowStart = new Date(
       Date.now() - 14 * 24 * 60 * 60 * 1000,
     ).toISOString();
-    const { count: episodeCount, error: episodeError } = await supabase
-      .from("prox_shadow_board_episode_representatives")
-      .select("*", { count: "exact", head: true })
-      .gte("decision_at", scorecardWindowStart);
+    const { data: episodeCountData, error: episodeError } = await supabase.rpc(
+      "prox_shadow_episode_count",
+      { p_window_start: scorecardWindowStart },
+    );
     if (episodeError) throw episodeError;
+    const episodeCount = Number(episodeCountData);
+    if (!Number.isFinite(episodeCount) || episodeCount < 0) {
+      throw new Error("ProX shadow episode count returned an invalid value.");
+    }
     checks.push({
       name: "prox_shadow_episode_scorecard",
       ok: true,
@@ -1299,7 +1303,7 @@ export async function GET() {
       detail: {
         authority: "shadow_research_only",
         windowDays: 14,
-        episodeCount: episodeCount ?? 0,
+        episodeCount,
         episodeDefinition:
           "first_ticker_date_session_disposition_decision",
       },
@@ -1309,7 +1313,7 @@ export async function GET() {
       name: "prox_shadow_episode_scorecard",
       ok: false,
       message:
-        "ProX shadow scorecard episode de-correlation is unavailable; run migration 0025 before deploying.",
+        "ProX shadow scorecard episode de-correlation is unavailable; run migrations 0032 and 0033 before deploying.",
       detail: getErrorMessage(
         err,
         "Unknown ProX shadow episode scorecard health-check error.",
@@ -2876,7 +2880,7 @@ export async function GET() {
       supabase.from("ht_agent_global_control").select("kill_switch,policy_version,updated_at").eq("id", "global").single(),
       supabase.from("ht_agent_profiles").select("id,mode,status,kill_switch"),
       supabase.from("ht_agent_decision_frames").select("id", { count: "exact", head: true }),
-      supabase.from("ht_agent_decisions").select("id,frame_id", { count: "exact" }).limit(5000),
+      supabase.from("ht_agent_decisions").select("id,frame_id,decision_version,trade_plan", { count: "exact" }).limit(5000),
       supabase.from("ht_agent_runs").select("id,profile_id,status,mode,started_at,completed_at,decision_count,order_count,diagnostics").order("started_at", { ascending: false }).limit(5000),
       supabase.from("paper_orders").select("id,ht_agent_decision_id,strategy_source,status", { count: "exact" }).eq("strategy_source", "ht_agent").limit(5000),
       supabase.from("ht_agent_outcomes").select("id", { count: "exact", head: true }).eq("complete", false).lt("target_at", overdueCutoff),
@@ -2899,13 +2903,21 @@ export async function GET() {
     });
     const decisions = decisionsResult.data ?? [];
     const decisionFrameComplete = decisions.every((decision) => Boolean(decision.frame_id));
+    const tradePlanComplete = decisions.every((decision) =>
+      decision.decision_version !== "ht-agent-decision-v2-trade-plan" || (
+        decision.trade_plan &&
+        typeof decision.trade_plan === "object" &&
+        (decision.trade_plan as Record<string, unknown>).version === "ht-trade-plan-v1"
+      ),
+    );
     const agentOrders = agentOrdersResult.data ?? [];
     const paperLinkComplete = agentOrders.every((order) => Boolean(order.ht_agent_decision_id));
     const paperOnly = agentOrders.every((order) => order.strategy_source === "ht_agent");
     const overdueOutcomeCount = overdueOutcomesResult.count ?? 0;
     const healthy =
-      controlResult.data?.policy_version === "ht-agent-risk-v1" &&
+      controlResult.data?.policy_version === "ht-agent-risk-v2-tradeability" &&
       decisionFrameComplete &&
+      tradePlanComplete &&
       paperLinkComplete &&
       paperOnly &&
       overdueOutcomeCount === 0 &&
@@ -2915,6 +2927,8 @@ export async function GET() {
       ok: healthy,
       message: !decisionFrameComplete
         ? "One or more HT Agent decisions is missing its immutable evidence frame."
+        : !tradePlanComplete
+          ? "One or more v2 HT Agent decisions is missing its backend-owned trade plan."
         : !paperLinkComplete || !paperOnly
           ? "An HT Agent paper order is missing its deterministic decision link."
           : overdueOutcomeCount > 0
@@ -2924,6 +2938,8 @@ export async function GET() {
             : "HT Agent Phase 1 is schema-ready, fail-closed, auditable, and isolated to HT Paper Trading.",
       detail: {
         frameVersion: "ht-agent-frame-v1",
+        decisionVersion: "ht-agent-decision-v2-trade-plan",
+        tradePlanVersion: "ht-trade-plan-v1",
         policyVersion: controlResult.data?.policy_version ?? null,
         globalKillSwitch: controlResult.data?.kill_switch ?? null,
         profileCount: profiles.length,
@@ -2942,7 +2958,7 @@ export async function GET() {
     checks.push({
       name: "ht_agent_phase1",
       ok: false,
-      message: "HT Agent Phase 1 is unavailable; run migration 0030 before deploying.",
+      message: "HT Agent trade-plan schema is unavailable; run migrations 0030 and 0031 before deploying.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }

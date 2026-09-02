@@ -14,6 +14,9 @@ export const DEFAULT_HT_AGENT_RISK_POLICY: HtAgentRiskPolicy = {
   maxOpenPositions: 6,
   riskBudgetPercent: 0.5,
   conservativeSlippageBps: 25,
+  minimumRiskReward: 1.5,
+  minimumEntryQuality: 55,
+  maximumExtensionRisk: 65,
 };
 
 const finite = (value: unknown): number | null => {
@@ -93,6 +96,12 @@ export function evaluateHtAgentRisk(
     ? (frame.paper.grossExposure + estimatedNotional) / equity * 100
     : Infinity;
   const projectedRiskPercent = equity > 0 ? maximumRisk / equity * 100 : Infinity;
+  const modeledRiskReward =
+    entry !== null && stop !== null && target !== null && stop < entry && target > entry
+      ? (target - entry) / (entry - stop)
+      : null;
+  const entryQuality = finite(frame.canonical.entryQuality);
+  const extensionRisk = finite(frame.canonical.extensionRisk);
 
   const rules: HtAgentRiskRule[] = [
     rule("global_kill_switch", !context.globalKillSwitch, context.globalKillSwitch, false, "Global kill switch must be off."),
@@ -105,6 +114,34 @@ export function evaluateHtAgentRisk(
     rule("liquidity", frame.market.dollarVolume >= policy.minDollarVolume, frame.market.dollarVolume, policy.minDollarVolume, "Dollar volume must meet the liquidity floor."),
     rule("halt", !frame.market.halted, frame.market.halted, false, "Halted symbols cannot enter."),
     rule("bad_print", !frame.market.badPrint, frame.market.badPrint, false, "Bad-print conditions cannot enter."),
+    rule(
+      "trade_levels",
+      modeledRiskReward !== null,
+      modeledRiskReward === null ? "unmeasurable" : Number(modeledRiskReward.toFixed(2)),
+      "measurable stop and target",
+      "Entry, invalidation, and continuation target must be measurable and correctly ordered.",
+    ),
+    rule(
+      "risk_reward",
+      modeledRiskReward !== null && modeledRiskReward >= policy.minimumRiskReward,
+      modeledRiskReward === null ? null : Number(modeledRiskReward.toFixed(2)),
+      policy.minimumRiskReward,
+      "Modeled reward/risk must clear the HT Agent paper floor.",
+    ),
+    rule(
+      "entry_quality",
+      entryQuality !== null && entryQuality >= policy.minimumEntryQuality,
+      entryQuality,
+      policy.minimumEntryQuality,
+      "Canonical entry quality must be measurable and clear the Agent floor.",
+    ),
+    rule(
+      "extension",
+      extensionRisk !== null && extensionRisk <= policy.maximumExtensionRisk,
+      extensionRisk,
+      policy.maximumExtensionRisk,
+      "Current extension risk is too high for a new paper entry.",
+    ),
     rule("duplicate", !context.duplicateDecision && !frame.paper.pendingOrderForSymbol, context.duplicateDecision || frame.paper.pendingOrderForSymbol, false, "Duplicate decisions and pending symbol orders are blocked."),
     rule("position_count", frame.paper.openPositionCount < policy.maxOpenPositions || frame.paper.symbolPositionQuantity !== 0, frame.paper.openPositionCount, policy.maxOpenPositions, "Open-position limit must be available."),
     rule("position_absent", frame.paper.symbolPositionQuantity === 0, frame.paper.symbolPositionQuantity, 0, "A new entry cannot duplicate an existing position."),

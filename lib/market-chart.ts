@@ -17,6 +17,14 @@ export type MarketChartSummary = {
   changePercent: number;
 };
 
+export type MarketChartDisplayQuote = {
+  price: number;
+  changePercent: number;
+  asOf: string;
+  live: boolean;
+  source: "massive_polygon_last_trade" | "massive_polygon_snapshot";
+};
+
 export type MarketChartResponse = {
   success: true;
   asset: MarketChartAsset;
@@ -25,6 +33,7 @@ export type MarketChartResponse = {
   windowLabel: string;
   sourceLabel: string;
   dataMode?: "real_time" | "delayed" | "unavailable";
+  displayQuote?: MarketChartDisplayQuote;
   latestAt: string;
   summary: MarketChartSummary;
   bars: MarketChartBar[];
@@ -144,6 +153,43 @@ export function mergeMarketBars(
   const merged = new Map(base.map((bar) => [bar.time, bar]));
   for (const bar of replacements) merged.set(bar.time, bar);
   return [...merged.values()].sort((left, right) => left.time - right.time);
+}
+
+/**
+ * Fold one verified provider trade into the minute series used by the chart.
+ * When the aggregate for that minute already exists, only its close/range is
+ * advanced; volume is not added twice. If the provider has not published the
+ * current aggregate yet, the single print is an honest provisional OHLC bar.
+ */
+export function mergeVerifiedTradeIntoBars(
+  bars: MarketChartBar[],
+  trade: { price: number; size: number | null; timestamp: string } | null,
+  bucketSeconds = 60,
+): MarketChartBar[] {
+  if (!trade || !(trade.price > 0) || !(bucketSeconds > 0)) return bars;
+  const timestampMs = Date.parse(trade.timestamp);
+  if (!Number.isFinite(timestampMs)) return bars;
+  const tradeTime = Math.floor(timestampMs / 1_000 / bucketSeconds) * bucketSeconds;
+  const latest = bars.at(-1);
+  if (latest && tradeTime < latest.time) return bars;
+
+  const existing = bars.find((bar) => bar.time === tradeTime);
+  const replacement: MarketChartBar = existing
+    ? {
+        ...existing,
+        high: round(Math.max(existing.high, trade.price)),
+        low: round(Math.min(existing.low, trade.price)),
+        close: round(trade.price),
+      }
+    : {
+        time: tradeTime,
+        open: round(trade.price),
+        high: round(trade.price),
+        low: round(trade.price),
+        close: round(trade.price),
+        volume: round(trade.size ?? 0, 2),
+      };
+  return mergeMarketBars(bars, [replacement]);
 }
 
 export function buildUniformMarketTimeSlots(

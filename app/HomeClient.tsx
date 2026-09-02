@@ -21,6 +21,7 @@ import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileExperience from "./components/mobile/MobileExperience";
 import { useMobileAppNavigation } from "./components/MobileAppNavigationContext";
 import CryptoMomentumPreview from "./components/crypto/CryptoMomentumPreview";
+import HomeTradePlan from "./components/agent/HomeTradePlan";
 import { supabase } from "@/lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
 import type {
@@ -1729,6 +1730,12 @@ export default function HomeClient({
                             </div>
                             <span className="text-[10px] font-black text-zinc-600">{mounted && canonicalLastUpdated ? canonicalLastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}</span>
                           </div>
+
+                          {apiHero && (
+                            <div className="px-5 pb-4">
+                              <HomeTradePlan symbol={apiHero.ticker} />
+                            </div>
+                          )}
 
                           <div className="ht-spot-momentum-columns grid grid-cols-1 divide-y divide-white/[0.06] xl:grid-cols-[0.92fr_0.92fr_1.08fr] xl:divide-x xl:divide-y-0">
                             {apiHero && (

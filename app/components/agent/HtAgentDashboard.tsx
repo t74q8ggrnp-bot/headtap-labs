@@ -4,7 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import type { HtAgentMode } from "@/lib/ht-agent/contracts";
+import type { HtAgentMode, HtTradePlan } from "@/lib/ht-agent/contracts";
+import HtTradePlanCard from "./HtTradePlanCard";
 
 type DecisionRow = {
   id: string;
@@ -20,6 +21,7 @@ type DecisionRow = {
   estimated_notional: number;
   risk_allowed: boolean;
   explanation: string;
+  trade_plan: HtTradePlan | null;
   decided_at: string;
 };
 
@@ -158,6 +160,19 @@ export default function HtAgentDashboard() {
                 {dashboard.control.globalKillSwitch && <p className="mt-3 text-xs text-red-300">Global kill switch: {dashboard.control.globalReason}</p>}
                 {message && <p className="mt-3 text-xs text-red-300">{message}</p>}
               </aside>
+            </section>
+
+            <section className="border-b border-white/8 px-5 py-5 lg:px-8">
+              {dashboard.decisions.find((decision) => decision.trade_plan?.version === "ht-trade-plan-v1")?.trade_plan ? (
+                <HtTradePlanCard
+                  plan={dashboard.decisions.find((decision) => decision.trade_plan?.version === "ht-trade-plan-v1")!.trade_plan!}
+                />
+              ) : (
+                <div className="rounded-2xl border border-dashed border-white/10 px-5 py-7 text-center">
+                  <p className="text-[9px] font-black uppercase tracking-[0.22em] text-cyan-300">HT Trade Plan</p>
+                  <p className="mt-2 text-sm font-bold text-zinc-500">No backend-owned plan exists yet. Run an aligned Observe cycle; HT Agent will not invent one.</p>
+                </div>
+              )}
             </section>
 
             <section className="grid lg:grid-cols-[1.2fr_.8fr]">

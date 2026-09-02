@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
-import { buildUniformMarketTimeSlots, easternDateString, mergeMarketBars, normalizeMarketBars, rollupMarketBars, selectLatestEasternSessionBars, summarizeMarketBars } from "./market-chart.ts";
+import { buildUniformMarketTimeSlots, easternDateString, mergeMarketBars, mergeVerifiedTradeIntoBars, normalizeMarketBars, rollupMarketBars, selectLatestEasternSessionBars, summarizeMarketBars } from "./market-chart.ts";
 
 test("normalizes, validates, orders, and deduplicates provider bars", () => {
   const bars = normalizeMarketBars([
@@ -63,6 +63,40 @@ test("real-time rolled candles replace the same minute from the minute feed", ()
   assert.equal(merged.length, 1);
   assert.equal(merged[0].close, 10.4);
   assert.equal(merged[0].volume, 100);
+});
+
+test("latest verified trade advances the current candle without double-counting volume", () => {
+  const bars = normalizeMarketBars([
+    { time: Date.parse("2026-09-02T13:05:00Z"), open: 10, high: 10.2, low: 9.9, close: 10.1, volume: 500 },
+  ]);
+  const merged = mergeVerifiedTradeIntoBars(bars, {
+    price: 10.35,
+    size: 25,
+    timestamp: "2026-09-02T13:05:42.000Z",
+  });
+  assert.equal(merged[0].high, 10.35);
+  assert.equal(merged[0].close, 10.35);
+  assert.equal(merged[0].volume, 500);
+});
+
+test("a verified print creates an honest provisional candle before its aggregate arrives", () => {
+  const bars = normalizeMarketBars([
+    { time: Date.parse("2026-09-02T13:04:00Z"), open: 10, high: 10.2, low: 9.9, close: 10.1, volume: 500 },
+  ]);
+  const merged = mergeVerifiedTradeIntoBars(bars, {
+    price: 10.25,
+    size: 25,
+    timestamp: "2026-09-02T13:05:02.000Z",
+  });
+  assert.equal(merged.length, 2);
+  assert.deepEqual(merged[1], {
+    time: Date.parse("2026-09-02T13:05:00Z") / 1_000,
+    open: 10.25,
+    high: 10.25,
+    low: 10.25,
+    close: 10.25,
+    volume: 25,
+  });
 });
 
 test("builds an honest uniform time axis without fabricating missing candles", () => {

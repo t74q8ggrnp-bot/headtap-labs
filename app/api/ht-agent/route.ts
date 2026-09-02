@@ -3,6 +3,7 @@ import { authenticatePaperRequest } from "@/lib/paper-trading/server";
 import {
   configureHtAgentProfile,
   loadHtAgentDashboard,
+  loadHtAgentTradePlans,
   resolveHtAgentProposal,
   runHtAgentCycle,
 } from "@/lib/ht-agent/server";
@@ -24,6 +25,9 @@ export async function GET(request: Request) {
   try {
     const context = await authenticatePaperRequest(request);
     if (!context) return response({ ok: false, error: "Authentication required." }, 401);
+    if (new URL(request.url).searchParams.get("view") === "trade_plans") {
+      return response({ ok: true, tradePlans: await loadHtAgentTradePlans(context) });
+    }
     return response({ ok: true, dashboard: await loadHtAgentDashboard(context) });
   } catch (error) {
     console.error("[ht-agent] dashboard failed", error);

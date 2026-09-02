@@ -31,10 +31,12 @@ import {
   type HtAgentDecisionFrame,
   type HtAgentMode,
   type HtAgentProxEvidence,
+  type HtTradePlan,
 } from "./contracts";
 import { buildHtAgentCohorts, decideHtAgentAction } from "./decision";
 import { DEFAULT_HT_AGENT_RISK_POLICY, evaluateHtAgentRisk } from "./risk";
 import { getEasternDayStart, getHtAgentSessionCloseTarget } from "./time";
+import { buildHtTradePlan } from "./trade-plan";
 
 type AgentProfileRow = {
   id: string;
@@ -54,6 +56,7 @@ type ProxMemberRow = {
   evidence_confidence: number | string;
   disposition: string;
   disposition_reason: string;
+  structure_assessment: unknown;
   hard_failures: unknown;
   reasons: unknown;
 };
@@ -160,7 +163,7 @@ async function loadProxEvidence(
   if (!run) return { run: null, members: new Map() };
   const memberResult = await service
     .from("prox_shadow_board_members")
-    .select("ticker,decision_at,edge_score,evidence_confidence,disposition,disposition_reason,hard_failures,reasons")
+    .select("ticker,decision_at,edge_score,evidence_confidence,disposition,disposition_reason,structure_assessment,hard_failures,reasons")
     .eq("run_id", run.id)
     .in("ticker", symbols);
   if (memberResult.error) throw memberResult.error;
@@ -181,6 +184,7 @@ function proxEvidence(run: ProxRunRow | null, member?: ProxMemberRow): HtAgentPr
       disposition: null,
       edgeScore: null,
       evidenceConfidence: null,
+      structure: null,
       reasons: ["No timestamp-aligned independent ProX member exists for this ticker."],
     };
   }
@@ -189,6 +193,9 @@ function proxEvidence(run: ProxRunRow | null, member?: ProxMemberRow): HtAgentPr
     .filter(Boolean)
     .slice(0, 8);
   const confidence = number(member.evidence_confidence);
+  const rawStructure = member.structure_assessment && typeof member.structure_assessment === "object"
+    ? member.structure_assessment as Record<string, unknown>
+    : null;
   const stance = member.disposition === "selected"
     ? "support"
     : member.disposition === "blocked" && failures.length > 0
@@ -203,6 +210,17 @@ function proxEvidence(run: ProxRunRow | null, member?: ProxMemberRow): HtAgentPr
     disposition: member.disposition,
     edgeScore: number(member.edge_score),
     evidenceConfidence: confidence,
+    structure: rawStructure ? {
+      measurable: rawStructure.measurable === true,
+      structuralSupport: number(rawStructure.structuralSupport, Number.NaN) || null,
+      invalidationPrice: number(rawStructure.invalidationPrice, Number.NaN) || null,
+      resistancePrice: number(rawStructure.resistancePrice, Number.NaN) || null,
+      scenarioRiskReward: number(rawStructure.scenarioRiskReward, Number.NaN) || null,
+      extensionAtrMultiple: number(rawStructure.extensionAtrMultiple, Number.NaN) || null,
+      extended: rawStructure.extended === true,
+      postPeakFailure: rawStructure.postPeakFailure === true,
+      severePeakFailure: rawStructure.severePeakFailure === true,
+    } : null,
     reasons,
   };
 }
@@ -212,10 +230,12 @@ function canonicalLevels(opportunity: Opportunity) {
   const entry = opportunity.price > 0 ? opportunity.price : null;
   const downside = framework?.downsideRisk ?? opportunity.explosionAssessment?.structuralDownsidePercent ?? null;
   const upside = framework?.upsideMin ?? opportunity.explosionAssessment?.scenarioBands?.base.min ?? null;
+  const upsideMax = framework?.upsideMax ?? opportunity.explosionAssessment?.scenarioBands?.base.max ?? null;
   return {
     entry,
     stop: entry && downside && downside > 0 ? entry * (1 - downside / 100) : null,
     target: entry && upside && upside > 0 ? entry * (1 + upside / 100) : null,
+    targetTwo: entry && upsideMax && upsideMax > 0 ? entry * (1 + upsideMax / 100) : null,
   };
 }
 
@@ -296,6 +316,8 @@ async function buildFrame(
       providerTimestamp: quote.timestamp,
       source: quote.source,
       marketSession: getEasternMarketSession(),
+      sessionHighPrice: opportunity.sessionHighPrice ?? null,
+      pullbackFromSessionHighPercent: opportunity.pullbackFromSessionHighPercent ?? null,
       halted: hasExplicitHaltEvidence(opportunity),
       badPrint,
     },
@@ -312,6 +334,15 @@ async function buildFrame(
       proposedEntry: levels.entry,
       proposedStop: levels.stop,
       proposedTarget: levels.target,
+      proposedTargetTwo: levels.targetTwo,
+      support: opportunity.tradeFramework?.support ?? null,
+      resistance: opportunity.tradeFramework?.resistance ?? null,
+      riskReward: opportunity.tradeFramework?.rrRatio ?? null,
+      entryQuality: opportunity.tradeFramework?.entryQuality ?? null,
+      extensionRisk: opportunity.tradeFramework?.extensionRisk ?? null,
+      whatChanged: opportunity.whatChanged,
+      riskNote: opportunity.riskNote,
+      riskTags: opportunity.riskTags,
     },
     prox,
     catalyst: {
@@ -371,6 +402,8 @@ async function buildManagedPositionFrame(
       providerTimestamp: quote.timestamp,
       source: quote.source,
       marketSession: getEasternMarketSession(),
+      sessionHighPrice: number((prior.market_facts as Record<string, unknown>)?.sessionHighPrice, Number.NaN) || null,
+      pullbackFromSessionHighPercent: number((prior.market_facts as Record<string, unknown>)?.pullbackFromSessionHighPercent, Number.NaN) || null,
       halted: false,
       badPrint: Boolean(bid && ask && (quote.price < bid * 0.9 || quote.price > ask * 1.1)),
     },
@@ -433,6 +466,7 @@ async function persistDecision(
     throw frameInsert.error;
   }
   const state = decision.requiresApproval ? "pending_approval" : "recorded";
+  const tradePlan = buildHtTradePlan(frame, decision, profile.mode);
   const decisionInsert = await context.service.from("ht_agent_decisions").insert({
     profile_id: profile.id,
     user_id: context.user.id,
@@ -453,6 +487,7 @@ async function persistDecision(
     risk_allowed: decision.risk.allowed,
     risk_rules: decision.risk.rules,
     explanation: decision.explanation,
+    trade_plan: tradePlan,
   }).select("id").single();
   if (decisionInsert.error) throw decisionInsert.error;
   const decisionId = String(decisionInsert.data.id);
@@ -478,7 +513,13 @@ async function persistDecision(
     profile_id: profile.id,
     user_id: context.user.id,
     event_type: decision.action === "prepare" ? "proposal_created" : "decision_recorded",
-    detail: { action: decision.action, risk_allowed: decision.risk.allowed, frame_hash: frameHash },
+    detail: {
+      action: decision.action,
+      risk_allowed: decision.risk.allowed,
+      frame_hash: frameHash,
+      trade_plan_version: tradePlan.version,
+      trade_plan_status: tradePlan.status,
+    },
   });
   if (event.error) throw event.error;
   const horizons = [
@@ -1043,6 +1084,7 @@ export async function resolveHtAgentProposal(
     risk_allowed: risk.allowed,
     risk_rules: risk.rules,
     explanation: `${String(row.explanation)} Approval was revalidated against a fresh immutable frame.`,
+    trade_plan: buildHtTradePlan(frame, refreshedDecision, profile.mode),
     updated_at: new Date().toISOString(),
   }).eq("id", decisionId);
   await context.service.from("ht_agent_decision_events").insert({
@@ -1062,7 +1104,7 @@ export async function loadHtAgentDashboard(context: PaperServerContext) {
     globalControl(context.service),
     loadPaperDashboard(context),
     context.service.from("ht_agent_decisions")
-      .select("id,symbol,action,state,mode,proposed_entry,proposed_stop,proposed_target,proposed_quantity,maximum_risk,estimated_notional,risk_allowed,explanation,paper_order_id,paper_order_result,decided_at")
+      .select("id,symbol,action,state,mode,proposed_entry,proposed_stop,proposed_target,proposed_quantity,maximum_risk,estimated_notional,risk_allowed,explanation,trade_plan,paper_order_id,paper_order_result,decided_at")
       .eq("profile_id", profile.id).order("decided_at", { ascending: false }).limit(100),
     context.service.from("ht_agent_runs")
       .select("id,status,mode,candidate_count,decision_count,order_count,started_at,completed_at,diagnostics,error_message")
@@ -1136,5 +1178,56 @@ export async function loadHtAgentDashboard(context: PaperServerContext) {
     runs: runs.data ?? [],
     cohortMetrics,
     riskPolicy: policyFromProfile(profile),
+  };
+}
+
+export async function loadHtAgentTradePlans(context: PaperServerContext) {
+  const profile = await getOrCreateHtAgentProfile(context);
+  const [control, decisions] = await Promise.all([
+    globalControl(context.service),
+    context.service.from("ht_agent_decisions")
+      .select("symbol,decision_version,trade_plan,decided_at")
+      .eq("profile_id", profile.id)
+      .order("decided_at", { ascending: false })
+      .limit(100),
+  ]);
+  if (decisions.error) throw decisions.error;
+  const activeSession = getEasternMarketSession();
+  const maximumAgeSeconds = activeSession === "closed" ? 72 * 60 * 60 : 5 * 60;
+  const seen = new Set<string>();
+  const plans = (decisions.data ?? []).flatMap((row) => {
+    const symbol = String(row.symbol);
+    if (seen.has(symbol)) return [];
+    const plan = row.trade_plan as HtTradePlan | null;
+    if (!plan || plan.version !== "ht-trade-plan-v1") return [];
+    seen.add(symbol);
+    const evidenceAt = Date.parse(plan.evidenceAsOf);
+    const ageSeconds = Number.isFinite(evidenceAt)
+      ? Math.max(0, (Date.now() - evidenceAt) / 1000)
+      : Infinity;
+    return [{
+      symbol,
+      decidedAt: String(row.decided_at),
+      current: ageSeconds <= maximumAgeSeconds,
+      ageSeconds: Number.isFinite(ageSeconds) ? Number(ageSeconds.toFixed(1)) : null,
+      plan,
+    }];
+  });
+  return {
+    generatedAt: new Date().toISOString(),
+    marketSession: activeSession,
+    control: {
+      globalKillSwitch: control.kill_switch,
+      profileKillSwitch: profile.kill_switch,
+      mode: profile.mode,
+    },
+    plans,
+    authority: {
+      detection: "canonical",
+      research: "independent_prox",
+      decision: "ht_agent",
+      execution: "ht_labs_paper_only",
+      liveBrokerage: false,
+    },
   };
 }
