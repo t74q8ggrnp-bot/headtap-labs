@@ -26,6 +26,7 @@ export default function LegalDocument({
           </Link>
           <div className="flex flex-wrap gap-2 text-xs font-black uppercase tracking-[0.12em] text-zinc-400">
             <Link href="/account" className="rounded-full border border-white/10 px-4 py-2 hover:border-orange-400/50 hover:text-white">Account</Link>
+            <Link href="/support" className="rounded-full border border-white/10 px-4 py-2 hover:border-orange-400/50 hover:text-white">Support</Link>
             <Link href="/privacy" className="rounded-full border border-white/10 px-4 py-2 hover:border-orange-400/50 hover:text-white">Privacy</Link>
             <Link href="/terms" className="rounded-full border border-white/10 px-4 py-2 hover:border-orange-400/50 hover:text-white">Terms</Link>
           </div>

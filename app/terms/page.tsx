@@ -52,7 +52,7 @@ export default function TermsPage() {
 
       <section>
         <h2>Suspension, changes, and contact</h2>
-        <p>Access may be restricted or terminated for misuse, security threats, legal requirements, or violation of these terms. We may update these terms as HT Labs evolves; continued use after an update means you accept the revised terms. Questions may be sent through the public support contact listed on the HT Labs App Store listing or website.</p>
+        <p>Access may be restricted or terminated for misuse, security threats, legal requirements, or violation of these terms. We may update these terms as HT Labs evolves; continued use after an update means you accept the revised terms. Questions may be sent through <Link href="/support">HT Labs Support</Link> or to <a href="mailto:support@gethtlabs.com">support@gethtlabs.com</a>.</p>
       </section>
     </LegalDocument>
   );

@@ -59,7 +59,7 @@ export default function PrivacyPolicyPage() {
 
       <section>
         <h2>Changes and contact</h2>
-        <p>We may update this policy as the product changes. The effective date above identifies the latest version. Privacy requests can be handled through the <Link href="/account">in-app account controls</Link>. If you cannot access your account, use the public support contact published on the HT Labs App Store listing or website.</p>
+        <p>We may update this policy as the product changes. The effective date above identifies the latest version. Privacy requests can be handled through the <Link href="/account">in-app account controls</Link>. If you cannot access your account, visit <Link href="/support">HT Labs Support</Link> or email <a href="mailto:support@gethtlabs.com">support@gethtlabs.com</a>.</p>
       </section>
     </LegalDocument>
   );
