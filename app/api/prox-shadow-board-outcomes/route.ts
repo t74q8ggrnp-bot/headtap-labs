@@ -33,12 +33,13 @@ export const maxDuration = 300;
 const POLYGON_KEY = process.env.POLYGON_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
 const POLYGON_AGGREGATES_ORIGIN = "https://api.polygon.io/v2/aggs/ticker";
-const ACTIVE_MEMBER_BATCH_LIMIT = 5000;
-const DUE_HORIZON_BATCH_LIMIT = 20000;
+const ACTIVE_MEMBER_BATCH_LIMIT = 500;
+const DUE_HORIZON_BATCH_LIMIT = 4000;
 const DUE_HORIZON_PAGE_SIZE = 1000;
-const TICKER_BATCH_LIMIT = 500;
+const TICKER_BATCH_LIMIT = 100;
 const POLYGON_FETCH_CONCURRENCY = 15;
-const WRITE_BATCH_SIZE = 100;
+const WRITE_BATCH_SIZE = 500;
+const EXPECTED_HORIZONS_PER_MEMBER = 8;
 
 type MemberOutcomeRow = {
   id: string;
@@ -315,11 +316,34 @@ export async function GET(request: Request) {
   const now = new Date();
   const observedAt = now.toISOString();
   const minute = observationMinute(now);
-  let runId: string | null = null;
+  const workerId = crypto.randomUUID();
+  let runId: string | null = workerId;
+
+  const lease = await supabase.rpc("prox_shadow_outcome_worker_begin", {
+    p_worker_id: workerId,
+  });
+  if (lease.error) {
+    return NextResponse.json({
+      error: "ProX outcome worker migration 0046 is unavailable.",
+      authority: "shadow_research_only",
+    }, { status: 503 });
+  }
+  const leaseState = lease.data && typeof lease.data === "object"
+    ? lease.data as Record<string, unknown>
+    : null;
+  if (leaseState?.allowed !== true) {
+    return NextResponse.json({
+      success: true,
+      state: "worker_in_progress",
+      authority: "shadow_research_only",
+      timestamp: observedAt,
+    }, { status: 202 });
+  }
 
   const { data: run, error: runError } = await supabase
     .from("prox_shadow_board_outcome_runs")
     .insert({
+      id: workerId,
       observed_at: observedAt,
       observation_minute: minute,
       engine_version: PROX_SHADOW_BOARD_OUTCOMES_VERSION,
@@ -335,6 +359,10 @@ export async function GET(request: Request) {
         .eq("observation_minute", minute)
         .eq("engine_version", PROX_SHADOW_BOARD_OUTCOMES_VERSION)
         .maybeSingle();
+      await supabase.rpc("prox_shadow_outcome_worker_finish", {
+        p_worker_id: workerId,
+        p_summary: { deduplicated: true },
+      });
       return NextResponse.json({
         success: existing?.status === "success",
         deduplicated: true,
@@ -343,6 +371,10 @@ export async function GET(request: Request) {
         timestamp: new Date().toISOString(),
       });
     }
+    await supabase.rpc("prox_shadow_outcome_worker_finish", {
+      p_worker_id: workerId,
+      p_summary: { failed: true, stage: "run_insert" },
+    });
     return NextResponse.json(
       {
         error:
@@ -388,11 +420,28 @@ export async function GET(request: Request) {
       selectedTickers.has(member.ticker.toUpperCase()),
     );
 
-    await ensureMemberHorizons(supabase, members);
-    const horizonRows = await readMemberHorizons(
+    let horizonRows = await readMemberHorizons(
       supabase,
       members.map((member) => member.id),
     );
+    const horizonCounts = new Map<string, number>();
+    for (const horizon of horizonRows) {
+      horizonCounts.set(
+        horizon.member_outcome_id,
+        (horizonCounts.get(horizon.member_outcome_id) ?? 0) + 1,
+      );
+    }
+    const incompleteHorizonMembers = members.filter(
+      (member) => (horizonCounts.get(member.id) ?? 0) < EXPECTED_HORIZONS_PER_MEMBER,
+    );
+    if (incompleteHorizonMembers.length > 0) {
+      await ensureMemberHorizons(supabase, incompleteHorizonMembers);
+      const refreshedIds = new Set(incompleteHorizonMembers.map((member) => member.id));
+      horizonRows = [
+        ...horizonRows.filter((horizon) => !refreshedIds.has(horizon.member_outcome_id)),
+        ...await readMemberHorizons(supabase, [...refreshedIds]),
+      ];
+    }
     const horizonsByMember = new Map<string, HorizonRow[]>();
     for (const horizon of horizonRows) {
       const group = horizonsByMember.get(horizon.member_outcome_id) ?? [];
@@ -410,6 +459,7 @@ export async function GET(request: Request) {
     }
     const tickerBars = new Map<string, ProxOutcomeBar[]>();
     const providerFailures: Array<{ ticker: string; message: string }> = [];
+    const providerFailureTickers = new Set<string>();
     await mapWithConcurrency(
       [...selectedTickers],
       POLYGON_FETCH_CONCURRENCY,
@@ -433,6 +483,7 @@ export async function GET(request: Request) {
               `Polygon historical bars failed for ${ticker}.`,
             ),
           });
+          providerFailureTickers.add(ticker);
         }
       },
     );
@@ -452,7 +503,9 @@ export async function GET(request: Request) {
     let updatedMemberCount = 0;
 
     for (const member of members) {
-      const bars = tickerBars.get(member.ticker.toUpperCase()) ?? [];
+      const normalizedTicker = member.ticker.toUpperCase();
+      const bars = tickerBars.get(normalizedTicker) ?? [];
+      const providerFailed = providerFailureTickers.has(normalizedTicker);
       const memberHorizons = horizonsByMember.get(member.id) ?? [];
       const dueHorizons = memberHorizons.filter(
         (horizon) =>
@@ -471,6 +524,11 @@ export async function GET(request: Request) {
       }
 
       for (const horizon of dueHorizons) {
+        if (providerFailed) {
+          unavailableOutcomeCount += 1;
+          deferredOutcomeCount += 1;
+          continue;
+        }
         const resolved = resolveProxOutcomeHorizon({
           horizon: horizon.horizon,
           targetAt: horizon.target_at,
@@ -648,6 +706,19 @@ export async function GET(request: Request) {
       .eq("id", runId);
     if (completionError) throw completionError;
 
+    const leaseCompletion = await supabase.rpc("prox_shadow_outcome_worker_finish", {
+      p_worker_id: workerId,
+      p_summary: {
+        success: complete,
+        dueOutcomeCount,
+        persistedOutcomeCount,
+        deferredOutcomeCount,
+        processedMemberCount: members.length,
+        selectedTickerCount: selectedTickers.size,
+      },
+    });
+    if (leaseCompletion.error) throw leaseCompletion.error;
+
     return NextResponse.json({
       success: complete,
       authority: "shadow_research_only",
@@ -675,6 +746,10 @@ export async function GET(request: Request) {
         })
         .eq("id", runId);
     }
+    await supabase.rpc("prox_shadow_outcome_worker_finish", {
+      p_worker_id: workerId,
+      p_summary: { failed: true },
+    });
     return NextResponse.json(
       { error: message, authority: "shadow_research_only" },
       { status: 500 },

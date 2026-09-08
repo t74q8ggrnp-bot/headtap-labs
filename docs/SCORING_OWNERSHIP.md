@@ -42,6 +42,16 @@ may not select a replacement, sort them again, or change eligibility.
 
 ## Independent ProX shadow owner
 
+### Crypto live research (not a public owner)
+
+`lib/crypto/live-research.ts` is the separate `crypto-live-research-v1`
+raw-evidence evaluator requested on 2026-09-02. It has no public, ProX stock,
+Agent execution or bot authority. `docs/CRYPTO_LIVE_RESEARCH_V1.md` records its
+initial weights, strict timestamp contract, cost assumptions and pending
+promotion requirements. The existing crypto decision owner above is unchanged.
+
+### Independent stock ProX
+
 `app/api/prox-shadow-board/route.ts` owns the separate, research-only ProX
 shadow frame. Its score and rank are produced by `lib/prox/edge-score.ts`,
 `lib/prox/market-structure.ts`, and `lib/prox/shadow-board.ts` from independent
@@ -78,6 +88,14 @@ Verified Massive Advanced transport supplies real-time stock snapshots, last
 trades, NBBO quotes, and second aggregates. Transport freshness may determine
 whether an existing decision contract can act, but it does not grant the data
 provider, browser, chart, or UI any scoring or eligibility authority.
+
+Closed-session presentation is separate from active decision authority. Rolling
+frame v5 reports retained last-session data with original provider times, source
+run/date and an explicit integrity receipt, while `fresh` remains false and
+`freshUntil` remains null. Health may accept verified historical display integrity
+only while the stock clock is closed. This does not authorize Agent entries,
+rehabilitate misaligned ProX evidence, or modify any ranking/eligibility formula.
+Desktop/mobile consumers must not interpret a new `presentedAt` as market freshness.
 
 ## Legacy local intelligence still in `app/page.tsx`
 

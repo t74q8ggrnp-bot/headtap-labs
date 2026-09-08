@@ -234,7 +234,7 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
     relativeVolume: numberValue(source.relativeVolume ?? source.relative_volume),
     crowdStage: numberValue(source.crowdStage),
     scannedAt: (source.scannedAt ?? source.scanned_at ?? null) as string | null,
-    freshnessLabel: String(source.freshnessLabel ?? "Live Scan"),
+    freshnessLabel: String(source.freshnessLabel ?? "Last Verified Signal"),
     tradeFramework: (source.tradeFramework ?? null) as TradeFrameworkResult | null,
     explosionAssessment: (source.explosionAssessment ??
       null) as ExplosionAssessment | null,

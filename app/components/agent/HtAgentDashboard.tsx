@@ -46,9 +46,37 @@ const money = (value: number | null | undefined) => value === null || value === 
   ? "—"
   : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
 
+const price = (value: number | null | undefined) => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  const digits = Math.abs(value) < 0.01 ? 6 : Math.abs(value) < 1 ? 4 : 2;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+};
+
+function publicActionLabel(action: string) {
+  if (action === "reject") return "observed";
+  if (action === "expire") return "expired";
+  return action;
+}
+
+function hasEntryProposal(decision: DecisionRow) {
+  return ["prepare", "enter"].includes(decision.action)
+    && decision.proposed_entry !== null
+    && decision.proposed_entry > 0
+    && decision.proposed_stop !== null
+    && decision.proposed_stop > 0
+    && decision.proposed_stop < decision.proposed_entry
+    && decision.proposed_target !== null
+    && decision.proposed_target > decision.proposed_entry;
+}
+
 function badgeTone(action: string) {
   if (["enter", "manage"].includes(action)) return "border-emerald-400/25 bg-emerald-500/10 text-emerald-300";
-  if (["exit", "reduce", "reject", "expire"].includes(action)) return "border-red-400/25 bg-red-500/10 text-red-300";
+  if (["exit", "reduce"].includes(action)) return "border-red-400/25 bg-red-500/10 text-red-300";
   if (action === "prepare") return "border-orange-400/25 bg-orange-500/10 text-orange-300";
   return "border-violet-400/20 bg-violet-500/10 text-violet-300";
 }
@@ -175,43 +203,33 @@ export default function HtAgentDashboard() {
               )}
             </section>
 
-            <section className="grid lg:grid-cols-[1.2fr_.8fr]">
-              <div className="border-b border-white/8 p-5 lg:border-b-0 lg:border-r lg:p-8">
+            <section className="border-b border-white/8 px-5 py-5 lg:px-8">
+              <div className="flex items-center justify-between gap-4"><h2 className="text-lg font-black">Paper positions</h2><div className="text-right text-[10px] text-zinc-500"><span>{dashboard.riskUtilization.openPositions}/{dashboard.riskUtilization.maximumPositions} slots</span><span className="ml-4">{dashboard.riskUtilization.grossExposurePercent.toFixed(1)}% utilized</span></div></div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {dashboard.paper.positions.map((position) => <div key={position.symbol} className="flex items-center justify-between rounded-xl border border-white/8 bg-black/20 p-3"><div><strong>{position.symbol}</strong><p className="text-[10px] text-zinc-600">{position.side} · {position.quantity} shares</p></div><div className="text-right"><p className="font-mono text-sm">{price(position.currentPrice)}</p><p className={`font-mono text-[10px] ${(position.unrealizedPnl ?? 0) >= 0 ? "text-emerald-300" : "text-red-300"}`}>{money(position.unrealizedPnl)}</p></div></div>)}
+                {dashboard.paper.positions.length === 0 && <p className="rounded-xl border border-white/8 bg-black/20 p-4 text-sm text-zinc-600 sm:col-span-2 xl:col-span-3">No open paper positions.</p>}
+              </div>
+            </section>
+
+            <section className="p-5 lg:p-8">
+              <div>
                 <div className="flex items-center justify-between"><h2 className="text-lg font-black">Decision stream</h2><span className="text-[9px] font-bold uppercase tracking-wider text-zinc-600">Includes no-trades</span></div>
-                <div className="mt-4 grid gap-3">
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
                   {dashboard.decisions.slice(0, 16).map((decision) => <article key={decision.id} className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><strong className="text-xl">{decision.symbol}</strong><span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase ${badgeTone(decision.action)}`}>{decision.action}</span><span className="text-[9px] uppercase text-zinc-600">{decision.state}</span></div><time className="text-[10px] text-zinc-600">{new Date(decision.decided_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time></div>
+                    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><strong className="text-xl">{decision.symbol}</strong><span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase ${badgeTone(decision.action)}`}>{publicActionLabel(decision.action)}</span><span className="text-[9px] uppercase text-zinc-600">{decision.state}</span></div><time className="text-[10px] text-zinc-600">{new Date(decision.decided_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time></div>
                     <p className="mt-3 text-xs leading-5 text-zinc-500">{decision.explanation}</p>
-                    <div className="mt-3 grid grid-cols-4 gap-2 font-mono text-[10px] text-zinc-400"><span>Entry {money(decision.proposed_entry)}</span><span>Stop {money(decision.proposed_stop)}</span><span>Target {money(decision.proposed_target)}</span><span>Risk {money(decision.maximum_risk)}</span></div>
+                    {hasEntryProposal(decision) ? (
+                      <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[10px] text-zinc-400 sm:grid-cols-4"><span>Entry {price(decision.proposed_entry)}</span><span>Stop {price(decision.proposed_stop)}</span><span>Target {price(decision.proposed_target)}</span><span>Max risk {money(decision.maximum_risk)}</span></div>
+                    ) : ["manage", "reduce", "exit"].includes(decision.action) ? (
+                      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 font-mono text-[10px] text-zinc-400"><span>Reference {price(decision.proposed_entry)}</span><span>{decision.proposed_quantity} shares</span></div>
+                    ) : (
+                      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[10px] text-zinc-600"><span>Observed at {price(decision.proposed_entry)}</span><span>No paper order created</span></div>
+                    )}
                     {decision.state === "pending_approval" && <div className="mt-4 flex gap-2"><button disabled={busy} onClick={() => void act({ action: "approve", decisionId: decision.id })} className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-black text-black">Approve paper</button><button disabled={busy} onClick={() => void act({ action: "decline", decisionId: decision.id })} className="rounded-lg border border-white/10 px-4 py-2 text-xs font-black text-zinc-400">Decline</button></div>}
                   </article>)}
                   {dashboard.decisions.length === 0 && <div className="rounded-2xl border border-dashed border-white/10 p-10 text-center text-sm text-zinc-600">Run the first aligned decision cycle. Observe mode is the safest starting point.</div>}
                 </div>
               </div>
-              <aside className="p-5 lg:p-8">
-                <h2 className="text-lg font-black">Paper portfolio</h2>
-                <div className="mt-4 grid gap-2">{dashboard.paper.positions.map((position) => <div key={position.symbol} className="flex items-center justify-between rounded-xl border border-white/8 p-3"><div><strong>{position.symbol}</strong><p className="text-[10px] text-zinc-600">{position.side} · {position.quantity} shares</p></div><div className="text-right"><p className="font-mono text-sm">{money(position.currentPrice)}</p><p className={`font-mono text-[10px] ${(position.unrealizedPnl ?? 0) >= 0 ? "text-emerald-300" : "text-red-300"}`}>{money(position.unrealizedPnl)}</p></div></div>)}{dashboard.paper.positions.length === 0 && <p className="rounded-xl border border-white/8 p-5 text-sm text-zinc-600">No open paper positions.</p>}</div>
-                <h2 className="mt-8 text-lg font-black">Shadow cohorts</h2>
-                <div className="mt-4 grid gap-2">
-                  {dashboard.cohortMetrics.map((metric) => (
-                    <div key={metric.cohort} className="rounded-xl border border-white/8 p-3">
-                      <div className="flex justify-between text-xs font-bold">
-                        <span>{metric.cohort.replaceAll("_", " + ")}</span>
-                        <span className="font-mono text-violet-300">{metric.wouldEnter}/{metric.observations}</span>
-                      </div>
-                      <div className="mt-2 h-1 overflow-hidden rounded bg-white/5">
-                        <div className="h-full bg-violet-400" style={{ width: `${metric.observations ? metric.wouldEnter / metric.observations * 100 : 0}%` }} />
-                      </div>
-                      <div className="mt-2 flex justify-between font-mono text-[9px] text-zinc-600">
-                        <span>{metric.measuredOutcomes} measured</span>
-                        <span>avg {metric.averageReturnPercent === null ? "—" : `${metric.averageReturnPercent.toFixed(2)}%`} · win {metric.positiveRatePercent === null ? "—" : `${metric.positiveRatePercent.toFixed(0)}%`}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-4 rounded-xl border border-white/8 p-3 text-[10px] text-zinc-500"><div className="flex justify-between"><span>Gross risk utilization</span><strong className="font-mono text-zinc-300">{dashboard.riskUtilization.grossExposurePercent.toFixed(1)}%</strong></div><div className="mt-2 flex justify-between"><span>Agent portfolio slots</span><strong className="font-mono text-zinc-300">{dashboard.riskUtilization.openPositions}/{dashboard.riskUtilization.maximumPositions}</strong></div></div>
-                <div className="mt-8 rounded-2xl border border-cyan-400/15 bg-cyan-500/[0.035] p-4 text-[11px] leading-5 text-zinc-500"><strong className="text-cyan-300">Authority lock</strong><br />Canonical → detection/ranking<br />ProX → independent research<br />Risk v1 → deterministic gate<br />HT Paper → sole execution destination<br />Live brokerage → disabled</div>
-              </aside>
             </section>
           </>
         )}

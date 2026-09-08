@@ -14,9 +14,8 @@ export default function PriceDiscoveryWindow({
 }: PriceDiscoveryWindowProps) {
   const scenarios = assessment.scenarioBands;
   if (!scenarios) {
-    if (!compact) return null;
     return (
-      <div className="rounded-xl border border-violet-400/20 bg-violet-500/[0.04] p-3.5">
+      <div className={`rounded-xl border border-violet-400/20 bg-violet-500/[0.04] ${compact ? "p-3.5" : "p-4"}`}>
         <div className="flex items-center justify-between gap-3">
           <p className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-400">
             Price Discovery
@@ -25,8 +24,11 @@ export default function PriceDiscoveryWindow({
             {assessment.score}/100
           </p>
         </div>
-        <p className="mt-2 text-[10px] font-semibold leading-4 text-zinc-500">
-          {assessment.summary}
+        <p className="mt-2 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300">
+          Scenario not measurable
+        </p>
+        <p className="mt-1 text-[10px] font-semibold leading-4 text-zinc-500">
+          {assessment.scenarioUnavailableReason ?? assessment.summary}
         </p>
       </div>
     );

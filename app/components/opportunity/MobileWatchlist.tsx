@@ -1,5 +1,6 @@
 import type { MarketStock } from "@/lib/contracts/market";
 import type { Opportunity } from "@/lib/opportunity-model";
+import LiveStockValue from "@/app/components/market/LiveStockValue";
 
 type MobileWatchlistProps = {
   tickers: string[];
@@ -46,9 +47,9 @@ export default function MobileWatchlist({
                   <p className="text-[10px] font-semibold text-zinc-500">{opportunity?.stage ?? "Watchlist"}</p>
                 </div>
                 <div className="text-right">
-                  {price > 0 && <p className="font-mono text-[10px] font-semibold text-zinc-600">${price.toFixed(2)}</p>}
+                  <p className="font-mono text-[10px] font-semibold text-zinc-600"><LiveStockValue symbol={ticker} fallback={price > 0 ? price : undefined} /></p>
                   <p className={`font-mono text-base font-black ${change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                    {change >= 0 ? "+" : ""}{change.toFixed(2)}%
+                    <LiveStockValue symbol={ticker} field="change" fallback={change} />
                   </p>
                   <p className="text-[10px] font-black text-orange-300">
                     {opportunity ? `HT ${Math.round(opportunity.opportunityScore)}` : "Not ranked"}

@@ -1,5 +1,7 @@
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
 import { HT_AGENT_DECISION_VERSION, type HtAgentDecision, type HtAgentDecisionFrame, type HtAgentMode, type HtAgentRiskResult } from "./contracts.ts";
+// @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
+import { htAgentRootFailures } from "./risk.ts";
 
 export function decideHtAgentAction(
   frame: HtAgentDecisionFrame,
@@ -73,7 +75,7 @@ export function decideHtAgentAction(
     };
   }
   if (!risk.allowed) {
-    const failed = risk.rules.filter((item) => item.blocking && !item.passed);
+    const failed = htAgentRootFailures(risk.rules);
     return {
       version: HT_AGENT_DECISION_VERSION,
       action: failed.some((item) => item.code.includes("fresh") || item.code.includes("timestamp"))
@@ -118,9 +120,14 @@ export function decideHtAgentAction(
 export function buildHtAgentCohorts(frame: HtAgentDecisionFrame, decision: HtAgentDecision) {
   const canonicalWouldEnter = frame.canonical.eligible;
   const proxWouldEnter = canonicalWouldEnter && frame.prox.stance !== "veto";
+  // Qualification is counterfactual; mode controls permission to create an
+  // order, not whether the same setup belongs in the research cohort.
+  const fullWouldEnter = proxWouldEnter && frame.paper.symbolPositionQuantity === 0 && decision.risk.allowed;
   return [
     { cohort: "canonical_only", wouldEnter: canonicalWouldEnter, reason: canonicalWouldEnter ? "Canonical eligible" : "Canonical rejected" },
     { cohort: "canonical_prox", wouldEnter: proxWouldEnter, reason: frame.prox.stance === "veto" ? "Independent ProX veto" : `ProX ${frame.prox.stance}` },
-    { cohort: "ht_agent_full", wouldEnter: decision.action === "enter" || decision.action === "prepare", reason: decision.explanation },
+    { cohort: "ht_agent_full", wouldEnter: fullWouldEnter, reason: fullWouldEnter
+      ? "Qualified under the complete paper policy; execution mode is evaluated separately."
+      : decision.explanation },
   ] as const;
 }

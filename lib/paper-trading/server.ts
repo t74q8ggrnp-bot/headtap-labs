@@ -359,9 +359,10 @@ export async function loadPaperDashboard(
     positions,
     orders,
     fills,
-    disclosure: account.data_mode === "delayed"
-      ? "Simulation only. Quotes and fills use delayed market data and may differ materially from executable market prices."
-      : "Simulation only. Paper fills may differ from executable market prices.",
+    // This account-level field defaults to delayed at creation and is not a
+    // current quote receipt. Actual orders/fills record their own data mode.
+    // Do not label every quote delayed (or live) based on old account metadata.
+    disclosure: "Simulation only. Quote timing varies by source; check the displayed market-data timestamp. Paper fills may differ materially from executable market prices.",
     generatedAt: new Date().toISOString(),
   };
 }

@@ -109,7 +109,12 @@ export default function MarketValidationCockpit() {
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0);
-    const interval = window.setInterval(() => void refresh(), 30_000);
+    // This endpoint intentionally performs the deep release audit. Keep that
+    // work on the internal cockpit and refresh it at an operator cadence, not
+    // at the same cadence as ordinary market data.
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 5 * 60_000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(interval);

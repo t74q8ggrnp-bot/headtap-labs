@@ -14,11 +14,16 @@ import {
 } from "@/lib/canonical-momentum";
 import { evaluateProxPublicAuthority } from "@/lib/prox/public-authority";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
+import { getStockMarketClock, stockHistoryLabel } from "@/lib/stock-market-session";
+import {
+  buildPriceDiscoveryScenario,
+  type PriceDiscoveryScenarioBands,
+} from "@/lib/price-discovery-scenarios";
 
 export { getCanonicalMomentumMagnitude } from "@/lib/canonical-momentum";
 
 export const CANONICAL_OPPORTUNITY_VERSION =
-  "opportunities-v18-temporal-peak-damage";
+  "opportunities-v19-scenario-integrity";
 export const ACTIVE_SESSION_MAX_SIGNAL_AGE_MS = 20 * 60 * 1000;
 export const EXTREME_MOMENTUM_MIN_CHANGE = 25;
 export const EXTREME_MOMENTUM_MIN_RVOL = 3;
@@ -111,27 +116,8 @@ export type ExplosionAssessment = {
   expansionCase: string;
   tailCase: string;
   invalidation: string;
-  scenarioBands: {
-    methodologyVersion: "price-discovery-scenarios-v1";
-    unit: "additional_from_current_price";
-    base: { min: number; max: number };
-    expansion: { min: number; max: number };
-    tail: { min: number; max: number };
-    // Null when framework.downsideRisk isn't available (a genuine breakout
-    // that's blown past the historical-deviation check before a support
-    // level was ever computed) — the upside bands below don't need a
-    // downside number to be computed, only these two do. Null means
-    // "not measurable yet," never a manufactured number.
-    structuralRisk: number | null;
-    expansionRr: number | null;
-    inputs: {
-      atrPercent: number;
-      currentMovePercent: number;
-      relativeVolume: number;
-      momentumScore: number;
-      explosionScore: number;
-    };
-  } | null;
+  scenarioBands: PriceDiscoveryScenarioBands | null;
+  scenarioUnavailableReason?: string | null;
   paperEntryEligible: boolean;
   paperTradeScore: number | null;
 };
@@ -363,87 +349,17 @@ function buildExplosionAssessment(
     framework.atr14 !== null && candidate.price > 0
       ? (framework.atr14 / candidate.price) * 100
       : null;
-  // Only the risk/ratio piece below genuinely needs a real downsideRisk —
-  // the upside bands (base/expansion/tail) are built entirely from ATR,
-  // live impulse, volume, and momentum. Previously the whole scenario was
-  // gated on downsideRisk being available, which meant one missing number
-  // (structurally null for the biggest, most extended movers — the ones
-  // that blew past the historical-deviation check before a support level
-  // was ever computed) blanked out the entire scenario for a candidate
-  // that had already passed every other confirmation check. Now the bands
-  // compute whenever ATR data is available; structuralRisk/expansionRr
-  // individually fall back to null when downsideRisk isn't there, rather
-  // than the whole thing disappearing.
-  const scenarioBands =
-    state === "price_discovery" && atrPercent !== null && atrPercent > 0
-      ? (() => {
-          // These are conditional expansion scenarios, not price targets.
-          // Base is anchored to the stock's own ATR. Expansion and tail are
-          // anchored to the live impulse, scaled only by observed RVOL,
-          // momentum, and the already-published explosion score. Downside is
-          // never used to manufacture upside.
-          const volumeFuel = clamp(candidate.relativeVolume * 7.5);
-          const fuelFactor = Math.max(
-            0.6,
-            Math.min(
-              1.2,
-              (volumeFuel * 0.35 +
-                clamp(candidate.momentumScore) * 0.4 +
-                breakoutScore * 0.25) /
-                100,
-            ),
-          );
-          const impulse = Math.max(
-            0,
-            Math.min(150, momentumReferenceChange),
-          );
-          const baseMin = atrPercent * 0.75;
-          const baseMax = atrPercent * (1 + fuelFactor);
-          const expansionMin = Math.max(baseMax, impulse * 0.35 * fuelFactor);
-          const expansionMax = Math.max(
-            expansionMin,
-            impulse * 0.75 * fuelFactor,
-          );
-          const tailMin = Math.max(
-            expansionMax,
-            impulse * 0.9 * fuelFactor,
-          );
-          const tailMax = Math.max(
-            tailMin,
-            impulse * 1.5 * fuelFactor,
-          );
-          const expansionMidpoint = (expansionMin + expansionMax) / 2;
-          const rounded = (value: number) =>
-            Math.round(Math.min(200, value) * 10) / 10;
-          return {
-            methodologyVersion: "price-discovery-scenarios-v1" as const,
-            unit: "additional_from_current_price" as const,
-            base: { min: rounded(baseMin), max: rounded(baseMax) },
-            expansion: {
-              min: rounded(expansionMin),
-              max: rounded(expansionMax),
-            },
-            tail: { min: rounded(tailMin), max: rounded(tailMax) },
-            structuralRisk:
-              framework.downsideRisk !== null && framework.downsideRisk > 0
-                ? rounded(framework.downsideRisk)
-                : null,
-            expansionRr:
-              framework.downsideRisk !== null && framework.downsideRisk > 0
-                ? Math.round(
-                    (expansionMidpoint / framework.downsideRisk) * 10,
-                  ) / 10
-                : null,
-            inputs: {
-              atrPercent: rounded(atrPercent),
-              currentMovePercent: rounded(momentumReferenceChange),
-              relativeVolume: rounded(candidate.relativeVolume),
-              momentumScore: Math.round(candidate.momentumScore),
-              explosionScore: breakoutScore,
-            },
-          };
-        })()
-      : null;
+  const scenarioResult =
+    state === "price_discovery"
+      ? buildPriceDiscoveryScenario({
+          atrPercent,
+          currentMovePercent: momentumReferenceChange,
+          relativeVolume: candidate.relativeVolume,
+          momentumScore: candidate.momentumScore,
+          explosionScore: breakoutScore,
+          structuralRiskPercent: framework.downsideRisk,
+        })
+      : { bands: null, unavailableReason: null };
 
   return {
     state,
@@ -481,7 +397,8 @@ function buildExplosionAssessment(
       framework.downsideRisk !== null
         ? `The structural downside reference is ${framework.downsideRisk.toFixed(1)}%; momentum failure can occur sooner.`
         : "Exit the thesis when momentum confirmation or data quality fails.",
-    scenarioBands,
+    scenarioBands: scenarioResult.bands,
+    scenarioUnavailableReason: scenarioResult.unavailableReason,
     paperEntryEligible,
     paperTradeScore,
   };
@@ -824,7 +741,9 @@ export function evaluateCanonicalOpportunity(
     riskTags.push("New Listing / Limited History");
   }
   const freshnessLabel =
-    !Number.isFinite(signalAgeMs) || signalAgeMs > 8 * 60 * 60 * 1000
+    !getStockMarketClock().active
+      ? stockHistoryLabel(decisionMarketDataAsOf)
+      : !Number.isFinite(signalAgeMs) || signalAgeMs > 8 * 60 * 60 * 1000
       ? "Last Verified Signal"
       : signalAgeMs > 60 * 60 * 1000
         ? "Recent Scan"

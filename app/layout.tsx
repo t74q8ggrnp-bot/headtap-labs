@@ -3,6 +3,8 @@ import { Suspense } from "react";
 import MobileAppNavigation from "./components/MobileAppNavigation";
 import { MobileAppNavigationProvider } from "./components/MobileAppNavigationContext";
 import NativeAppBridge from "./components/NativeAppBridge";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -38,6 +40,8 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
         <NativeAppBridge />
+        <Analytics />
+        <SpeedInsights />
         <MobileAppNavigationProvider>
           <div className="ht-app-content">{children}</div>
           <Suspense fallback={null}>

@@ -13,11 +13,10 @@ import {
 } from "lightweight-charts";
 import type {
   MarketChartAsset,
-  MarketChartDisplayQuote,
-  MarketChartResponse,
 } from "@/lib/market-chart";
 import { buildUniformMarketTimeSlots } from "@/lib/market-chart";
-import { HT_REFRESH_RATES_MS } from "@/lib/runtime-capabilities";
+import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
+import { formatMarketPrice as formatPrice } from "@/lib/market-price-format";
 
 type HeroPriceChartProps = {
   asset: MarketChartAsset;
@@ -26,7 +25,6 @@ type HeroPriceChartProps = {
   accent?: "violet" | "orange" | "cyan";
   compact?: boolean;
   height?: number;
-  onQuoteUpdate?: (quote: MarketChartDisplayQuote | null) => void;
 };
 
 type ChartMode = "graph" | "candles";
@@ -40,14 +38,6 @@ type SavedViewport = {
   pointCount: number;
   range: { from: number; to: number };
 };
-
-const REQUEST_CACHE_MS = 2_000;
-const STOCK_CHART_REFRESH_MS = HT_REFRESH_RATES_MS.selectedStockCharts;
-const CRYPTO_CHART_REFRESH_MS = 60_000;
-const requestCache = new Map<
-  string,
-  { createdAt: number; request: Promise<MarketChartResponse> }
->();
 
 const accents = {
   violet: {
@@ -66,40 +56,6 @@ const accents = {
     text: "text-cyan-300",
   },
 } as const;
-
-function loadChart(url: string) {
-  const cached = requestCache.get(url);
-  if (cached && Date.now() - cached.createdAt < REQUEST_CACHE_MS) {
-    return cached.request;
-  }
-
-  const request = fetch(url, { cache: "no-store" }).then(async (response) => {
-    const payload: unknown = await response.json();
-    if (
-      !response.ok ||
-      !payload ||
-      typeof payload !== "object" ||
-      (payload as { success?: unknown }).success !== true
-    ) {
-      throw new Error("Verified chart unavailable.");
-    }
-    return payload as MarketChartResponse;
-  }).catch((error) => {
-    requestCache.delete(url);
-    throw error;
-  });
-  requestCache.set(url, { createdAt: Date.now(), request });
-  return request;
-}
-
-function formatPrice(value: number) {
-  const maximumFractionDigits = value < 1 ? 4 : 2;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits,
-  }).format(value);
-}
 
 function chartTimeToDate(time: Time) {
   if (typeof time === "number") return new Date(time * 1_000);
@@ -135,7 +91,6 @@ export default function HeroPriceChart({
   accent = "violet",
   compact = false,
   height,
-  onQuoteUpdate,
 }: HeroPriceChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null);
   const chartApiRef = useRef<ReturnType<typeof createChart> | null>(null);
@@ -143,11 +98,7 @@ export default function HeroPriceChart({
   const volumeWriterRef = useRef<SeriesDataWriter | null>(null);
   const savedViewportRef = useRef<SavedViewport | null>(null);
   const slotCountRef = useRef(0);
-  const [result, setResult] = useState<{
-    url: string;
-    data: MarketChartResponse | null;
-    failed: boolean;
-  } | null>(null);
+  const marketView = useLiveMarketView(symbol, { asset, productId, chart: true });
   const [chartMode, setChartMode] = useState<ChartMode>("candles");
   const [timeZone] = useState(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
@@ -158,44 +109,18 @@ export default function HeroPriceChart({
     if (productId) params.set("productId", productId);
     return `/api/market-chart?${params.toString()}`;
   }, [asset, productId, symbol]);
-  const data = result?.url === url ? result.data : null;
-  const failed = result?.url === url ? result.failed : false;
+  const data = marketView.chart;
+  const failed = marketView.error && !data;
   const dataReady = data !== null;
   const resolvedHeight = height ?? (compact ? 150 : 185);
   const viewportKey = `${url}:${compact ? "compact" : "full"}:${resolvedHeight}`;
   const slots = useMemo(
     () => buildUniformMarketTimeSlots(
       data?.bars ?? [],
-      asset === "stock" ? 60 : 300,
+      data?.intervalSeconds ?? 60,
     ),
-    [asset, data],
+    [data],
   );
-
-  useEffect(() => {
-    let active = true;
-    const refresh = () => {
-      void loadChart(url)
-        .then((payload) => {
-          if (active) setResult({ url, data: payload, failed: false });
-        })
-        .catch(() => {
-          if (active) setResult({ url, data: null, failed: true });
-        });
-    };
-    refresh();
-    const refreshInterval = window.setInterval(
-      refresh,
-      asset === "stock" ? STOCK_CHART_REFRESH_MS : CRYPTO_CHART_REFRESH_MS,
-    );
-    return () => {
-      active = false;
-      window.clearInterval(refreshInterval);
-    };
-  }, [asset, url]);
-
-  useEffect(() => {
-    onQuoteUpdate?.(data?.displayQuote ?? null);
-  }, [data?.displayQuote, onQuoteUpdate]);
 
   useEffect(() => {
     if (!chartRef.current || !dataReady) return;
@@ -375,7 +300,7 @@ export default function HeroPriceChart({
       chart.timeScale().setVisibleLogicalRange(previousRange);
     } else {
       const visibleMinutes = compact ? 90 : 180;
-      const intervalMinutes = asset === "stock" ? 1 : 5;
+      const intervalMinutes = (data?.intervalSeconds ?? 60) / 60;
       const visiblePoints = Math.max(1, Math.floor(visibleMinutes / intervalMinutes));
       const to = slots.length + 2;
       chart.timeScale().setVisibleLogicalRange({
@@ -392,7 +317,7 @@ export default function HeroPriceChart({
         range,
       };
     }
-  }, [asset, chartMode, compact, slots, viewportKey]);
+  }, [asset, chartMode, compact, data?.intervalSeconds, slots, viewportKey]);
 
   const latestTime = data
     ? new Intl.DateTimeFormat("en-US", {
@@ -411,6 +336,9 @@ export default function HeroPriceChart({
     <section
       className={`overflow-hidden rounded-2xl border ${palette.border} bg-black/35`}
       aria-label={`${symbol} verified price chart`}
+      data-market-symbol={symbol}
+      data-market-as-of={marketView.quote?.asOf ?? ""}
+      data-market-price={marketView.quote?.price ?? ""}
     >
       <div className={`border-b border-white/7 px-3 py-2.5 ${compact ? "space-y-2.5 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0" : "flex flex-wrap items-center justify-between gap-2"}`}>
         <div className={compact ? "flex items-start justify-between gap-3" : ""}>
@@ -423,10 +351,13 @@ export default function HeroPriceChart({
                 ? `${data.windowLabel} · ${data.sourceLabel} · ${chartMode === "candles" ? "OHLC" : "close graph"}`
                 : "Provider-backed market history"}
             </p>
+            <p className="mt-1 text-[8px] font-semibold text-zinc-500" aria-live="off">
+              {marketView.label}{marketView.quote ? ` · ${new Date(marketView.quote.asOf).toLocaleTimeString("en-US", { timeZone, timeZoneName: "short" })}` : ""}
+            </p>
           </div>
           {compact && latestTime && (
             <p className="shrink-0 font-mono text-[8px] font-bold text-zinc-600">
-              Through {latestTime}
+              Candle interval {latestTime}
             </p>
           )}
         </div>
@@ -454,7 +385,7 @@ export default function HeroPriceChart({
           </div>
           {!compact && latestTime && (
             <p className="font-mono text-[8px] font-bold text-zinc-600">
-              Through {latestTime}
+              Candle interval {latestTime}
             </p>
           )}
         </div>
@@ -491,11 +422,11 @@ export default function HeroPriceChart({
               ["Open", formatPrice(data.summary.open)],
               ["High", formatPrice(data.summary.high)],
               ["Low", formatPrice(data.summary.low)],
-              ["Chart move", `${data.summary.changePercent >= 0 ? "+" : ""}${data.summary.changePercent.toFixed(1)}%`],
+              ["From chart open", `${data.summary.changePercent >= 0 ? "+" : ""}${data.summary.changePercent.toFixed(1)}%`],
             ].map(([label, value]) => (
               <div key={label} className="border-r border-white/7 px-2 py-2.5 last:border-r-0">
                 <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-700">{label}</p>
-                <p className={`mt-1 truncate font-mono text-[10px] font-black ${label === "Chart move" ? (data.summary.changePercent >= 0 ? "text-green-400" : "text-red-400") : "text-zinc-300"}`}>
+                <p className={`mt-1 truncate font-mono text-[10px] font-black ${label === "From chart open" ? (data.summary.changePercent >= 0 ? "text-green-400" : "text-red-400") : "text-zinc-300"}`}>
                   {value}
                 </p>
               </div>

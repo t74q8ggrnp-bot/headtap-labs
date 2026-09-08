@@ -1,5 +1,7 @@
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
 import { HT_TRADE_PLAN_VERSION, type HtAgentDecision, type HtAgentDecisionFrame, type HtAgentMode, type HtTradePlan, type HtTradePlanStatus } from "./contracts.ts";
+// @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
+import { nullableAgentNumber } from "./evidence.ts";
 
 const round = (value: number, digits = 4) => {
   const factor = 10 ** digits;
@@ -7,8 +9,8 @@ const round = (value: number, digits = 4) => {
 };
 
 const finitePositive = (value: unknown) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const parsed = nullableAgentNumber(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
 };
 
 const failedCodes = (decision: HtAgentDecision) => new Set(
@@ -25,12 +27,15 @@ function statusLabel(status: HtTradePlanStatus, mode: HtAgentMode) {
     return mode === "observe" ? "PAPER SETUP ELIGIBLE · OBSERVE" : "PAPER ENTRY ELIGIBLE";
   }
   return {
-    wait: "WAIT",
+    wait: "SETUP FORMING",
     manage: "MANAGE PAPER POSITION",
     reduce: "PROTECT PAPER PROFIT",
     exit: "PAPER EXIT TRIGGERED",
-    avoid: "AVOID CURRENT SETUP",
-    unavailable: "DECISION UNAVAILABLE",
+    // Backward-compatible display copy for persisted v1 plans. New plans no
+    // longer emit `avoid`; an incomplete setup remains observable instead of
+    // making a directional claim about what the stock will do next.
+    avoid: "SETUP FORMING",
+    unavailable: "UPDATING MARKET EVIDENCE",
   }[status];
 }
 
@@ -43,22 +48,20 @@ function planStatus(
     if (decision.action === "reduce") return "reduce";
     return "manage";
   }
-  if (!frame.canonical.eligible || frame.prox.stance === "veto") return "avoid";
+  if (!frame.canonical.eligible || frame.prox.stance === "veto") return "wait";
   const failed = failedCodes(decision);
   if (hasAny(failed, ["fresh_market_data", "timestamp_alignment"])) return "unavailable";
-  if (hasAny(failed, ["halt", "bad_print", "trade_levels", "risk_reward", "liquidity", "spread"])) {
-    return "avoid";
-  }
+  if (hasAny(failed, ["halt", "bad_print", "trade_levels", "risk_reward", "liquidity", "spread"])) return "wait";
   if (failed.size > 0) return "wait";
   return "paper_entry_eligible";
 }
 
 function chaseRisk(frame: HtAgentDecisionFrame): HtTradePlan["chaseRisk"] {
-  const extension = Number(frame.canonical.extensionRisk);
-  const pullback = Number(frame.market.pullbackFromSessionHighPercent);
-  if (!Number.isFinite(extension)) return "unmeasured";
-  if (extension >= 65 || (Number.isFinite(pullback) && pullback >= 12)) return "high";
-  if (extension >= 40 || (Number.isFinite(pullback) && pullback >= 6)) return "medium";
+  const extension = nullableAgentNumber(frame.canonical.extensionRisk);
+  const pullback = nullableAgentNumber(frame.market.pullbackFromSessionHighPercent);
+  if (extension === null) return "unmeasured";
+  if (extension >= 65 || (pullback !== null && pullback >= 12)) return "high";
+  if (extension >= 40 || (pullback !== null && pullback >= 6)) return "medium";
   return "low";
 }
 
@@ -120,18 +123,18 @@ export function buildHtTradePlan(
       ? "The setup clears the measurable market gates, but paper execution remains locked or observe-only."
       : "The setup clears the current backend tradeability and deterministic paper-risk gates.";
   } else if (status === "wait") {
-    summary = "Momentum may still deserve attention, but HT Agent is withholding a paper entry at the current price.";
+    summary = "Momentum remains active while the measurable paper-entry framework is still forming at the current price.";
   } else if (status === "avoid") {
-    summary = "The stock may be moving, but the current setup does not provide an acceptable paper entry.";
+    summary = "The move remains under observation while HT waits for a measurable paper-entry framework.";
   } else if (status === "unavailable") {
     summary = "HT Agent cannot issue a current plan because the required provider-time evidence is stale or misaligned.";
   }
 
   const confirmation = confirmationTrigger === null
-    ? "No entry confirmation is currently measurable; wait for a fresh aligned decision frame."
+    ? "No entry confirmation is measurable yet; a fresh aligned decision frame may form one."
     : `A fresh Canonical frame must remain eligible at or above ${confirmationTrigger.toFixed(4)}, with ProX not vetoing and spread/liquidity still inside policy.`;
   const invalidationText = stop === null
-    ? "No honest invalidation is measurable, so a new paper entry is withheld."
+    ? "No honest invalidation is measurable yet; HT will keep monitoring instead of manufacturing one."
     : `The modeled setup is invalid below ${stop.toFixed(4)}.`;
 
   return {

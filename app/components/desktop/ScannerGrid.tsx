@@ -5,6 +5,7 @@
 // /api/opportunities scoring (no local scoring calls in this section), so
 // this is a pure JSX/props extraction with no behavior change.
 import { motion } from "framer-motion";
+import LiveStockValue from "@/app/components/market/LiveStockValue";
 import {
   getOpportunityPresentation,
   opportunityToStock,
@@ -51,7 +52,7 @@ export default function ScannerGrid({
             Premium scan mode
           </div>
           <p className="mt-2 text-sm text-zinc-500">
-            Auto-refreshes every 8 seconds.
+            Prices refresh independently of the ranked decision. Source age is shown below each price.
           </p>
         </div>
 
@@ -169,7 +170,7 @@ export default function ScannerGrid({
                 <p className="text-sm text-zinc-500">Current Price</p>
 
                 <h3 className="mt-1 text-4xl font-black">
-                  ${Number(opportunity.price || 0).toFixed(2)}
+                  <LiveStockValue symbol={opportunity.ticker} fallback={opportunity.price} />
                 </h3>
 
                 <p
@@ -177,9 +178,9 @@ export default function ScannerGrid({
                     isBullish ? "text-green-400" : "text-red-400"
                   }`}
                 >
-                  {isBullish ? "+" : ""}
-                  {Number(opportunity.change || 0).toFixed(2)}%
+                  <LiveStockValue symbol={opportunity.ticker} field="change" fallback={opportunity.change} />
                 </p>
+                <p className="mt-1 text-[9px] text-zinc-500"><LiveStockValue symbol={opportunity.ticker} field="time" /></p>
               </div>
 
               <div className="mt-5 rounded-2xl border border-white/10 bg-black/35 p-4">

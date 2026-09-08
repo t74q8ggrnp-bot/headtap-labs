@@ -1,3 +1,4 @@
+import LiveStockValue from "@/app/components/market/LiveStockValue";
 import type { Opportunity } from "@/lib/opportunity-model";
 
 type MomentumContendersProps = {
@@ -19,7 +20,7 @@ export default function MomentumContenders({
         </p>
         {candidates.length > 0 && (
           <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">
-            Live canonical rank
+            Canonical rank
           </p>
         )}
       </div>
@@ -43,7 +44,7 @@ export default function MomentumContenders({
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm font-black text-white truncate">{opportunity.ticker}</span>
                     <span className={`font-mono text-[10px] font-black shrink-0 ${opportunity.change >= 0 ? "text-orange-400" : "text-red-400"}`}>
-                      {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(1)}%
+                      <LiveStockValue symbol={opportunity.ticker} field="change" fallback={opportunity.change} digits={1} />
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -127,8 +128,7 @@ export function MomentumRadar({
                   {opportunity.ticker}
                 </span>
                 <span className="shrink-0 font-mono text-[10px] font-black text-amber-300">
-                  {opportunity.change >= 0 ? "+" : ""}
-                  {opportunity.change.toFixed(1)}%
+                  <LiveStockValue symbol={opportunity.ticker} field="change" fallback={opportunity.change} digits={1} />
                 </span>
               </div>
               <p className="mt-1 text-[8px] font-bold text-zinc-600">

@@ -11,7 +11,10 @@ import {
   CANONICAL_DECISION_FRAME_VERSION,
   getDecisionFrameFreshness,
   getDecisionFrameMarketTimingFreshness,
+  getRetainedSessionIntegrity,
+  presentCanonicalSessionRecord,
 } from "@/lib/canonical-decision-frame-policy";
+import { getStockMarketClock } from "@/lib/stock-market-session";
 
 type RollingFrameType = Extract<
   OpportunityFeedRequestType,
@@ -54,14 +57,19 @@ export async function getRollingCanonicalDecisionFrame(
   const cachedTimestamp = "timestamp" in cached ? cached.timestamp : null;
   const cachedFreshness = getDecisionFrameFreshness(cachedTimestamp);
   const cachedMarketTiming = getDecisionFrameMarketTimingFreshness(cached);
-  const payload = cachedFreshness.fresh && cachedMarketTiming.fresh
+  const cachedRetention = getRetainedSessionIntegrity(cached);
+  const useCached = cachedFreshness.fresh && (cachedMarketTiming.fresh || cachedRetention.valid);
+  const payload = useCached
     ? cached
     : await buildFullFrame(requestedType);
   const decisionAsOf = "timestamp" in payload
     ? payload.timestamp
-    : new Date().toISOString();
-  const freshness = getDecisionFrameFreshness(decisionAsOf);
-  const marketTiming = getDecisionFrameMarketTimingFreshness(payload);
+    : null;
+  const now = new Date();
+  const freshness = getDecisionFrameFreshness(decisionAsOf, now);
+  const marketTiming = getDecisionFrameMarketTimingFreshness(payload, now);
+  const retainedSession = getRetainedSessionIntegrity(payload, now);
+  const currentSession = getStockMarketClock(now).session;
   const frameFreshUntilMs = freshness.freshUntil
     ? new Date(freshness.freshUntil).getTime()
     : NaN;
@@ -74,22 +82,31 @@ export async function getRollingCanonicalDecisionFrame(
           ? Math.min(frameFreshUntilMs, marketFreshUntilMs)
           : marketFreshUntilMs,
       ).toISOString()
-    : freshness.freshUntil;
+    : null;
 
   return {
     ...payload,
+    opportunities: payload.opportunities.map(record => presentCanonicalSessionRecord(record, now)),
+    ...("momentumContenders" in payload ? {
+      momentumContenders: payload.momentumContenders.map(record => presentCanonicalSessionRecord(record, now)),
+      momentumRadar: payload.momentumRadar.map(record => presentCanonicalSessionRecord(record, now)),
+    } : {}),
     decisionFrame: {
       version: CANONICAL_DECISION_FRAME_VERSION,
       decisionAsOf,
-      presentedAt: new Date().toISOString(),
+      presentedAt: now.toISOString(),
       freshUntil: strictFreshUntil,
       ageSeconds: Number.isFinite(freshness.ageSeconds)
         ? Number(freshness.ageSeconds.toFixed(1))
         : null,
       maxAgeSeconds: CANONICAL_DECISION_FRAME_MAX_AGE_SECONDS,
       fresh: freshness.fresh && marketTiming.fresh,
-      staleCacheBypassed:
-        !cachedFreshness.fresh || !cachedMarketTiming.fresh,
+      status: currentSession === "closed"
+        ? retainedSession.valid ? "last_session" : "unavailable"
+        : freshness.fresh && marketTiming.fresh ? "live" : "stale",
+      currentSession,
+      retainedSession,
+      staleCacheBypassed: !useCached,
     },
   };
 }

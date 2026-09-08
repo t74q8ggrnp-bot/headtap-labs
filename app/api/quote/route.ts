@@ -13,11 +13,11 @@ import {
 } from "@/lib/massive-stocks";
 import {
   resolveSnapshotChangePercent,
-  resolveSnapshotDisplayPrice,
-  resolveSnapshotTimestampMs,
 } from "@/lib/polygon-snapshot";
+import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
 import { fetchHydratedSessionSnapshot } from "@/lib/intraday-snapshot-hydration";
 import { getStockMarketClock } from "@/lib/stock-market-session";
+import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
 
 export const dynamic = "force-dynamic";
 
@@ -92,16 +92,8 @@ export async function GET(request: Request) {
       );
     }
 
-    const snapshotPrice = resolveSnapshotDisplayPrice(snapshot);
-    const snapshotTimestampMs = resolveSnapshotTimestampMs(snapshot);
-    const tradeTimestampMs = liveTrade ? Date.parse(liveTrade.timestamp) : null;
-    const useLiveTrade = Boolean(
-      liveTrade &&
-        tradeTimestampMs !== null &&
-        (snapshotTimestampMs === null || tradeTimestampMs >= snapshotTimestampMs),
-    );
-    const price = useLiveTrade ? liveTrade!.price : snapshotPrice;
-    if (!(price > 0)) {
+    const display = resolveStockDisplayPrice(snapshot, liveTrade, receivedAt.getTime());
+    if (!display) {
       console.error("[quote] Massive returned no usable price", { symbol });
       return NextResponse.json(
         { error: "Verified price unavailable.", symbol, c: 0, dp: 0 },
@@ -109,23 +101,18 @@ export async function GET(request: Request) {
       );
     }
 
-    const marketTimestampMs = Math.max(
-      snapshotTimestampMs ?? 0,
-      tradeTimestampMs ?? 0,
-    );
-    const marketAsOf = marketTimestampMs > 0
-      ? new Date(marketTimestampMs).toISOString()
-      : null;
+    const price = display.price;
+    const marketAsOf = display.asOf;
     const timing = buildMarketDataTimingReceipt({ marketAsOf, receivedAt });
     const activeTimestampUsable = isActiveMarketTimestampUsable(
       marketAsOf,
       new Date(timing.processedAt),
     );
     const directRealtimeCoverage = Boolean(liveTrade && liveQuote);
-    const isLive = clock.active &&
+    const isLive = display.priceKind === "trade" && clock.active &&
       entitlement.dataMode === "real_time" &&
       directRealtimeCoverage &&
-      activeTimestampUsable;
+      activeTimestampUsable && isActiveMarketTimestampUsable(marketAsOf, new Date(), DISPLAY_LIVE_MAX_AGE_MS);
     const snapshotOpen = Number(snapshot.day?.o || 0);
     const snapshotHigh = Number(snapshot.day?.h || 0);
     const snapshotLow = Number(snapshot.day?.l || 0);
@@ -148,10 +135,10 @@ export async function GET(request: Request) {
       volume,
       bid: liveQuote?.bid ?? null,
       ask: liveQuote?.ask ?? null,
+      quoteAsOf: liveQuote?.timestamp ?? null,
       asOf: marketAsOf,
-      source: useLiveTrade
-        ? "massive_polygon_last_trade"
-        : "massive_polygon_snapshot",
+      source: display.source,
+      priceKind: display.priceKind,
       provider: "massive_polygon",
       dataMode: entitlement.dataMode,
       marketSession: clock.session,

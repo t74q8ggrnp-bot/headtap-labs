@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { checkApiRateLimit } from "@/lib/api-rate-limit";
 import { buildMarketDataTimingReceipt } from "@/lib/market-data-time";
 import { massiveStocksUrl, probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
+import { getStockMarketClock } from "@/lib/stock-market-session";
+import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
 import {
   resolveSnapshotChangePercent,
-  resolveSnapshotDisplayPrice,
-  resolveSnapshotTimestampMs,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
+import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +29,10 @@ type BulkQuote = {
   avgVolume: number;
   volumeBaseline: "previous_session_proxy";
   asOf: string | null;
+  live: boolean;
   dataMode: "real_time" | "delayed" | "unavailable";
   source: "massive_polygon_snapshot";
+  priceKind: "trade" | "minute_aggregate";
   timing: ReturnType<typeof buildMarketDataTimingReceipt>;
 };
 
@@ -52,12 +55,11 @@ async function fetchSnapshotBatch(
   const result: Record<string, BulkQuote> = {};
   for (const row of payload.tickers ?? []) {
     const symbol = String(row.ticker ?? "").trim().toUpperCase();
-    const price = resolveSnapshotDisplayPrice(row);
-    if (!SYMBOL_PATTERN.test(symbol) || !(price > 0)) continue;
-    const timestampMs = resolveSnapshotTimestampMs(row);
-    const marketAsOf = timestampMs === null
-      ? null
-      : new Date(timestampMs).toISOString();
+    const display = resolveStockDisplayPrice(row, null, receivedAt.getTime());
+    if (!SYMBOL_PATTERN.test(symbol) || !display) continue;
+    const price = display.price;
+    const marketAsOf = display.asOf;
+    const timestampMs = Date.parse(marketAsOf);
     const previousVolume = Number(row.prevDay?.v || 0);
     result[symbol] = {
       price,
@@ -70,8 +72,11 @@ async function fetchSnapshotBatch(
       avgVolume: previousVolume,
       volumeBaseline: "previous_session_proxy",
       asOf: marketAsOf,
+      live: display.priceKind === "trade" && dataMode === "real_time" && getStockMarketClock(receivedAt).active &&
+        receivedAt.getTime() - timestampMs >= -2_000 && receivedAt.getTime() - timestampMs <= DISPLAY_LIVE_MAX_AGE_MS,
       dataMode,
       source: "massive_polygon_snapshot",
+      priceKind: display.priceKind,
       timing: buildMarketDataTimingReceipt({ marketAsOf, receivedAt }),
     };
   }

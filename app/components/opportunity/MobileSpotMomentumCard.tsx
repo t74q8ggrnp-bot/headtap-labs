@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { formatMarketPrice } from "@/lib/market-price-format";
+import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import type { DecisionTraceDisplay, TradeFrameworkDisplay } from "@/lib/contracts/market";
-import type { MarketChartDisplayQuote } from "@/lib/market-chart";
 import {
   getOpportunityPresentation,
   type Opportunity,
@@ -38,18 +38,11 @@ export default function MobileSpotMomentumCard({
 }: MobileSpotMomentumCardProps) {
   const view = getOpportunityPresentation(opportunity);
   const catalyst = opportunity.catalystTags[0] ?? null;
-  const [displayQuoteState, setDisplayQuoteState] = useState<{
-    symbol: string;
-    quote: MarketChartDisplayQuote | null;
-  }>({ symbol: opportunity.ticker, quote: null });
-  const displayQuote =
-    displayQuoteState.symbol === opportunity.ticker ? displayQuoteState.quote : null;
-  const updateDisplayQuote = useCallback((quote: MarketChartDisplayQuote | null) => {
-    setDisplayQuoteState({ symbol: opportunity.ticker, quote });
-  }, [opportunity.ticker]);
+  const marketView = useLiveMarketView(opportunity.ticker, { chart: true });
+  const displayQuote = marketView.quote;
   const displayPrice = displayQuote?.price ?? opportunity.price;
   const displayChange = displayQuote?.changePercent ?? opportunity.change;
-  const displayLive = displayQuote?.live ?? opportunity.displayQuoteLive;
+  const displayLive = marketView.live;
 
   return (
     <div className="mx-4 mb-3 mt-4 flex-shrink-0 overflow-hidden rounded-2xl border border-violet-400/15 bg-black">
@@ -65,7 +58,7 @@ export default function MobileSpotMomentumCard({
         <div className="mb-2 flex items-end gap-3">
           <p className="font-mono text-[3.2rem] font-black leading-none tracking-[-0.06em] text-white">{opportunity.ticker}</p>
           <div className="pb-1">
-            <span className="font-mono text-base font-black text-white">${displayPrice.toFixed(displayPrice < 1 ? 4 : 2)}</span>
+            <span className="font-mono text-base font-black text-white">{formatMarketPrice(displayPrice)}</span>
             <span className={`ml-2 font-mono text-xs font-black ${displayChange >= 0 ? "text-green-400" : "text-red-400"}`}>
               {displayChange >= 0 ? "+" : ""}{displayChange.toFixed(2)}%
             </span>
@@ -76,6 +69,11 @@ export default function MobileSpotMomentumCard({
             )}
           </div>
         </div>
+        {!displayLive && (
+          <p className="mb-2 text-[9px] font-semibold text-zinc-500">
+            {displayQuote ? marketView.label : opportunity.freshnessLabel}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-black text-zinc-400">{opportunity.stage}</span>
           <span className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black ${view.positionLabel === "EARLY" ? "border-green-400/20 bg-green-500/[0.06] text-green-400" : "border-zinc-700 text-zinc-600"}`}>
@@ -99,7 +97,7 @@ export default function MobileSpotMomentumCard({
       </div>
 
       <div className="border-b border-white/8 px-4 py-4">
-        <HeroPriceChart asset="stock" symbol={opportunity.ticker} accent="violet" compact onQuoteUpdate={updateDisplayQuote} />
+        <HeroPriceChart asset="stock" symbol={opportunity.ticker} accent="violet" compact />
       </div>
 
       {framework && <OpportunityWindow framework={framework} compact />}

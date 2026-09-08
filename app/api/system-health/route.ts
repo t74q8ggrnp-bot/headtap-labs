@@ -20,11 +20,12 @@
 // ─────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
+import { assessCryptoPaperHealth } from "@/lib/crypto/paper-health";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
 import { auditCanonicalSpotMomentumFeed } from "@/lib/canonical-feed-integrity";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
-import { getDecisionFrameMarketTimingFreshness } from "@/lib/canonical-decision-frame-policy";
+import { getDecisionFrameMarketTimingFreshness, getRetainedSessionIntegrity } from "@/lib/canonical-decision-frame-policy";
 import { auditTopMoverDispositions } from "@/lib/top-mover-disposition";
 import {
   PROX_PUBLIC_AUTHORITY_CONTRACT,
@@ -48,12 +49,21 @@ import {
 } from "@/lib/prox/shadow-outcome-resolution";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
 import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
+import { describeProxMicrostructureCoverage } from "@/lib/prox/microstructure-coverage";
 import {
   PROX_MICROSTRUCTURE_AUTHORITY,
   PROX_MICROSTRUCTURE_VERSION,
 } from "@/lib/prox/microstructure";
 import { PAPER_TRADING_CONTRACT_VERSION } from "@/lib/paper-trading/engine";
 import { HT_AGENT_OUTCOME_HEALTH_GRACE_MS } from "@/lib/ht-agent/outcome-policy";
+import { HT_AGENT_COHORT_VERSION, HT_AGENT_DECISION_VERSION, HT_AGENT_FRAME_VERSION, HT_AGENT_POLICY_VERSION, HT_TRADE_PLAN_VERSION } from "@/lib/ht-agent/contracts";
+import { isHtAgentRiskAuditComplete } from "@/lib/ht-agent/risk-audit";
+import { assessHtAgentRunHealth } from "@/lib/ht-agent/run-health";
+import { assessProxOutcomeMemoryRunHealth } from "@/lib/prox/outcome-memory-run-health";
+import { legacyCryptoOutcomeQuarantine } from "@/lib/crypto/outcome-integrity";
+import { assessCryptoEvidenceHealth, isObservationOnlyRow } from "@/lib/crypto/evidence-health";
+import { readCryptoOutcomeProcessingEvidence } from "@/lib/crypto/outcome-processing-health";
+import { probeDatabaseHealth } from "@/lib/database-health-probe";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -223,6 +233,53 @@ export async function GET() {
       : "Missing POLYGON_API_KEY.",
   });
 
+  const supabase = getSupabase();
+
+  if (!supabase) {
+    return NextResponse.json({
+      ok: false,
+      status: "unhealthy",
+      message: "System health failed before database check.",
+      checks,
+      timestamp: new Date().toISOString(),
+    }, { status: 500 });
+  }
+
+  // One small, bounded read before the exhaustive audit. An unavailable
+  // database must not trigger dozens of additional reads and provider probes.
+  // A reachable database still runs EVERY original health criterion below.
+  const databaseProbe = await probeDatabaseHealth((signal) => supabase
+    .from("ht_scan_runs")
+    .select("id")
+    .limit(1)
+    .abortSignal(signal));
+  checks.push({
+    name: "database_connectivity",
+    ok: databaseProbe.ok,
+    message: databaseProbe.ok
+      ? "The application database read completed; pipeline validation follows."
+      : "The application database could not be read. Remaining pipeline checks were not run and are not verified healthy.",
+    detail: databaseProbe,
+  });
+  if (!databaseProbe.ok) {
+    return NextResponse.json({
+      ok: false,
+      status: "needs_attention",
+      message: "Database availability failed. Full pipeline health could not be verified.",
+      auditComplete: false,
+      unverified: ["canonical", "prox", "crypto", "paper_trading", "ht_agent", "massive_entitlement"],
+      summary: {
+        latestTicker: null,
+        latestSignalAt: null,
+        displayableSignals: null,
+        failures: checks.filter((check) => !check.ok).map((check) => check.name),
+      },
+      checks,
+      warnings: [],
+      timestamp: new Date().toISOString(),
+    }, { status: 503, headers: { "Cache-Control": "private, no-store", "Retry-After": "30" } });
+  }
+
   if (hasPolygonKey) {
     const entitlement = await probeMassiveRealtimeEntitlement({ force: true });
     checks.push({
@@ -240,20 +297,6 @@ export async function GET() {
         errors: entitlement.errors,
       },
     });
-  }
-
-  const supabase = getSupabase();
-
-  if (!supabase) {
-    const ok = false;
-
-    return NextResponse.json({
-      ok,
-      status: "unhealthy",
-      message: "System health failed before database check.",
-      checks,
-      timestamp: new Date().toISOString(),
-    }, { status: 500 });
   }
 
   // Home and Scanner read the latest promoted run-scoped dataset.
@@ -617,6 +660,8 @@ export async function GET() {
           .eq("run_id", microstructureRun.id);
       if (observationReadError) throw observationReadError;
 
+      const sourceCoverage = describeProxMicrostructureCoverage(microstructureObservations ?? []);
+
       const expectedCount = Number(
         microstructureRun.expected_observation_count,
       );
@@ -678,7 +723,9 @@ export async function GET() {
                       : !processingFresh
                         ? "ProX quote/tape collection is stale."
                         : activeMarketSession
-                          ? "ProX is preserving fresh Massive NBBO and trade-tape evidence without changing scores."
+                          ? sourceCoverage.coverageState === "complete"
+                            ? "ProX quote/tape collection meets health criteria; every sampled source is within its existing freshness window."
+                            : "ProX quote/tape collection meets health criteria with partial source coverage. Inspect the individual quote/trade clocks; not every ticker has fresh evidence."
                           : "Latest ProX quote/tape evidence is retained outside the active session.",
         detail: {
           runId: microstructureRun.id,
@@ -686,6 +733,7 @@ export async function GET() {
           authority: microstructureRun.authority,
           sourceDataMode: microstructureRun.source_data_mode,
           marketSession: microstructureRun.market_session,
+          activeMarketSession,
           expectedCount,
           persistedCount,
           actualCount: microstructureObservations?.length ?? 0,
@@ -697,6 +745,8 @@ export async function GET() {
           freshSourceCoveragePercent: Number(
             (sourceFreshCoverage * 100).toFixed(1),
           ),
+          minimumSourceCoveragePercent: 80,
+          sourceCoverage,
           staleSourceTickers: (microstructureObservations ?? [])
             .filter(
               (row) =>
@@ -1326,16 +1376,24 @@ export async function GET() {
   // horizon, and keep MFE/MAE arithmetic honest. Its labels and calibration
   // remain shadow-only and cannot publish another opportunity score.
   try {
-    const { data: outcomeRun, error: outcomeRunError } = await supabase
+    const { data: outcomeRuns, error: outcomeRunError } = await supabase
       .from("prox_outcome_memory_runs")
       .select(
         "id,observed_at,completed_at,status,market_session,snapshot_count,active_episode_count,updated_episode_count,due_outcome_count,persisted_outcome_count,unavailable_outcome_count,calibration_count,complete,methodology_version,diagnostics",
       )
       .eq("methodology_version", PROX_OUTCOME_MEMORY_VERSION)
       .order("observed_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(20);
     if (outcomeRunError) throw outcomeRunError;
+
+    const outcomeRunHealth = assessProxOutcomeMemoryRunHealth(
+      outcomeRuns ?? [],
+      {
+        maximumSuccessAgeMs:
+          ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS * 60 * 60 * 1_000,
+      },
+    );
+    const outcomeRun = outcomeRunHealth.latestSuccess;
 
     const { data: latestEpisode, error: latestEpisodeError } = await supabase
       .from("prox_research_episodes")
@@ -1349,13 +1407,25 @@ export async function GET() {
     if (latestEpisodeError) throw latestEpisodeError;
 
     if (!outcomeRun) {
+      const lifecycleFailure =
+        outcomeRunHealth.runningOverdue ||
+        outcomeRunHealth.latestTerminalFailed ||
+        (activeMarketSession && outcomeRuns?.length === 0);
       checks.push({
         name: "prox_outcome_memory",
-        ok: !activeMarketSession,
-        message: activeMarketSession
-          ? "Pro X Outcome Memory has no completed active-session cycle."
-          : "Pro X Outcome Memory schema is ready and awaiting its next active session.",
-        detail: { activeMarketSession, latestEpisode: latestEpisode ?? null },
+        ok: !lifecycleFailure && !activeMarketSession,
+        message: outcomeRunHealth.runningOverdue
+          ? "Pro X Outcome Memory has an overdue incomplete cycle and no completed success."
+          : outcomeRunHealth.latestTerminalFailed
+            ? "The latest completed Pro X Outcome Memory cycle failed and no successful receipt is available."
+            : activeMarketSession
+              ? "Pro X Outcome Memory has no completed active-session cycle."
+              : "Pro X Outcome Memory schema is ready and awaiting its next active session.",
+        detail: {
+          activeMarketSession,
+          latestEpisode: latestEpisode ?? null,
+          lifecycle: outcomeRunHealth,
+        },
       });
     } else {
       const runAgeHours = hoursSince(
@@ -1376,8 +1446,10 @@ export async function GET() {
           persistedOutcomeCount + unavailableOutcomeCount &&
         (activeEpisodeCount === 0 || Number(outcomeRun.snapshot_count) > 0);
       const fresh =
-        !activeMarketSession ||
-        runAgeHours <= ACTIVE_MAX_OUTCOME_MEMORY_AGE_HOURS;
+        !activeMarketSession || outcomeRunHealth.successFresh;
+      const lifecycleHealthy =
+        !outcomeRunHealth.runningOverdue &&
+        !outcomeRunHealth.latestTerminalFailed;
 
       let episodeMathValid = true;
       let episodeDetail: Record<string, unknown> | null = null;
@@ -1422,8 +1494,16 @@ export async function GET() {
 
       checks.push({
         name: "prox_outcome_memory",
-        ok: coverageComplete && fresh && episodeMathValid,
-        message: !coverageComplete
+        ok:
+          coverageComplete &&
+          fresh &&
+          lifecycleHealthy &&
+          episodeMathValid,
+        message: outcomeRunHealth.runningOverdue
+          ? "Pro X Outcome Memory has an overdue incomplete cycle."
+          : outcomeRunHealth.latestTerminalFailed
+            ? "The latest completed Pro X Outcome Memory cycle failed."
+            : !coverageComplete
           ? "Pro X Outcome Memory failed its due-horizon coverage receipt."
           : !fresh
             ? "Pro X Outcome Memory is stale during the active market-data session."
@@ -1456,6 +1536,14 @@ export async function GET() {
             "authority" in outcomeRun.diagnostics
               ? outcomeRun.diagnostics.authority
               : null,
+          lifecycle: {
+            latestAttempt: outcomeRunHealth.latestAttempt,
+            latestTerminal: outcomeRunHealth.latestTerminal,
+            runningCurrent: outcomeRunHealth.runningCurrent,
+            runningOverdue: outcomeRunHealth.runningOverdue,
+            latestTerminalFailed: outcomeRunHealth.latestTerminalFailed,
+            runningAgeSeconds: outcomeRunHealth.runningAgeSeconds,
+          },
         },
       });
     }
@@ -2059,9 +2147,11 @@ export async function GET() {
   try {
     const feed = await getRollingCanonicalDecisionFrame("momentum");
     const audit = auditCanonicalSpotMomentumFeed(feed);
+    const retainedSession = getRetainedSessionIntegrity(feed);
+    const decisionTimingValid = activeMarketSession ? feed.decisionFrame.fresh : retainedSession.valid;
     const topDecisionSet = [
       feed.opportunities[0],
-      ...("momentumContenders" in feed ? feed.momentumContenders : []),
+      ...(feed.momentumContenders ?? []),
     ].filter(Boolean);
     const liveQuoteCount = topDecisionSet.filter(
       (record) => record.displayQuoteLive === true,
@@ -2104,13 +2194,17 @@ export async function GET() {
       );
     checks.push({
       name: "canonical_opportunity_atomicity",
-      ok: audit.ok && feed.decisionFrame.fresh && marketTimestampCoverage,
+      ok: audit.ok && decisionTimingValid && marketTimestampCoverage,
       message: !audit.ok
         ? "Canonical Spot Momentum contains a quote, eligibility, rank, or radar-authority mismatch."
-        : !feed.decisionFrame.fresh
-          ? "The rolling canonical decision frame exceeded its strict freshness window."
+        : !decisionTimingValid
+          ? activeMarketSession
+            ? "The rolling canonical decision frame exceeded its strict freshness window."
+            : "Retained stock data failed last-session integrity verification."
         : !marketTimestampCoverage
           ? "Canonical and ProX market facts are stale, missing, or refer to different market moments."
+        : !activeMarketSession
+          ? "Market closed: verified last-session stock data is retained for display only; not live or entry-authorizing."
         : directQuoteCoverage
           ? "Canonical Spot Momentum scoring, ranking, and display use one fresh rolling decision frame."
           : "Canonical Spot Momentum remains atomic; unavailable direct quote refreshes retain the fresh promoted-run decision.",
@@ -2118,6 +2212,8 @@ export async function GET() {
         engineVersion: feed.engineVersion,
         sourceRunId: "sourceRun" in feed ? feed.sourceRun.id : null,
         decisionFrame: feed.decisionFrame,
+        timingMode: activeMarketSession ? "active_freshness" : "retained_session_integrity",
+        retainedSession,
         qualifiedCount: audit.qualifiedCount,
         contenderCount: audit.contenderCount,
         radarCount: audit.radarCount,
@@ -2418,8 +2514,38 @@ export async function GET() {
     });
   }
 
-  // Crypto has no market close. A healthy 24/7 ProX lane must prove the
-  // complete saved set, packet coverage, freshness, and timed-outcome writes.
+  // Operational collection and archived, excluded performance are distinct.
+  // A source is closed only after a per-record audit and intact protections.
+  // CoinAPI collection/outcomes are separate HARD checks, never assumed healthy
+  // merely because old data was quarantined or a cron returned HTTP 200.
+  const cryptoConfiguration = {
+    production: process.env.VERCEL_ENV === "production",
+    environmentEnabled: process.env.COINAPI_PILOT_ENABLED === "true",
+    credentialConfigured: Boolean(process.env.COINAPI_API_KEY?.trim()),
+  };
+  let cryptoEvidence = assessCryptoEvidenceHealth(null, cryptoConfiguration);
+  try {
+    const { data, error } = await supabase.rpc("ht_crypto_evidence_health_snapshot");
+    if (error || !data) throw error ?? new Error("Crypto evidence snapshot unavailable.");
+    const outcomeProcessing = await readCryptoOutcomeProcessingEvidence(supabase);
+    cryptoEvidence = assessCryptoEvidenceHealth({...data,outcomeProcessing}, cryptoConfiguration);
+  } catch (error) {
+    // Missing schema, timeout, and unverified evidence remain hard failures.
+    cryptoEvidence = assessCryptoEvidenceHealth(null, cryptoConfiguration, Date.now(), error);
+  }
+  checks.push(...cryptoEvidence.checks);
+
+  // Manual paper fills are separate from the research collector's authority.
+  // No live exchange orders, and no user account identities in public health.
+  try {
+    const {data,error}=await supabase.rpc("ht_crypto_paper_health");
+    checks.push(assessCryptoPaperHealth(error ? null : data));
+  } catch {
+    checks.push(assessCryptoPaperHealth(null));
+  }
+
+  // The legacy public lane continues recording observations, not new legacy
+  // outcome promises. Preserve its exact-set, provider and freshness checks.
   try {
     const { data: cryptoRun, error: cryptoRunError } = await supabase
       .from("ht_crypto_prox_collection_runs")
@@ -2441,7 +2567,7 @@ export async function GET() {
       const { data: cryptoObservations, error: cryptoObservationError } =
         await supabase
           .from("ht_crypto_prox_observations")
-          .select("product_id,symbol,role,rank,prox_state,prox_packet")
+          .select("product_id,symbol,role,rank,prox_state,prox_packet,outcome_tracking_status,target_15m_at,target_1h_at,target_4h_at,target_24h_at")
           .eq("observation_minute", cryptoRun.observation_minute);
       if (cryptoObservationError) throw cryptoObservationError;
       const overdueCutoff = new Date(
@@ -2541,7 +2667,10 @@ export async function GET() {
         cryptoRun.complete === true &&
         expectedCount === persistedCount &&
         persistedCount === actualCount;
-      const outcomesCurrent = (overdueOutcomeCount ?? 0) === 0;
+      const outcomeEvidence = legacyCryptoOutcomeQuarantine();
+      const archiveAudit = cryptoEvidence.archiveBySource.ht_crypto_prox_observations;
+      const observationOnly = (cryptoObservations ?? []).every(isObservationOnlyRow);
+      const outcomesCurrent = archiveAudit.ok && observationOnly;
 
       checks.push({
         name: "crypto_prox_observation_pipeline",
@@ -2561,10 +2690,10 @@ export async function GET() {
               : !packetCoverage
                 ? "One or more current crypto opportunities is missing a valid bounded-authority ProX packet."
                 : !outcomesCurrent
-                  ? "Crypto ProX has overdue 15-minute outcome observations."
+                  ? "Legacy crypto audit/protection is incomplete or the current writer scheduled invalid legacy outcomes. Check migration 0038 and audit details."
                   : !fresh
                     ? "The latest Crypto ProX observation cycle is stale."
-                    : "Crypto ProX is fresh, complete, exact-set verified, and recording timed outcomes.",
+                    : "Crypto ProX observations are fresh and exact-set verified; historical outcomes are audited/excluded, and current outcomes are checked separately in CoinAPI.",
         detail: {
           observedAt: cryptoRun.observed_at,
           expectedCount,
@@ -2579,6 +2708,9 @@ export async function GET() {
           exactCryptoSet,
           packetCoverage,
           overdue15mOutcomes: overdueOutcomeCount ?? 0,
+          outcomeEvidence,
+          archiveAudit,
+          observationOnly,
           outcomesUpdatedThisCycle: cryptoRun.outcomes_updated,
           ageMinutes: Number.isFinite(cryptoRunAgeHours)
             ? Number((cryptoRunAgeHours * 60).toFixed(1))
@@ -2728,7 +2860,7 @@ export async function GET() {
       const { data: discoveryObservations, error: discoveryObservationError } =
         await supabase
           .from("ht_crypto_discovery_observations")
-          .select("asset_id,symbol,rank,discovery_packet")
+          .select("asset_id,symbol,rank,discovery_packet,outcome_tracking_status,target_15m_at,target_1h_at,target_4h_at,target_24h_at")
           .eq("observation_minute", discoveryRun.observation_minute);
       if (discoveryObservationError) throw discoveryObservationError;
       const overdueCutoff = new Date(
@@ -2740,12 +2872,8 @@ export async function GET() {
           .select("*", { count: "exact", head: true })
           .is("price_15m_usd", null)
           .lte("target_15m_at", overdueCutoff)
-          // Must match the same current-format filter as the outcome
-          // backfill query in crypto/prox-sensor/route.ts, or this count
-          // would permanently include the 49,583 legacy "crypto:SYMBOL"
-          // rows that pipeline deliberately stopped chasing — they can
-          // never resolve, so counting them here would just reintroduce
-          // the same false failure at a different layer.
+          // Retain the existing comparable count, but all legacy formats
+          // remain quarantined below. No current-price backfill is allowed.
           .like("asset_id", "crypto:%:%");
       if (overdueOutcomeError) throw overdueOutcomeError;
 
@@ -2811,7 +2939,10 @@ export async function GET() {
         candidateAssets === expectedCount;
       const discoveryAgeHours = hoursSince(discoveryRun.observed_at);
       const fresh = discoveryAgeHours <= MAX_CRYPTO_PROX_AGE_HOURS;
-      const outcomesCurrent = (overdueOutcomeCount ?? 0) === 0;
+      const outcomeEvidence = legacyCryptoOutcomeQuarantine();
+      const archiveAudit = cryptoEvidence.archiveBySource.ht_crypto_discovery_observations;
+      const observationOnly = (discoveryObservations ?? []).every(isObservationOnlyRow);
+      const outcomesCurrent = archiveAudit.ok && observationOnly;
 
       checks.push({
         name: "crypto_multivenue_shadow_discovery",
@@ -2831,10 +2962,10 @@ export async function GET() {
               : !packetCoverage
                 ? "One or more discovery candidates is missing its shadow decision packet."
                 : !outcomesCurrent
-                  ? "Multi-venue discovery has overdue 15-minute outcomes."
+                  ? "Multi-venue legacy audit/protection is incomplete or the current writer scheduled invalid legacy outcomes. Check migration 0038 and audit details."
                   : !fresh
                     ? "Multi-venue crypto discovery is stale."
-                    : "Multi-venue crypto discovery is fresh, shadow-only, exact-set verified, and recording outcomes.",
+                    : "Multi-venue discovery is fresh and exact-set verified; historical outcomes are audited/excluded, and current outcomes are checked separately in CoinAPI.",
         detail: {
           authority: "none",
           observedAt: discoveryRun.observed_at,
@@ -2852,6 +2983,9 @@ export async function GET() {
           exactCandidateSet,
           packetCoverage,
           overdue15mOutcomes: overdueOutcomeCount ?? 0,
+          outcomeEvidence,
+          archiveAudit,
+          observationOnly,
           outcomesUpdatedThisCycle: discoveryRun.outcomes_updated,
           outcomesUnavailableThisCycle: discoveryRun.outcomes_unavailable,
           ageMinutes: Number.isFinite(discoveryAgeHours)
@@ -2879,70 +3013,95 @@ export async function GET() {
     const overdueCutoff = new Date(
       Date.now() - HT_AGENT_OUTCOME_HEALTH_GRACE_MS,
     ).toISOString();
-    const [controlResult, profilesResult, framesResult, decisionsResult, runsResult, agentOrdersResult, overdueOutcomesResult, controlEventsResult] = await Promise.all([
+    const [controlResult, profilesResult, framesResult, decisionsResult, runsResult, agentOrdersResult, overdueOutcomesResult, controlEventsResult, riskAuditsResult, lifecycleResult] = await Promise.all([
       supabase.from("ht_agent_global_control").select("kill_switch,policy_version,updated_at").eq("id", "global").single(),
       supabase.from("ht_agent_profiles").select("id,mode,status,kill_switch"),
       supabase.from("ht_agent_decision_frames").select("id", { count: "exact", head: true }),
-      supabase.from("ht_agent_decisions").select("id,frame_id,decision_version,trade_plan", { count: "exact" }).limit(5000),
+      supabase.from("ht_agent_decisions").select("id,frame_id,decision_version,trade_plan", { count: "exact" }).order("decided_at", { ascending: false }).limit(5000),
       supabase.from("ht_agent_runs").select("id,profile_id,status,mode,started_at,completed_at,decision_count,order_count,diagnostics").order("started_at", { ascending: false }).limit(5000),
       supabase.from("paper_orders").select("id,ht_agent_decision_id,strategy_source,status", { count: "exact" }).eq("strategy_source", "ht_agent").limit(5000),
       supabase.from("ht_agent_outcomes").select("id", { count: "exact", head: true }).eq("complete", false).lt("target_at", overdueCutoff),
       supabase.from("ht_agent_control_events").select("id", { count: "exact", head: true }),
+      supabase.from("ht_agent_decisions").select("policy_version,risk_rules,risk_allowed", { count: "exact" })
+        .eq("decision_version", HT_AGENT_DECISION_VERSION).order("decided_at", { ascending: false }).limit(100),
+      supabase.rpc("ht_agent_lifecycle_health"),
     ]);
-    const errors = [controlResult.error, profilesResult.error, framesResult.error, decisionsResult.error, runsResult.error, agentOrdersResult.error, overdueOutcomesResult.error, controlEventsResult.error].filter(Boolean);
+    const errors = [controlResult.error, profilesResult.error, framesResult.error, decisionsResult.error, runsResult.error, agentOrdersResult.error, overdueOutcomesResult.error, controlEventsResult.error, riskAuditsResult.error].filter(Boolean);
     if (errors.length > 0) throw errors[0];
     const profiles = profilesResult.data ?? [];
     const activeProfiles = profiles.filter((profile) => profile.status === "active" && profile.kill_switch === false);
     const cycleRequired = activeProfiles.length > 0;
     const runs = runsResult.data ?? [];
-    const latestRunsByProfile = new Map<string, (typeof runs)[number]>();
-    for (const run of runs) {
-      if (!latestRunsByProfile.has(run.profile_id)) latestRunsByProfile.set(run.profile_id, run);
-    }
     const maxCycleAgeHours = isActiveMarketSession() ? 10 / 60 : 24;
-    const cycleFresh = !cycleRequired || activeProfiles.every((profile) => {
-      const latest = latestRunsByProfile.get(profile.id);
-      return latest?.status === "success" && Boolean(latest.completed_at) && hoursSince(latest.completed_at!) <= maxCycleAgeHours;
+    const runHealth = assessHtAgentRunHealth(activeProfiles, runs, {
+      maximumSuccessAgeMs: maxCycleAgeHours * 60 * 60_000,
     });
+    const cycleFresh = !cycleRequired || runHealth.ok;
+    const lifecycle = lifecycleResult.data && typeof lifecycleResult.data === "object"
+      ? lifecycleResult.data as Record<string, unknown>
+      : null;
+    const lifecycleReady = !lifecycleResult.error && lifecycle?.oneRunningIndexInstalled === true &&
+      lifecycle?.outcomeWorkerInstalled === true &&
+      Number(lifecycle.duplicateRunningProfiles) === 0 &&
+      Number(lifecycle.overdueRunningCycles) === 0;
     const decisions = decisionsResult.data ?? [];
     const decisionFrameComplete = decisions.every((decision) => Boolean(decision.frame_id));
     const tradePlanComplete = decisions.every((decision) =>
-      decision.decision_version !== "ht-agent-decision-v2-trade-plan" || (
+      !["ht-agent-decision-v2-trade-plan", "ht-agent-decision-v3-evidence", HT_AGENT_DECISION_VERSION].includes(decision.decision_version) || (
         decision.trade_plan &&
         typeof decision.trade_plan === "object" &&
-        (decision.trade_plan as Record<string, unknown>).version === "ht-trade-plan-v1"
+        (decision.trade_plan as Record<string, unknown>).version === HT_TRADE_PLAN_VERSION
       ),
     );
+    const evidenceAuditComplete = (riskAuditsResult.data ?? []).every((decision) =>
+      decision.policy_version === HT_AGENT_POLICY_VERSION &&
+      isHtAgentRiskAuditComplete(decision.risk_rules, decision.risk_allowed, { requireMarketTiming: true }),
+    );
+    const policyVersionReady = controlResult.data?.policy_version === HT_AGENT_POLICY_VERSION;
     const agentOrders = agentOrdersResult.data ?? [];
     const paperLinkComplete = agentOrders.every((order) => Boolean(order.ht_agent_decision_id));
     const paperOnly = agentOrders.every((order) => order.strategy_source === "ht_agent");
     const overdueOutcomeCount = overdueOutcomesResult.count ?? 0;
     const healthy =
-      controlResult.data?.policy_version === "ht-agent-risk-v2-tradeability" &&
+      policyVersionReady &&
       decisionFrameComplete &&
       tradePlanComplete &&
+      evidenceAuditComplete &&
       paperLinkComplete &&
       paperOnly &&
       overdueOutcomeCount === 0 &&
+      lifecycleReady &&
       cycleFresh;
     checks.push({
       name: "ht_agent_phase1",
       ok: healthy,
-      message: !decisionFrameComplete
+      message: !policyVersionReady
+        ? "HT Agent evidence policy is not current; apply migration 0034 and deploy the matching code."
+        : !decisionFrameComplete
         ? "One or more HT Agent decisions is missing its immutable evidence frame."
         : !tradePlanComplete
-          ? "One or more v2 HT Agent decisions is missing its backend-owned trade plan."
+          ? "One or more HT Agent trade-plan decisions is missing its backend-owned trade plan."
+        : !evidenceAuditComplete
+          ? "One or more current HT Agent decisions has incomplete or contradictory risk-evidence logging."
         : !paperLinkComplete || !paperOnly
           ? "An HT Agent paper order is missing its deterministic decision link."
           : overdueOutcomeCount > 0
             ? `HT Agent has ${overdueOutcomeCount} overdue provider-time outcome observations.`
+          : !lifecycleReady
+            ? "HT Agent lifecycle/outcome-worker protection is missing or an abandoned cycle remains; apply migration 0046."
           : !cycleFresh
-            ? "An unlocked HT Agent profile has no fresh successful decision cycle."
+            ? runHealth.overdueRunningCount > 0
+              ? "An unlocked HT Agent profile has an overdue running decision cycle."
+              : "An unlocked HT Agent profile has no fresh successful decision cycle."
             : "HT Agent Phase 1 is schema-ready, fail-closed, auditable, and isolated to HT Paper Trading.",
       detail: {
-        frameVersion: "ht-agent-frame-v1",
-        decisionVersion: "ht-agent-decision-v2-trade-plan",
-        tradePlanVersion: "ht-trade-plan-v1",
+        frameVersion: HT_AGENT_FRAME_VERSION,
+        decisionVersion: HT_AGENT_DECISION_VERSION,
+        tradePlanVersion: HT_TRADE_PLAN_VERSION,
+        cohortVersion: HT_AGENT_COHORT_VERSION,
+        evidenceAuditComplete,
+        currentVersionSampleCount: riskAuditsResult.data?.length ?? 0,
+        currentVersionDecisionCount: riskAuditsResult.count ?? 0,
         policyVersion: controlResult.data?.policy_version ?? null,
         globalKillSwitch: controlResult.data?.kill_switch ?? null,
         profileCount: profiles.length,
@@ -2953,7 +3112,11 @@ export async function GET() {
         overdueOutcomeCount,
         outcomeMeasurementGraceMinutes:
           HT_AGENT_OUTCOME_HEALTH_GRACE_MS / 60_000,
-        latestRuns: activeProfiles.map((profile) => latestRunsByProfile.get(profile.id) ?? null),
+        latestRuns: runHealth.profileStates.map((state) => state.latestRun),
+        latestSuccessfulRuns: runHealth.profileStates.map((state) => state.latestSuccess),
+        runHealth: runHealth.profileStates,
+        lifecycle,
+        lifecycleReady,
         cycleFresh,
         executionAuthority: "ht_labs_paper_only",
         liveBrokerage: false,
@@ -2963,7 +3126,7 @@ export async function GET() {
     checks.push({
       name: "ht_agent_phase1",
       ok: false,
-      message: "HT Agent trade-plan schema is unavailable; run migrations 0030 and 0031 before deploying.",
+      message: "HT Agent schema is unavailable; confirm migrations 0030, 0031 and 0034 before deploying.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }
@@ -2984,6 +3147,18 @@ export async function GET() {
       failures: hardFailures.map((check) => check.name),
     },
     checks,
+    warnings: [
+      ...cryptoEvidence.warnings,
+      ...checks.flatMap((check) => {
+        if (check.name !== "prox_realtime_microstructure_observations") return [];
+        const detail = check.detail as { activeMarketSession?: boolean; sourceCoverage?: ReturnType<typeof describeProxMicrostructureCoverage> } | undefined;
+        if (!detail?.sourceCoverage || detail.activeMarketSession !== true || detail.sourceCoverage.coverageState === "complete") return [];
+        return [{ name: "prox_microstructure_partial_source_coverage",
+          message: "ProX collection health is not complete per-ticker freshness. Some quote or trade evidence is stale/unavailable; original provider times are preserved.",
+          sources: detail.sourceCoverage.sourceIssues,
+          providerRequests: 0 }];
+      }),
+    ],
     timestamp: new Date().toISOString(),
   }, { status: ok ? 200 : 500 });
 }

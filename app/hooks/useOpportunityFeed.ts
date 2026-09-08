@@ -130,7 +130,7 @@ export function useOpportunityFeed(initial: InitialOpportunityFeeds) {
       ? window.setTimeout(() => void refresh(), 0)
       : null;
     const interval = window.setInterval(() => {
-      void refresh();
+      if (document.visibilityState === "visible") void refresh();
     }, HT_REFRESH_RATES_MS.homeDecisions);
     return () => {
       if (initialLoad !== null) window.clearTimeout(initialLoad);

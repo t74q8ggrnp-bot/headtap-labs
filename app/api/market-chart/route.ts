@@ -17,14 +17,14 @@ import {
 } from "@/lib/massive-stocks";
 import {
   resolveSnapshotChangePercent,
-  resolveSnapshotDisplayPrice,
-  resolveSnapshotTimestampMs,
 } from "@/lib/polygon-snapshot";
+import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
-import { getStockMarketClock } from "@/lib/stock-market-session";
+import { getStockMarketClock, stockHistoryLabel } from "@/lib/stock-market-session";
+import { fetchMassiveCryptoChart } from "@/lib/massive-crypto";
+import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
 
 const POLYGON_ORIGIN = "https://api.polygon.io";
-const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
 const STOCK_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
 const CRYPTO_SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9.-]{0,19}$/;
 const CRYPTO_PRODUCT_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,30}-USD$/;
@@ -140,27 +140,16 @@ async function fetchStockBars(symbol: string): Promise<{
       ),
     );
   }
-  const snapshotPrice = snapshot ? resolveSnapshotDisplayPrice(snapshot) : 0;
-  const snapshotTimestampMs = snapshot ? resolveSnapshotTimestampMs(snapshot) : null;
-  const tradeTimestampMs = lastTrade ? Date.parse(lastTrade.timestamp) : null;
-  const useTrade = Boolean(
-    lastTrade &&
-      tradeTimestampMs !== null &&
-      Number.isFinite(tradeTimestampMs) &&
-      (snapshotTimestampMs === null || tradeTimestampMs >= snapshotTimestampMs),
-  );
-  const displayPrice = useTrade ? lastTrade!.price : snapshotPrice;
-  const displayAsOfMs = useTrade ? tradeTimestampMs : snapshotTimestampMs;
-  const displayAsOf = displayAsOfMs && displayAsOfMs > 0
-    ? new Date(displayAsOfMs).toISOString()
-    : null;
+  const display = resolveStockDisplayPrice(snapshot, lastTrade);
+  const displayPrice = display?.price ?? 0;
+  const displayAsOf = display?.asOf ?? null;
   const mergedBars = selectLatestEasternSessionBars(
     mergeVerifiedTradeIntoBars(
       mergeMarketBars(minuteBars, secondBars),
       displayPrice > 0 && displayAsOf
         ? {
             price: displayPrice,
-            size: useTrade ? lastTrade?.size ?? null : null,
+            size: display?.size ?? null,
             timestamp: displayAsOf,
           }
         : null,
@@ -169,13 +158,13 @@ async function fetchStockBars(symbol: string): Promise<{
   const clock = getStockMarketClock();
   const displayQuote = snapshot && displayPrice > 0 && displayAsOf
     ? {
-        price: displayPrice,
+        price: Number(displayPrice.toFixed(6)),
         changePercent: resolveSnapshotChangePercent(snapshot, displayPrice),
         asOf: displayAsOf,
-        live: clock.active && secondResponse.ok && isActiveMarketTimestampUsable(displayAsOf),
-        source: useTrade
-          ? "massive_polygon_last_trade" as const
-          : "massive_polygon_snapshot" as const,
+        live: display!.priceKind === "trade" && clock.active && secondResponse.ok && isActiveMarketTimestampUsable(displayAsOf, Date.now(), DISPLAY_LIVE_MAX_AGE_MS),
+        changeBasis: "previous_close" as const,
+        source: display!.source,
+        priceKind: display!.priceKind,
       }
     : undefined;
   return {
@@ -183,40 +172,6 @@ async function fetchStockBars(symbol: string): Promise<{
     realTimeSeconds: secondResponse.ok,
     displayQuote,
   };
-}
-
-async function fetchCryptoBars(productId: string): Promise<MarketChartBar[]> {
-  const params = new URLSearchParams({ granularity: "300" });
-  const response = await fetch(
-    `${COINBASE_ORIGIN}/products/${encodeURIComponent(productId)}/candles?${params}`,
-    {
-      cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "HT-Labs-Crypto-Research/1.0",
-      },
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`Crypto chart provider returned ${response.status}.`);
-  }
-
-  const payload: unknown = await response.json();
-  if (!Array.isArray(payload)) return [];
-  return normalizeMarketBars(
-    payload.map((bar) => {
-      const candle = Array.isArray(bar) ? bar : [];
-      return {
-        time: candle[0],
-        low: candle[1],
-        high: candle[2],
-        open: candle[3],
-        close: candle[4],
-        volume: candle[5],
-      };
-    }),
-  ).slice(-288);
 }
 
 export async function GET(request: Request) {
@@ -255,6 +210,7 @@ export async function GET(request: Request) {
     let sourceLabel: string;
     let windowLabel: string;
     let displayQuote: MarketChartResponse["displayQuote"];
+    let intervalSeconds = 60;
 
     if (asset === "stock") {
       const stockFeed = await fetchStockBars(symbol);
@@ -264,9 +220,7 @@ export async function GET(request: Request) {
         ? "Massive real-time minute + second aggregates"
         : "Massive minute aggregates";
       const latest = bars.at(-1);
-      windowLabel = latest && easternDateString(latest.time * 1_000) === easternDateString(new Date())
-        ? "Current session"
-        : "Latest verified session";
+      windowLabel = stockHistoryLabel(latest ? new Date(latest.time * 1_000).toISOString() : null);
     } else {
       productId = searchParams.get("productId")?.trim().toUpperCase() ?? "";
       if (!CRYPTO_PRODUCT_PATTERN.test(productId)) {
@@ -276,12 +230,15 @@ export async function GET(request: Request) {
           rateLimit.headers,
         );
       }
-      bars = await fetchCryptoBars(productId);
-      sourceLabel = "Coinbase 5-minute candles";
+      const cryptoFeed = await fetchMassiveCryptoChart(symbol, productId);
+      bars = cryptoFeed.bars;
+      displayQuote = cryptoFeed.displayQuote;
+      sourceLabel = cryptoFeed.sourceLabel;
+      intervalSeconds = cryptoFeed.intervalSeconds;
       windowLabel = "Rolling 24 hours";
     }
 
-    const summary = summarizeMarketBars(bars);
+    const summary = summarizeMarketBars(bars, asset === "crypto" ? 12 : 6);
     const latest = bars.at(-1);
     if (!summary || !latest || bars.length < 2) {
       return errorResponse(
@@ -305,6 +262,7 @@ export async function GET(request: Request) {
       latestAt: new Date(latest.time * 1_000).toISOString(),
       summary,
       bars,
+      intervalSeconds,
     }, rateLimit.headers);
   } catch (error) {
     console.error("Market chart fetch failed", {

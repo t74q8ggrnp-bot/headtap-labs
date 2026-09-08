@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import LiveStockValue from "@/app/components/market/LiveStockValue";
 import {
   mergeOpportunityLists,
   type Opportunity as HTOpportunity,
@@ -161,7 +162,7 @@ export default function ScannerPage() {
           <div className="flex items-center gap-3">
             {lastUpdated && (
               <span className="hidden text-[10px] font-black uppercase tracking-[0.15em] text-zinc-600 sm:block">
-                Updated {lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                Rankings received {lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · prices update separately
               </span>
             )}
             <button
@@ -297,9 +298,9 @@ export default function ScannerPage() {
 
                   <div className="mt-4 flex items-center justify-between">
                     <div>
-                      <p className="text-2xl font-mono font-black">${o.price.toFixed(2)}</p>
+                      <p className="text-2xl font-mono font-black"><LiveStockValue symbol={o.ticker} fallback={o.price} /></p>
                       <p className={`text-sm font-black ${isBullish ? "text-green-300" : "text-red-300"}`}>
-                        {isBullish ? "+" : ""}{o.change.toFixed(2)}%
+                        <LiveStockValue symbol={o.ticker} field="change" fallback={o.change} />
                       </p>
                     </div>
                     <div className="text-right">

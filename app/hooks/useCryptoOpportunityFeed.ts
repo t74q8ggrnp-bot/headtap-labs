@@ -41,7 +41,9 @@ export function useCryptoOpportunityFeed(
     const kickoff = needsImmediateRefresh
       ? window.setTimeout(() => void refresh(), 0)
       : null;
-    const interval = window.setInterval(() => void refresh(), 60_000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 60_000);
     return () => {
       if (kickoff !== null) window.clearTimeout(kickoff);
       window.clearInterval(interval);

@@ -1,3 +1,4 @@
+import LiveStockValue from "@/app/components/market/LiveStockValue";
 import type { Opportunity } from "@/lib/opportunity-model";
 
 type MobileConvictionsListProps = {
@@ -27,7 +28,7 @@ export default function MobileConvictionsList({
                 </div>
                 <div className="text-right">
                   <p className={`font-mono text-lg font-black ${opportunity.change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                    {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(2)}%
+                    <LiveStockValue symbol={opportunity.ticker} field="change" fallback={opportunity.change} />
                   </p>
                   <p className="mt-0.5 text-xs font-black text-orange-300">HT {Math.round(opportunity.opportunityScore)}</p>
                 </div>

@@ -5,3 +5,7 @@ app/lock-test/
 ios/
 capacitor-web/
 IOS_SETUP.md
+.claude/
+.agents/
+.codex/
+tsconfig.tsbuildinfo

@@ -1,7 +1,8 @@
 export const HT_AGENT_FRAME_VERSION = "ht-agent-frame-v1" as const;
-export const HT_AGENT_POLICY_VERSION = "ht-agent-risk-v2-tradeability" as const;
-export const HT_AGENT_DECISION_VERSION = "ht-agent-decision-v2-trade-plan" as const;
-export const HT_AGENT_COHORT_VERSION = "ht-agent-cohorts-v1" as const;
+export const HT_AGENT_POLICY_VERSION = "ht-agent-risk-v3-evidence" as const;
+export const HT_AGENT_DECISION_VERSION = "ht-agent-decision-v4-provider-clocks" as const;
+export const HT_AGENT_COHORT_VERSION = "ht-agent-cohorts-v3-provider-clocks" as const;
+export const HT_AGENT_MARKET_TIMING_VERSION = "ht-agent-market-timing-v1" as const;
 export const HT_TRADE_PLAN_VERSION = "ht-trade-plan-v1" as const;
 
 export type HtAgentMode = "observe" | "approval_paper" | "paper_autopilot";
@@ -34,6 +35,8 @@ export type HtAgentMarketFacts = {
   dollarVolume: number;
   relativeVolume: number;
   providerTimestamp: string;
+  // Additive provenance. Historical frames omit it and cannot authorize a new order.
+  quoteProviderTimestamp?: string | null;
   source: string;
   marketSession: "regular" | "premarket" | "after_hours" | "closed";
   sessionHighPrice: number | null;
@@ -44,6 +47,10 @@ export type HtAgentMarketFacts = {
 
 export type HtAgentCanonicalEvidence = {
   sourceRunId: string;
+  // Additive provenance for dual-lane frames; historical frames omit these.
+  sourceLane?: "momentum" | "before_crowd";
+  sourceProviderTimestamp?: string | null;
+  universeVersion?: string;
   engineVersion: string;
   decisionTimestamp: string;
   eligible: boolean;
@@ -136,6 +143,20 @@ export type HtAgentRiskPolicy = {
   maximumExtensionRisk: number;
 };
 
+export type HtAgentProviderClock = {
+  providerTimestamp: string | null;
+  ageSeconds: number | null;
+  status: "fresh" | "stale" | "future" | "unavailable";
+};
+
+export type HtAgentMarketTimingEvidence = {
+  version: typeof HT_AGENT_MARKET_TIMING_VERSION;
+  evaluatedAt: string | null;
+  maxAgeSeconds: number;
+  price: HtAgentProviderClock;
+  nbbo: HtAgentProviderClock;
+};
+
 export type HtAgentRiskRule = {
   code: string;
   passed: boolean;
@@ -143,6 +164,10 @@ export type HtAgentRiskRule = {
   observed: number | string | boolean | null;
   limit: number | string | boolean | null;
   message: string;
+  // Optional for historical v1/v2 records. New decisions always record status.
+  status?: "passed" | "failed" | "unavailable" | "not_evaluated";
+  dependsOn?: string[];
+  marketTiming?: HtAgentMarketTimingEvidence;
 };
 
 export type HtAgentRiskResult = {

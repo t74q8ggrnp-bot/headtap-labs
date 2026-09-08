@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
-import { normalizeOpportunity, type Opportunity } from "@/lib/opportunity-model";
+import type { Opportunity } from "@/lib/opportunity-model";
 import {
   calculatePaperFillPrice,
   estimatePaperSlippageBps,
@@ -26,6 +26,7 @@ import {
 import { fetchMassiveLastQuote } from "@/lib/massive-stocks";
 import {
   HT_AGENT_COHORT_VERSION,
+  HT_AGENT_DECISION_VERSION,
   HT_AGENT_FRAME_VERSION,
   type HtAgentDecision,
   type HtAgentDecisionFrame,
@@ -34,9 +35,12 @@ import {
   type HtTradePlan,
 } from "./contracts";
 import { buildHtAgentCohorts, decideHtAgentAction } from "./decision";
-import { DEFAULT_HT_AGENT_RISK_POLICY, evaluateHtAgentRisk } from "./risk";
+import { DEFAULT_HT_AGENT_RISK_POLICY, evaluateHtAgentRisk, resolveHtAgentRiskPolicy } from "./risk";
 import { getEasternDayStart, getHtAgentSessionCloseTarget } from "./time";
 import { buildHtTradePlan } from "./trade-plan";
+import { buildHtAgentCohortMetrics, htAgentMetricWindowEnd, HT_AGENT_METRIC_DECISION_LIMIT, HT_AGENT_METRIC_HORIZON } from "./cohort-metrics";
+import { findHtAgentProposalCandidate, htAgentProposalLane, HT_AGENT_STOCK_UNIVERSE_VERSION, loadHtAgentStockUniverse, type HtAgentStockCandidate } from "./stock-universe";
+import { completeHtAgentRun, failHtAgentRun } from "./run-lifecycle";
 
 type AgentProfileRow = {
   id: string;
@@ -72,14 +76,7 @@ const stringArray = (value: unknown) =>
   Array.isArray(value) ? value.map(String) : [];
 
 function policyFromProfile(profile: AgentProfileRow) {
-  const overrides = profile.risk_policy ?? {};
-  return {
-    ...DEFAULT_HT_AGENT_RISK_POLICY,
-    ...Object.fromEntries(
-      Object.entries(overrides).filter(([, value]) => Number.isFinite(Number(value))),
-    ),
-    version: DEFAULT_HT_AGENT_RISK_POLICY.version,
-  };
+  return resolveHtAgentRiskPolicy(profile.risk_policy);
 }
 
 export async function getOrCreateHtAgentProfile(
@@ -98,7 +95,21 @@ export async function getOrCreateHtAgentProfile(
     .insert({ user_id: context.user.id, paper_account_id: account.id })
     .select("id,user_id,paper_account_id,mode,status,kill_switch,policy_version,risk_policy")
     .single();
-  if (created.error) throw created.error;
+  if (created.error) {
+    // Two dashboard/cycle requests can reach first-use creation together. The
+    // unique user constraint chooses one profile; the loser reads that exact
+    // row without overwriting its mode, kill switch or risk policy.
+    if (created.error.code === "23505") {
+      const retry = await context.service
+        .from("ht_agent_profiles")
+        .select("id,user_id,paper_account_id,mode,status,kill_switch,policy_version,risk_policy")
+        .eq("user_id", context.user.id)
+        .single();
+      if (retry.error) throw retry.error;
+      return retry.data as AgentProfileRow;
+    }
+    throw created.error;
+  }
   return created.data as AgentProfileRow;
 }
 
@@ -231,11 +242,14 @@ function canonicalLevels(opportunity: Opportunity) {
   const downside = framework?.downsideRisk ?? opportunity.explosionAssessment?.structuralDownsidePercent ?? null;
   const upside = framework?.upsideMin ?? opportunity.explosionAssessment?.scenarioBands?.base.min ?? null;
   const upsideMax = framework?.upsideMax ?? opportunity.explosionAssessment?.scenarioBands?.base.max ?? null;
+  const rawStop = entry && downside && downside > 0 ? entry * (1 - downside / 100) : null;
+  const rawTarget = entry && upside && upside > 0 ? entry * (1 + upside / 100) : null;
+  const rawTargetTwo = entry && upsideMax && upsideMax > 0 ? entry * (1 + upsideMax / 100) : null;
   return {
     entry,
-    stop: entry && downside && downside > 0 ? entry * (1 - downside / 100) : null,
-    target: entry && upside && upside > 0 ? entry * (1 + upside / 100) : null,
-    targetTwo: entry && upsideMax && upsideMax > 0 ? entry * (1 + upsideMax / 100) : null,
+    stop: entry !== null && rawStop !== null && rawStop > 0 && rawStop < entry ? rawStop : null,
+    target: entry !== null && rawTarget !== null && rawTarget > entry ? rawTarget : null,
+    targetTwo: entry !== null && rawTargetTwo !== null && rawTargetTwo > entry ? rawTargetTwo : null,
   };
 }
 
@@ -270,16 +284,12 @@ async function paperDailyPnl(service: SupabaseClient, accountId: string) {
 async function buildFrame(
   context: PaperServerContext,
   profile: AgentProfileRow,
-  runId: string,
-  opportunity: Opportunity,
-  rank: number,
-  canonicalDecisionTimestamp: string,
-  canonicalSourceRunId: string,
-  canonicalEngineVersion: string,
+  candidate: HtAgentStockCandidate,
   proxRun: ProxRunRow | null,
   proxMember: ProxMemberRow | undefined,
 ): Promise<HtAgentDecisionFrame> {
-  const sourceRunId = requireCanonicalSourceRunId(canonicalSourceRunId);
+  const { opportunity, rank, decisionTimestamp: canonicalDecisionTimestamp } = candidate;
+  const sourceRunId = requireCanonicalSourceRunId(candidate.sourceRunId);
   const [quote, nbbo, dashboard, dailyPnl] = await Promise.all([
     getPaperTradingQuote(opportunity.ticker),
     fetchMassiveLastQuote(opportunity.ticker),
@@ -314,6 +324,7 @@ async function buildFrame(
       dollarVolume: quote.volume * quote.price,
       relativeVolume: opportunity.relativeVolume,
       providerTimestamp: quote.timestamp,
+      quoteProviderTimestamp: nbbo?.timestamp ?? null,
       source: quote.source,
       marketSession: getEasternMarketSession(),
       sessionHighPrice: opportunity.sessionHighPrice ?? null,
@@ -323,7 +334,10 @@ async function buildFrame(
     },
     canonical: {
       sourceRunId,
-      engineVersion: canonicalEngineVersion,
+      sourceLane: candidate.lane,
+      sourceProviderTimestamp: candidate.providerTimestamp,
+      universeVersion: HT_AGENT_STOCK_UNIVERSE_VERSION,
+      engineVersion: candidate.engineVersion,
       decisionTimestamp: canonicalDecisionTimestamp,
       eligible: opportunity.displayEligibility?.eligible === true,
       rank,
@@ -400,6 +414,7 @@ async function buildManagedPositionFrame(
       dollarVolume: quote.volume * quote.price,
       relativeVolume: number((prior.market_facts as Record<string, unknown>)?.relativeVolume, 0),
       providerTimestamp: quote.timestamp,
+      quoteProviderTimestamp: nbbo?.timestamp ?? null,
       source: quote.source,
       marketSession: getEasternMarketSession(),
       sessionHighPrice: number((prior.market_facts as Record<string, unknown>)?.sessionHighPrice, Number.NaN) || null,
@@ -800,11 +815,8 @@ export async function runHtAgentCycle(context: PaperServerContext) {
   const profile = await getOrCreateHtAgentProfile(context);
   const reconciledClosures = await reconcileHtAgentPaperLifecycles(context, profile);
   const control = await globalControl(context.service);
-  const canonical = await getRollingCanonicalDecisionFrame("momentum");
-  const opportunities = (canonical.opportunities ?? [])
-    .slice(0, 6)
-    .map(normalizeOpportunity);
-  const canonicalSourceRun = "sourceRun" in canonical ? canonical.sourceRun : null;
+  const universe = await loadHtAgentStockUniverse(getRollingCanonicalDecisionFrame);
+  const opportunities = universe.candidates.map((candidate) => candidate.opportunity);
   const paperBeforeCycle = await loadPaperDashboard(context);
   const agentEntryOrders = await context.service.from("paper_orders")
     .select("symbol")
@@ -829,6 +841,13 @@ export async function runHtAgentCycle(context: PaperServerContext) {
     if (recentRunResult.data.status === "running" && ageSeconds < 300) {
       throw new Error("An HT Agent decision cycle is already running for this profile.");
     }
+    if (recentRunResult.data.status === "running") {
+      await failHtAgentRun(
+        context.service,
+        String(recentRunResult.data.id),
+        "Previous HT Agent cycle exceeded the five-minute lifecycle deadline.",
+      );
+    }
     if (ageSeconds < 30) {
       throw new Error("HT Agent cycle cooldown is active; wait for the current provider frame to advance.");
     }
@@ -838,8 +857,14 @@ export async function runHtAgentCycle(context: PaperServerContext) {
     user_id: context.user.id,
     mode: profile.mode,
     candidate_count: opportunities.length,
+    diagnostics: { stock_universe: universe.coverage, paper_only: true },
   }).select("id").single();
-  if (runInsert.error) throw runInsert.error;
+  if (runInsert.error) {
+    if (runInsert.error.code === "23505") {
+      throw new Error("An HT Agent decision cycle is already running for this profile.");
+    }
+    throw runInsert.error;
+  }
   const runId = String(runInsert.data.id);
   try {
     const prox = await loadProxEvidence(
@@ -877,12 +902,7 @@ export async function runHtAgentCycle(context: PaperServerContext) {
         : await buildFrame(
           context,
           profile,
-          runId,
-          opportunity,
-          index + 1,
-          canonical.decisionFrame.decisionAsOf,
-          String(canonicalSourceRun?.id ?? opportunity.sourceRunId ?? ""),
-          String(canonical.engineVersion),
+          universe.candidates[index],
           prox.run,
           prox.members.get(opportunity.ticker),
         );
@@ -948,27 +968,32 @@ export async function runHtAgentCycle(context: PaperServerContext) {
         if (result) orders += 1;
       }
     }
-    await context.service.from("ht_agent_runs").update({
-      status: "success",
-      completed_at: new Date().toISOString(),
-      decision_count: decisions,
-      order_count: orders,
+    await completeHtAgentRun(context.service, runId, {
+      decisionCount: decisions,
+      orderCount: orders,
       diagnostics: {
-        canonical_source_run_id: canonicalSourceRun?.id ?? null,
-        canonical_decision_at: canonical.decisionFrame.decisionAsOf,
+        // Retain legacy momentum receipt keys for existing health consumers.
+        canonical_source_run_id: universe.coverage.lanes[0].sourceRunId,
+        canonical_decision_at: universe.coverage.lanes[0].decisionTimestamp,
+        stock_universe: universe.coverage,
         prox_source_run_id: prox.run?.id ?? null,
         global_kill_switch: control.kill_switch,
         paper_only: true,
         reconciled_closures: reconciledClosures,
       },
-    }).eq("id", runId);
+    });
     return { runId, decisions, orders };
   } catch (error) {
-    await context.service.from("ht_agent_runs").update({
-      status: "failed",
-      completed_at: new Date().toISOString(),
-      error_message: error instanceof Error ? error.message : "Agent cycle failed",
-    }).eq("id", runId);
+    try {
+      await failHtAgentRun(
+        context.service,
+        runId,
+        error instanceof Error ? error.message : "Agent cycle failed",
+      );
+    } catch {
+      // Never report success when either finalization write is unconfirmed.
+      throw new Error("HT Agent cycle failed and its database run state could not be finalized.", { cause: error });
+    }
     throw error;
   }
 }
@@ -981,7 +1006,7 @@ export async function resolveHtAgentProposal(
   const profile = await getOrCreateHtAgentProfile(context);
   const control = await globalControl(context.service);
   const result = await context.service.from("ht_agent_decisions")
-    .select("id,run_id,frame_id,symbol,action,state,explanation")
+    .select("id,run_id,frame_id,symbol,action,state,explanation,decision_version,policy_version")
     .eq("id", decisionId)
     .eq("profile_id", profile.id)
     .eq("state", "pending_approval")
@@ -1004,13 +1029,13 @@ export async function resolveHtAgentProposal(
   const symbol = String(row.symbol);
   const currentProx = await loadProxEvidence(context.service, [symbol]);
   let frame: HtAgentDecisionFrame;
+  const priorResult = await context.service.from("ht_agent_decision_frames")
+    .select("id,symbol,market_facts,canonical_evidence,catalyst_evidence")
+    .eq("id", String(row.frame_id))
+    .eq("profile_id", profile.id)
+    .single();
+  if (priorResult.error) throw priorResult.error;
   if (riskReducing) {
-    const priorResult = await context.service.from("ht_agent_decision_frames")
-      .select("id,symbol,market_facts,canonical_evidence,catalyst_evidence")
-      .eq("id", String(row.frame_id))
-      .eq("profile_id", profile.id)
-      .single();
-    if (priorResult.error) throw priorResult.error;
     frame = await buildManagedPositionFrame(
       context,
       profile,
@@ -1019,25 +1044,17 @@ export async function resolveHtAgentProposal(
       currentProx.members.get(symbol),
     );
   } else {
-    const canonical = await getRollingCanonicalDecisionFrame("momentum");
-    const currentIndex = (canonical.opportunities ?? []).findIndex(
-      (item) => String((item as { ticker?: unknown }).ticker ?? "").toUpperCase() === symbol,
-    );
-    const currentOpportunityRaw = currentIndex >= 0 ? canonical.opportunities[currentIndex] : null;
-    if (!currentOpportunityRaw) throw new Error("The proposal is no longer present in the current Canonical frame.");
-    const opportunity = normalizeOpportunity(currentOpportunityRaw);
-    const sourceRun = "sourceRun" in canonical ? canonical.sourceRun : null;
+    const lane = htAgentProposalLane(priorResult.data.canonical_evidence);
+    if (!lane) throw new Error("The proposal's original Canonical strategy is unavailable; a new decision is required.");
+    const canonical = await getRollingCanonicalDecisionFrame(lane);
+    const candidate = findHtAgentProposalCandidate(lane, canonical, symbol);
+    if (!candidate) throw new Error("The proposal is no longer present in a fresh authoritative frame for its original Canonical strategy.");
     frame = await buildFrame(
       context,
       profile,
-      String(row.run_id),
-      opportunity,
-      currentIndex + 1,
-      canonical.decisionFrame.decisionAsOf,
-      String(sourceRun?.id ?? opportunity.sourceRunId ?? ""),
-      String(canonical.engineVersion),
+      candidate,
       currentProx.run,
-      currentProx.members.get(opportunity.ticker),
+      currentProx.members.get(symbol),
     );
   }
   const risk = evaluateHtAgentRisk(frame, {
@@ -1072,8 +1089,10 @@ export async function resolveHtAgentProposal(
     paper_account_state: frame.paper,
   });
   if (revalidationFrame.error) throw revalidationFrame.error;
-  await context.service.from("ht_agent_decisions").update({
+  const approvalUpdate = await context.service.from("ht_agent_decisions").update({
     state: "approved",
+    decision_version: refreshedDecision.version,
+    policy_version: risk.policyVersion,
     approval_frame_id: frame.frameId,
     proposed_entry: risk.proposedEntry,
     proposed_stop: risk.proposedStop,
@@ -1086,67 +1105,62 @@ export async function resolveHtAgentProposal(
     explanation: `${String(row.explanation)} Approval was revalidated against a fresh immutable frame.`,
     trade_plan: buildHtTradePlan(frame, refreshedDecision, profile.mode),
     updated_at: new Date().toISOString(),
-  }).eq("id", decisionId);
-  await context.service.from("ht_agent_decision_events").insert({
+  }).eq("id", decisionId).eq("state", "pending_approval").select("id").single();
+  if (approvalUpdate.error) throw approvalUpdate.error;
+  const approvalEvent = await context.service.from("ht_agent_decision_events").insert({
     decision_id: decisionId,
     profile_id: profile.id,
     user_id: context.user.id,
     event_type: "proposal_revalidated",
-    detail: { approval_frame_id: frame.frameId, frame_hash: frameHash, provider_timestamp: frame.market.providerTimestamp },
+    detail: {
+      approval_frame_id: frame.frameId, frame_hash: frameHash, provider_timestamp: frame.market.providerTimestamp,
+      previous_decision_version: row.decision_version, previous_policy_version: row.policy_version,
+      decision_version: refreshedDecision.version, policy_version: risk.policyVersion,
+      risk_rules: risk.rules, risk_allowed: risk.allowed,
+    },
   });
+  if (approvalEvent.error) throw approvalEvent.error;
   const order = await submitHtAgentPaperOrder(context, profile, decisionId, frame, refreshedDecision);
   return { decisionId, state: order?.status ?? "approved", order };
 }
 
 export async function loadHtAgentDashboard(context: PaperServerContext) {
   const profile = await getOrCreateHtAgentProfile(context);
-  const [control, paper, decisions, runs, cohorts, outcomes] = await Promise.all([
+  const metricWindowEnd = htAgentMetricWindowEnd();
+  const [control, paper, decisions, runs, metricWindow] = await Promise.all([
     globalControl(context.service),
     loadPaperDashboard(context),
     context.service.from("ht_agent_decisions")
-      .select("id,symbol,action,state,mode,proposed_entry,proposed_stop,proposed_target,proposed_quantity,maximum_risk,estimated_notional,risk_allowed,explanation,trade_plan,paper_order_id,paper_order_result,decided_at")
-      .eq("profile_id", profile.id).order("decided_at", { ascending: false }).limit(100),
+      .select("id,symbol,decision_version,action,state,mode,proposed_entry,proposed_stop,proposed_target,proposed_quantity,maximum_risk,estimated_notional,risk_allowed,explanation,trade_plan,paper_order_id,paper_order_result,decided_at")
+      .eq("profile_id", profile.id).order("decided_at", { ascending: false }).order("id").limit(HT_AGENT_METRIC_DECISION_LIMIT),
     context.service.from("ht_agent_runs")
       .select("id,status,mode,candidate_count,decision_count,order_count,started_at,completed_at,diagnostics,error_message")
       .eq("profile_id", profile.id).order("started_at", { ascending: false }).limit(20),
-    context.service.from("ht_agent_cohort_observations")
-      .select("cohort,would_enter").eq("profile_id", profile.id),
-    context.service.from("ht_agent_outcomes")
-      .select("return_percent,complete,ht_agent_cohort_observations(cohort,would_enter)")
-      .eq("profile_id", profile.id)
-      .eq("complete", true)
-      .not("return_percent", "is", null)
-      .limit(5000),
+    context.service.from("ht_agent_decisions").select("id")
+      .eq("profile_id", profile.id).eq("decision_version", HT_AGENT_DECISION_VERSION)
+      .lte("decided_at", metricWindowEnd)
+      .order("decided_at", { ascending: false }).order("id").limit(HT_AGENT_METRIC_DECISION_LIMIT),
   ]);
   if (decisions.error) throw decisions.error;
   if (runs.error) throw runs.error;
+  if (metricWindow.error) throw metricWindow.error;
+  const decisionRows = decisions.data ?? [];
+  const metricDecisionIds = (metricWindow.data ?? []).map((row) => row.id);
+  // At most 100 decisions x 3 cohorts x 1 horizon: below the database row cap.
+  // Do not mix legacy Observe-mode cohort semantics into corrected reporting.
+  const [cohorts, outcomes] = metricDecisionIds.length ? await Promise.all([
+    context.service.from("ht_agent_cohort_observations")
+      .select("id,decision_id,cohort,cohort_version,would_enter")
+      .eq("profile_id", profile.id).eq("cohort_version", HT_AGENT_COHORT_VERSION)
+      .in("decision_id", metricDecisionIds).limit(HT_AGENT_METRIC_DECISION_LIMIT * 3),
+    context.service.from("ht_agent_outcomes")
+      .select("cohort_observation_id,horizon,complete,return_percent")
+      .eq("profile_id", profile.id).eq("horizon", HT_AGENT_METRIC_HORIZON)
+      .in("decision_id", metricDecisionIds).limit(HT_AGENT_METRIC_DECISION_LIMIT * 3),
+  ]) : [{ data: [], error: null }, { data: [], error: null }];
   if (cohorts.error) throw cohorts.error;
   if (outcomes.error) throw outcomes.error;
-  const completedOutcomes = (outcomes.data ?? []).flatMap((row) => {
-    const relation = row.ht_agent_cohort_observations as unknown as { cohort?: string; would_enter?: boolean } | null;
-    const returnPercent = number(row.return_percent, Number.NaN);
-    if (!relation?.cohort || !Number.isFinite(returnPercent)) return [];
-    return [{ cohort: relation.cohort, wouldEnter: relation.would_enter === true, returnPercent }];
-  });
-  const cohortMetrics = ["canonical_only", "canonical_prox", "ht_agent_full"].map((cohort) => {
-    const rows = (cohorts.data ?? []).filter((row) => row.cohort === cohort);
-    const measured = completedOutcomes.filter((row) => row.cohort === cohort && row.wouldEnter);
-    const averageReturnPercent = measured.length > 0
-      ? measured.reduce((sum, row) => sum + row.returnPercent, 0) / measured.length
-      : null;
-    const positiveRatePercent = measured.length > 0
-      ? measured.filter((row) => row.returnPercent > 0).length / measured.length * 100
-      : null;
-    return {
-      cohort,
-      observations: rows.length,
-      wouldEnter: rows.filter((row) => row.would_enter).length,
-      measuredOutcomes: measured.length,
-      averageReturnPercent,
-      positiveRatePercent,
-    };
-  });
-  const decisionRows = decisions.data ?? [];
+  const cohortMetrics = buildHtAgentCohortMetrics(cohorts.data ?? [], outcomes.data ?? []);
   const grossExposure = paper.positions.reduce((sum, position) => sum + Math.abs(position.marketValue ?? 0), 0);
   return {
     contractVersion: "ht-agent-api-v1",
@@ -1177,6 +1191,16 @@ export async function loadHtAgentDashboard(context: PaperServerContext) {
     decisions: decisionRows,
     runs: runs.data ?? [],
     cohortMetrics,
+    cohortMeasurement: {
+      cohortVersion: HT_AGENT_COHORT_VERSION,
+      horizon: HT_AGENT_METRIC_HORIZON,
+      window: "latest 100 current-version decisions at least 15 minutes old",
+      windowEndsAt: metricWindowEnd,
+      sampledDecisions: metricDecisionIds.length,
+      matchedDecisions: cohortMetrics[0].observations,
+      method: "Modeled returns from proposed entry using minute-bar approximation; not trade win rates or independent episodes.",
+      historicalV1Included: false,
+    },
     riskPolicy: policyFromProfile(profile),
   };
 }

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { formatMarketPrice } from "@/lib/market-price-format";
+import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import HeroPriceChart from "@/app/components/market/HeroPriceChart";
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
-import type { MarketChartDisplayQuote } from "@/lib/market-chart";
 import type { Opportunity } from "@/lib/opportunity-model";
 import OpportunityWindow from "./OpportunityWindow";
 import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
@@ -24,18 +24,11 @@ export default function OpportunityStory({
   onWatch,
 }: OpportunityStoryProps) {
   const explosion = opportunity.explosionAssessment;
-  const [displayQuoteState, setDisplayQuoteState] = useState<{
-    symbol: string;
-    quote: MarketChartDisplayQuote | null;
-  }>({ symbol: opportunity.ticker, quote: null });
-  const displayQuote =
-    displayQuoteState.symbol === opportunity.ticker ? displayQuoteState.quote : null;
-  const updateDisplayQuote = useCallback((quote: MarketChartDisplayQuote | null) => {
-    setDisplayQuoteState({ symbol: opportunity.ticker, quote });
-  }, [opportunity.ticker]);
+  const marketView = useLiveMarketView(opportunity.ticker, { chart: true });
+  const displayQuote = marketView.quote;
   const displayPrice = displayQuote?.price ?? opportunity.price;
   const displayChange = displayQuote?.changePercent ?? opportunity.change;
-  const displayLive = displayQuote?.live ?? opportunity.displayQuoteLive;
+  const displayLive = marketView.live;
 
   return (
     <div className="p-5 flex flex-col gap-4">
@@ -45,7 +38,7 @@ export default function OpportunityStory({
             {opportunity.ticker}
           </p>
           <div className="flex items-center gap-2 pb-1">
-            <span className="font-mono text-xl font-black text-white">${displayPrice.toFixed(displayPrice < 1 ? 4 : 2)}</span>
+            <span className="font-mono text-xl font-black text-white">{formatMarketPrice(displayPrice)}</span>
             <span className={`font-mono text-sm font-black ${displayChange >= 0 ? "text-green-400" : "text-red-400"}`}>
               {displayChange >= 0 ? "+" : ""}{displayChange.toFixed(2)}%
             </span>
@@ -56,6 +49,11 @@ export default function OpportunityStory({
             )}
           </div>
         </div>
+        {!displayLive && (
+          <p className="text-[9px] font-semibold text-zinc-500">
+            {displayQuote ? marketView.label : opportunity.freshnessLabel}
+          </p>
+        )}
       </div>
 
       {explosion?.state === "price_discovery" ? (
@@ -69,7 +67,6 @@ export default function OpportunityStory({
         symbol={opportunity.ticker}
         accent={opportunity.strategy === "before_the_crowd" ? "orange" : "violet"}
         compact
-        onQuoteUpdate={updateDisplayQuote}
       />
 
       <p className="text-[11px] font-semibold leading-5 text-zinc-500">

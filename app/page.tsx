@@ -5,6 +5,7 @@ import {
   loadLatestCryptoDecisionFeed,
   makeCryptoFrameSafeForStaleDisplay,
 } from "@/lib/crypto/decision-frame";
+import { compactHomeInitialOpportunityPayload } from "@/lib/home-initial-payload";
 
 export const dynamic = "force-dynamic";
 
@@ -37,17 +38,20 @@ export default async function Home() {
         ? cryptoResult.value
         : makeCryptoFrameSafeForStaleDisplay(cryptoResult.value)
       : null;
+  const initialMomentumPayload =
+    momentumResult.status === "fulfilled"
+      ? compactHomeInitialOpportunityPayload(momentumResult.value, 15)
+      : null;
+  const initialBeforeCrowdPayload =
+    beforeCrowdResult.status === "fulfilled"
+      ? compactHomeInitialOpportunityPayload(beforeCrowdResult.value, 5)
+      : null;
+
   return (
     <Suspense fallback={null}>
       <HomeClient
-        initialMomentumPayload={
-          momentumResult.status === "fulfilled" ? momentumResult.value : null
-        }
-        initialBeforeCrowdPayload={
-          beforeCrowdResult.status === "fulfilled"
-            ? beforeCrowdResult.value
-            : null
-        }
+        initialMomentumPayload={initialMomentumPayload}
+        initialBeforeCrowdPayload={initialBeforeCrowdPayload}
         initialCryptoFeed={initialCryptoFeed}
       />
     </Suspense>

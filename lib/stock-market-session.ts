@@ -39,3 +39,26 @@ export function getStockMarketClock(now = new Date()): StockMarketClock {
 
   return { session, easternDate, active: session !== "closed" };
 }
+
+// Uses the same weekday/extended-hours calendar as the existing stock clock.
+// Holidays are deliberately not inferred: an older source date must not be
+// silently blessed as the latest session without a verified holiday calendar.
+export function getLastCompletedStockSessionDate(now = new Date()): string | null {
+  const clock = getStockMarketClock(now);
+  if (clock.active) return null;
+  const date = new Date(`${clock.easternDate}T12:00:00Z`);
+  const beforeDawn = getStockMarketClock(new Date(now.getTime() - 8 * 3600_000)).easternDate !== clock.easternDate;
+  if (beforeDawn) date.setUTCDate(date.getUTCDate() - 1);
+  while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function stockHistoryLabel(asOf: string | null | undefined, now = new Date()): string {
+  const sourceMs = asOf ? Date.parse(asOf) : NaN;
+  if (!Number.isFinite(sourceMs)) return "Awaiting verified data";
+  const clock = getStockMarketClock(now);
+  const sourceDate = getStockMarketClock(new Date(sourceMs)).easternDate;
+  return clock.active && sourceDate === clock.easternDate
+    ? "Current session"
+    : `Last session · ${sourceDate}`;
+}

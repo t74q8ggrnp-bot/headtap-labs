@@ -1,3 +1,5 @@
+import { formatMarketPrice } from "@/lib/market-price-format";
+import LiveStockValue from "@/app/components/market/LiveStockValue";
 import {
   getOpportunityPresentation,
   tradeFrameworkToDisplay,
@@ -8,6 +10,7 @@ import OpportunityWindow from "./OpportunityWindow";
 import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
 import ProxPulse from "./ProxPulse";
 import HeroPriceChart from "@/app/components/market/HeroPriceChart";
+import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 
 type MobileCardDetailProps = {
   opportunities: Opportunity[];
@@ -27,7 +30,10 @@ export default function MobileCardDetail({
   onWatch,
 }: MobileCardDetailProps) {
   const current = opportunities[currentIndex];
+  const marketView = useLiveMarketView(current?.ticker ?? "", { chart: true });
   if (!current) return null;
+  const price = marketView.quote?.price ?? current.price;
+  const change = marketView.quote?.changePercent ?? current.change;
 
   const view = getOpportunityPresentation(current);
   const watched = watchlist.includes(current.ticker);
@@ -54,12 +60,12 @@ export default function MobileCardDetail({
           </div>
           <div className="flex items-center gap-1.5">
             <span
-              className={`h-1.5 w-1.5 rounded-full ${current.displayQuoteLive ? "animate-pulse bg-green-400" : "bg-zinc-600"}`}
+              className={`h-1.5 w-1.5 rounded-full ${marketView.live ? "animate-pulse bg-green-400" : "bg-zinc-600"}`}
             />
             <span
-              className={`text-[10px] font-black uppercase tracking-[0.14em] ${current.displayQuoteLive ? "text-green-400" : "text-zinc-500"}`}
+              className={`text-[10px] font-black uppercase tracking-[0.14em] ${marketView.live ? "text-green-400" : "text-zinc-500"}`}
             >
-              {current.displayQuoteLive ? "Live" : "Last verified"}
+              {marketView.label}
             </span>
           </div>
         </div>
@@ -75,11 +81,11 @@ export default function MobileCardDetail({
         </div>
         <p className="mt-2 text-sm font-semibold leading-5 text-zinc-400">{current.whyItMatters}</p>
         <div className="mt-4 flex items-center gap-3">
-          <span className="font-mono text-2xl font-black text-white">${current.price.toFixed(2)}</span>
-          <span className={`font-mono text-xl font-black ${current.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-            {current.change >= 0 ? "+" : ""}{current.change.toFixed(2)}%
+          <span className="font-mono text-2xl font-black text-white">{formatMarketPrice(price)}</span>
+          <span className={`font-mono text-xl font-black ${change >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {change >= 0 ? "+" : ""}{change.toFixed(2)}%
           </span>
-          {current.displayQuoteLive && (
+          {marketView.live && (
             <span className="text-[8px] font-black uppercase tracking-[0.14em] text-green-400">
               Live
             </span>
@@ -166,7 +172,7 @@ export default function MobileCardDetail({
                 <button key={opportunity.ticker} onClick={() => onOpen(opportunity)} className="w-28 shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-left">
                   <p className="font-mono text-base font-black text-white">{opportunity.ticker}</p>
                   <p className={`mt-1 font-mono text-xs font-black ${opportunity.change >= 0 ? "text-green-300" : "text-red-300"}`}>
-                    {opportunity.change >= 0 ? "+" : ""}{opportunity.change.toFixed(1)}%
+                    <LiveStockValue symbol={opportunity.ticker} field="change" fallback={opportunity.change} digits={1} />
                   </p>
                   <p className="mt-1 text-[9px] font-black text-orange-300">HT {Math.round(opportunity.opportunityScore)}</p>
                 </button>

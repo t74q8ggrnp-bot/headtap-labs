@@ -83,6 +83,19 @@ submit, or manage an order and may never rewrite a Canonical score.
 
 ## Independent candidate discovery
 
+### Separate crypto research lane
+
+On 2026-09-02 the owner requested stronger live crypto evaluation before
+increasing collection costs. `crypto-live-research-v1` is a separate,
+research-only raw-market model, documented in `docs/CRYPTO_LIVE_RESEARCH_V1.md`.
+It does not alter this guide's stock Edge Score, the public crypto decision
+owner, existing bounded ProX adjustments, or any execution authority. Its
+weights are uncalibrated hypotheses and require measured comparison and owner
+review before public promotion. No daily-movement gate or previous Canonical
+answer is accepted as an input to that research model.
+
+### Stock discovery
+
 ProX scans the full available U.S. stock universe directly through its market
 data source and verified event sources. Canonical nomination is not required.
 

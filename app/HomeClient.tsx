@@ -3,11 +3,12 @@
 declare global { interface Window { _htScannerLastFetch?: number } }
 
 import { motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import ScannerGrid from "./components/desktop/ScannerGrid";
+import LiveStockValue from "./components/market/LiveStockValue";
 import OpportunityStateCard from "./components/OpportunityStateCard";
 import OpportunityWindow from "./components/opportunity/OpportunityWindow";
 import BullBearPanel from "./components/opportunity/BullBearPanel";
@@ -20,7 +21,6 @@ import MomentumContenders, {
 import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileExperience from "./components/mobile/MobileExperience";
 import { useMobileAppNavigation } from "./components/MobileAppNavigationContext";
-import CryptoMomentumPreview from "./components/crypto/CryptoMomentumPreview";
 import HomeTradePlan from "./components/agent/HomeTradePlan";
 import { supabase } from "@/lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
@@ -42,6 +42,20 @@ import {
   type Opportunity as APIOpportunity,
 } from "@/lib/opportunity-model";
 import { getRelativeVolume } from "@/app/lib/legacy-stock-scoring";
+
+const ScannerGrid = dynamic(() => import("./components/desktop/ScannerGrid"), {
+  loading: () => (
+    <div className="mx-auto h-48 max-w-7xl animate-pulse rounded-3xl border border-white/5 bg-white/[0.02]" />
+  ),
+});
+const CryptoMomentumPreview = dynamic(
+  () => import("./components/crypto/CryptoMomentumPreview"),
+  {
+    loading: () => (
+      <div className="h-44 animate-pulse rounded-3xl border border-cyan-400/10 bg-cyan-500/[0.025]" />
+    ),
+  },
+);
 
 type ScannerFilter = "all" | "hot" | "bullish" | "watchlist";
 
@@ -396,11 +410,12 @@ export default function HomeClient({
     [apiFullRankedList],
   );
   const canonicalLastUpdated = useMemo(() => {
-    const raw = apiMomentum?.displayQuoteAsOf ?? apiMomentum?.scannedAt;
+    const raw = apiMomentum?.scannedAt;
     if (!raw) return null;
     const parsed = new Date(raw);
     return Number.isFinite(parsed.getTime()) ? parsed : null;
-  }, [apiMomentum?.displayQuoteAsOf, apiMomentum?.scannedAt]);
+  }, [apiMomentum?.scannedAt]);
+  const beforeCrowdUpdated = apiBeforeCrowdPick?.scannedAt ? new Date(apiBeforeCrowdPick.scannedAt) : null;
 
   useEffect(() => {
     setMobileCardIndex((current) =>
@@ -660,29 +675,27 @@ export default function HomeClient({
 
   const liveHeroTarget = resolvedSpotMomentumTarget;
 
-  const fetchStockUniverse = async (symbols: string[]): Promise<Stock[]> => {
-    // Step 1: Fetch Polygon bulk quotes first — this is the fast path.
-    // ht-signals-feed (Supabase) runs in parallel but we don't wait for it
-    // before rendering. Signals enrich the data when they arrive.
-    const [bulkRes, signalsRes] = await Promise.allSettled([
-      fetch("/api/bulk-quote", {
+  const fetchStockUniverse = async (
+    symbols: string[],
+    signalRows: SignalFeedRow[],
+  ): Promise<Stock[]> => {
+    // The caller already owns the current signal frame. Reuse it here so one
+    // browser refresh cannot download the identical feed twice.
+    const bulkRes = await fetch("/api/bulk-quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbols }),
-      }),
-      // Fire signals fetch but don't block on it — always fresh, no cache
-      fetch("/api/ht-signals-feed", { cache: "no-store" }).catch(() => null),
-    ]);
+      });
 
-    // Step 2: Parse bulk quote (Polygon price/volume — always fast)
+    // Parse the shared Massive quote response.
     let quotes: Record<string, { price: number; change: number; volume?: number; prevVolume?: number; avgVolume?: number }> = {};
-    if (bulkRes.status === "fulfilled" && bulkRes.value.ok) {
+    if (bulkRes.ok) {
       try {
-        const data = await bulkRes.value.json();
+        const data = await bulkRes.json();
         quotes = data.quotes ?? {};
       } catch { /* silent */ }
     }
-    // Step 3: Parse ht_signals if they arrived — optional enrichment
+    // Reuse the signal payload already fetched by fetchStocks.
     const signalsMap: Record<string, {
       relativeVolume?: number;
       catalystScore?: number;
@@ -695,27 +708,22 @@ export default function HomeClient({
       hasFDAEvent?: boolean;
       hasInsiderBuy?: boolean;
     }> = {};
-    if (signalsRes.status === "fulfilled" && signalsRes.value && (signalsRes.value as Response).ok) {
-      try {
-        const data = await (signalsRes.value as Response).json();
-        for (const row of data.signals ?? []) {
-          signalsMap[row.ticker] = {
-            relativeVolume: row.relative_volume,
-            catalystScore: row.catalyst_score,
-            htSignalScore: row.ht_score,
-            momentumScore: row.momentum_score,
-            crowdScore: row.crowd_score,
-            trapScore: row.trap_score,
-            signalState: row.state,
-            signalPattern: row.pattern,
-            hasFDAEvent: row.state?.includes("FDA Event") ?? false,
-            hasInsiderBuy: row.state?.includes("Insider Buy") ?? false,
-          };
-        }
-      } catch { /* silent — signals are enrichment, not required */ }
+    for (const row of signalRows) {
+      signalsMap[row.ticker] = {
+        relativeVolume: row.relative_volume,
+        catalystScore: row.catalyst_score,
+        htSignalScore: row.ht_score,
+        momentumScore: row.momentum_score,
+        crowdScore: row.crowd_score,
+        trapScore: row.trap_score,
+        signalState: row.state,
+        signalPattern: row.pattern,
+        hasFDAEvent: row.state?.includes("FDA Event") ?? false,
+        hasInsiderBuy: row.state?.includes("Insider Buy") ?? false,
+      };
     }
 
-    // Step 4: Merge and normalize
+    // Merge and normalize.
     return symbols.map((symbol) => {
       const q = quotes[symbol];
       const sig = signalsMap[symbol];
@@ -794,7 +802,7 @@ export default function HomeClient({
         ...watchlist,
       ])];
 
-      const stockData = await fetchStockUniverse(tickersToFetch);
+      const stockData = await fetchStockUniverse(tickersToFetch, signalsRaw);
 
       // Apply ht_signals enrichment to any stock that doesn't have it yet.
       // CRITICAL: For new discoveries, also use signal price when bulk-quote
@@ -907,7 +915,9 @@ export default function HomeClient({
         .catch(() => {});
     };
     fetchCtx();
-    const interval = setInterval(fetchCtx, 60 * 1000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchCtx();
+    }, 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1027,7 +1037,9 @@ export default function HomeClient({
   useEffect(() => {
     void fetchStocksRef.current();
     const interval = window.setInterval(() => {
-      void fetchStocksRef.current();
+      if (document.visibilityState === "visible") {
+        void fetchStocksRef.current();
+      }
     }, 30_000);
     return () => window.clearInterval(interval);
   }, []);
@@ -1728,14 +1740,8 @@ export default function HomeClient({
                               <span className="flex h-2 w-2 rounded-full bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.9)] animate-pulse" />
                               <p className="text-[11px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
                             </div>
-                            <span className="text-[10px] font-black text-zinc-600">{mounted && canonicalLastUpdated ? canonicalLastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}</span>
+                            <span className="text-[10px] font-black text-zinc-600">Decision {mounted && canonicalLastUpdated ? canonicalLastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "pending"}</span>
                           </div>
-
-                          {apiHero && (
-                            <div className="px-5 pb-4">
-                              <HomeTradePlan symbol={apiHero.ticker} />
-                            </div>
-                          )}
 
                           <div className="ht-spot-momentum-columns grid grid-cols-1 divide-y divide-white/[0.06] xl:grid-cols-[0.92fr_0.92fr_1.08fr] xl:divide-x xl:divide-y-0">
                             {apiHero && (
@@ -1761,6 +1767,11 @@ export default function HomeClient({
                               onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
                             />
                           </div>
+                          {apiHero && (
+                            <div className="border-t border-white/[0.06] px-5 py-4">
+                              <HomeTradePlan symbol={apiHero.ticker} />
+                            </div>
+                          )}
                           <MomentumRadar
                             candidates={apiMomentumRadar}
                             onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
@@ -1800,7 +1811,7 @@ export default function HomeClient({
                         trace={btcTrace}
                         dualEngine={isDualEngineConfirmation}
                         watched={watchlist.includes(apiBeforeCrowdPick.ticker)}
-                        updatedLabel={mounted && canonicalLastUpdated ? canonicalLastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Live"}
+                        updatedLabel={mounted && beforeCrowdUpdated && Number.isFinite(beforeCrowdUpdated.getTime()) ? `Decision ${beforeCrowdUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Decision pending"}
                         onOpen={() => setSelectedStock(opportunityToStock(apiBeforeCrowdPick))}
                         onWatch={() => toggleWatchlist(apiBeforeCrowdPick.ticker)}
                       />
@@ -2004,9 +2015,7 @@ export default function HomeClient({
                     <p className="text-xs uppercase text-zinc-500">Price</p>
 
                     <p className="mt-1 text-2xl font-black text-white">
-                      {selectedOpportunity
-                        ? `$${Number(selectedOpportunity.price).toFixed(2)}`
-                        : "—"}
+                      <LiveStockValue symbol={selectedStock.symbol} fallback={selectedOpportunity?.price} />
                     </p>
                   </div>
 
@@ -2022,9 +2031,7 @@ export default function HomeClient({
                             : "text-red-400"
                       }`}
                     >
-                      {selectedOpportunity
-                        ? `${selectedOpportunity.change >= 0 ? "+" : ""}${Number(selectedOpportunity.change).toFixed(2)}%`
-                        : "—"}
+                      <LiveStockValue symbol={selectedStock.symbol} field="change" fallback={selectedOpportunity?.change} />
                     </p>
                   </div>
                 </div>

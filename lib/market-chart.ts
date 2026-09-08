@@ -19,10 +19,12 @@ export type MarketChartSummary = {
 
 export type MarketChartDisplayQuote = {
   price: number;
-  changePercent: number;
+  changePercent: number | null;
   asOf: string;
   live: boolean;
-  source: "massive_polygon_last_trade" | "massive_polygon_snapshot";
+  source: "massive_polygon_last_trade" | "massive_polygon_snapshot" | "massive_crypto_trade" | "massive_crypto_aggregate" | "coinbase_crypto_trade" | "coinbase_crypto_aggregate";
+  changeBasis?: "previous_close" | "24h_reference" | "chart_open";
+  priceKind?: "trade" | "minute_aggregate";
 };
 
 export type MarketChartResponse = {
@@ -37,6 +39,7 @@ export type MarketChartResponse = {
   latestAt: string;
   summary: MarketChartSummary;
   bars: MarketChartBar[];
+  intervalSeconds?: number;
 };
 
 export type MarketChartTimeSlot = {
@@ -72,6 +75,7 @@ export function easternDateString(timestamp: number | Date): string {
 
 export function normalizeMarketBars(
   inputs: MarketBarInput[],
+  pricePrecision = 6,
 ): MarketChartBar[] {
   const unique = new Map<number, MarketChartBar>();
 
@@ -100,10 +104,10 @@ export function normalizeMarketBars(
     if (!valid) continue;
     unique.set(time, {
       time,
-      open: round(open),
-      high: round(high),
-      low: round(low),
-      close: round(close),
+      open: round(open, pricePrecision),
+      high: round(high, pricePrecision),
+      low: round(low, pricePrecision),
+      close: round(close, pricePrecision),
       volume: round(volume, 2),
     });
   }
@@ -165,6 +169,7 @@ export function mergeVerifiedTradeIntoBars(
   bars: MarketChartBar[],
   trade: { price: number; size: number | null; timestamp: string } | null,
   bucketSeconds = 60,
+  pricePrecision = 6,
 ): MarketChartBar[] {
   if (!trade || !(trade.price > 0) || !(bucketSeconds > 0)) return bars;
   const timestampMs = Date.parse(trade.timestamp);
@@ -177,16 +182,16 @@ export function mergeVerifiedTradeIntoBars(
   const replacement: MarketChartBar = existing
     ? {
         ...existing,
-        high: round(Math.max(existing.high, trade.price)),
-        low: round(Math.min(existing.low, trade.price)),
-        close: round(trade.price),
+        high: round(Math.max(existing.high, trade.price), pricePrecision),
+        low: round(Math.min(existing.low, trade.price), pricePrecision),
+        close: round(trade.price, pricePrecision),
       }
     : {
         time: tradeTime,
-        open: round(trade.price),
-        high: round(trade.price),
-        low: round(trade.price),
-        close: round(trade.price),
+        open: round(trade.price, pricePrecision),
+        high: round(trade.price, pricePrecision),
+        low: round(trade.price, pricePrecision),
+        close: round(trade.price, pricePrecision),
         volume: round(trade.size ?? 0, 2),
       };
   return mergeMarketBars(bars, [replacement]);
@@ -226,16 +231,17 @@ export function buildUniformMarketTimeSlots(
 
 export function summarizeMarketBars(
   bars: MarketChartBar[],
+  pricePrecision = 6,
 ): MarketChartSummary | null {
   const first = bars[0];
   const latest = bars.at(-1);
   if (!first || !latest || first.open <= 0) return null;
 
   return {
-    open: round(first.open),
-    high: round(Math.max(...bars.map((bar) => bar.high))),
-    low: round(Math.min(...bars.map((bar) => bar.low))),
-    close: round(latest.close),
+    open: round(first.open, pricePrecision),
+    high: round(Math.max(...bars.map((bar) => bar.high)), pricePrecision),
+    low: round(Math.min(...bars.map((bar) => bar.low)), pricePrecision),
+    close: round(latest.close, pricePrecision),
     changePercent: round(((latest.close - first.open) / first.open) * 100, 3),
   };
 }

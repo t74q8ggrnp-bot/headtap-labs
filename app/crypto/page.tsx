@@ -1,22 +1,15 @@
 "use client";
 
+import { formatMarketPrice } from "@/lib/market-price-format";
+import LiveCryptoValue from "@/app/components/market/LiveCryptoValue";
 import { useRef, useState, type TouchEvent } from "react";
 import type { CryptoOpportunity } from "@/lib/crypto/contracts";
 import { useCryptoOpportunityFeed } from "@/app/hooks/useCryptoOpportunityFeed";
 import CryptoProxPulse from "@/app/components/crypto/CryptoProxPulse";
 import HeroPriceChart from "@/app/components/market/HeroPriceChart";
+import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 
 const PULL_REFRESH_THRESHOLD = 64;
-
-const money = (value: number) => {
-  const maximumFractionDigits =
-    value < 0.0001 ? 10 : value < 0.01 ? 8 : value < 1 ? 6 : 2;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits,
-  }).format(value);
-};
 
 const compactMoney = (value: number) =>
   new Intl.NumberFormat("en-US", {
@@ -66,6 +59,7 @@ function Hero({
   mode?: "confirmed" | "developing";
 }) {
   const developing = mode === "developing";
+  const marketView = useLiveMarketView(opportunity.symbol, { asset: "crypto", productId: opportunity.productId, chart: true });
   return (
     <section className={`overflow-hidden rounded-3xl border bg-gradient-to-br via-black ${developing ? "border-violet-400/20 from-violet-500/[0.08] to-amber-500/[0.04]" : "border-cyan-400/20 from-cyan-500/[0.08] to-violet-500/[0.05]"}`}>
       <div className="border-b border-white/8 px-5 py-4 sm:px-7">
@@ -91,12 +85,13 @@ function Hero({
                   {opportunity.symbol}
                 </h1>
                 <p className="pb-1 font-mono text-xl font-black text-zinc-200">
-                  {money(opportunity.price)}
+                  {marketView.quote ? formatMarketPrice(marketView.quote.price) : "—"}
                 </p>
                 <p className="pb-1 font-mono text-lg font-black text-green-400">
-                  +{opportunity.change24hPercent.toFixed(1)}%
+                  {marketView.quote?.changePercent == null ? "—" : `${marketView.quote.changePercent >= 0 ? "+" : ""}${marketView.quote.changePercent.toFixed(1)}%`} <span className="text-[9px] text-zinc-500">from chart open</span>
                 </p>
               </div>
+              <p className="mt-1 text-[9px] text-zinc-500">{marketView.label} · {marketView.chart?.sourceLabel ?? "Connecting market source"}</p>
               <p className="mt-3 text-sm font-bold text-zinc-300">
                 {opportunity.summary}
               </p>
@@ -203,11 +198,11 @@ function ContenderCard({
               {opportunity.symbol}
             </h2>
             <span className="font-mono text-sm font-black text-green-400">
-              +{opportunity.change24hPercent.toFixed(1)}%
+              <LiveCryptoValue symbol={opportunity.symbol} productId={opportunity.productId} field="change" />
             </span>
           </div>
           <p className="mt-1 font-mono text-xs font-bold text-zinc-500">
-            {money(opportunity.price)}
+            <LiveCryptoValue symbol={opportunity.symbol} productId={opportunity.productId} />
           </p>
         </div>
         <div className="text-right">
@@ -387,7 +382,7 @@ export default function CryptoPage() {
                       <div>
                         <p className="font-black text-white">{opportunity.symbol}</p>
                         <p className="font-mono text-[10px] font-bold text-green-400">
-                          +{opportunity.change24hPercent.toFixed(1)}% · {opportunity.relativeVolume.toFixed(1)}×
+                          <LiveCryptoValue symbol={opportunity.symbol} productId={opportunity.productId} field="change" /> · {opportunity.relativeVolume.toFixed(1)}×
                         </p>
                       </div>
                       <p className="font-mono text-2xl font-black text-violet-300">

@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ACCOUNT_DELETE_CONFIRMATION,
   ACCOUNT_LOCAL_STORAGE_KEYS,
@@ -24,19 +24,35 @@ export default function AccountSettings() {
   const [confirmation, setConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState("");
+  const [recovering, setRecovering] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [repeatPassword, setRepeatPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordSaved, setPasswordSaved] = useState(false);
+  const passwordPending = useRef(false);
 
   useEffect(() => {
     let mounted = true;
+    let receivedAuthEvent = false;
+    const recoveryRequested = new URLSearchParams(window.location.search).get("recovery") === "1";
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setSession(data.session);
+      if (recoveryRequested) setRecovering(true);
+      if (!receivedAuthEvent) setSession(data.session);
       setLoadingSession(false);
+    }).catch(() => {
+      if (!mounted) return;
+      if (recoveryRequested) setRecovering(true);
+      setLoadingSession(false);
+      setMessage("Could not verify the account session. Reload and try again.");
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!mounted) return;
+      receivedAuthEvent = true;
+      if (event === "PASSWORD_RECOVERY") setRecovering(true);
       setSession(nextSession);
       setLoadingSession(false);
     });
@@ -46,6 +62,29 @@ export default function AccountSettings() {
       subscription.unsubscribe();
     };
   }, []);
+
+  const handlePasswordRecovery = async (event: FormEvent) => {
+    event.preventDefault();
+    if (passwordPending.current) return;
+    if (!session) { setMessage("This reset link has expired. Request another reset email from HT Labs."); return; }
+    if (newPassword.length < 8) { setMessage("Choose a password with at least 8 characters."); return; }
+    if (newPassword !== repeatPassword) { setMessage("The passwords do not match."); return; }
+    passwordPending.current = true;
+    setSavingPassword(true);
+    setMessage("");
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) { setMessage(error.message); return; }
+      setNewPassword("");
+      setRepeatPassword("");
+      setPasswordSaved(true);
+      // A recovery link may open outside the native app. Never imply that this
+      // browser session signs the iPhone in; the user signs in there explicitly.
+      try { await supabase.auth.signOut({ scope: "local" }); } catch { /* Password update already succeeded. */ }
+    } catch {
+      setMessage("Could not confirm the password update. Check your connection and try again.");
+    } finally { passwordPending.current = false; setSavingPassword(false); }
+  };
 
   const handleSignOut = async () => {
     setMessage("");
@@ -131,6 +170,16 @@ export default function AccountSettings() {
 
         {loadingSession ? (
           <div className="rounded-3xl border border-white/10 bg-zinc-950 p-8 text-sm font-semibold text-zinc-400" role="status">Checking your account...</div>
+        ) : recovering ? (
+          <section className="rounded-3xl border border-orange-400/25 bg-zinc-950 p-7">
+            <h2 className="text-2xl font-black">{passwordSaved ? "Password updated" : "Choose a new password"}</h2>
+            {passwordSaved ? <p className="mt-4 text-sm leading-6 text-zinc-300" role="status">Return to the HT Labs app and sign in with your new password. You can close this page.</p> : !session ? <p className="mt-4 text-sm leading-6 text-zinc-300" role="status">This reset link is expired or invalid. In HT Labs, open Paper → Forgot password and request a new email.</p> : <form className="mt-6 space-y-4" onSubmit={(event) => void handlePasswordRecovery(event)}>
+              <label className="block"><span className="mb-2 block text-sm text-zinc-300">New password (at least 8 characters)</span><input type="password" autoComplete="new-password" minLength={8} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} disabled={savingPassword} className="w-full rounded-xl border border-white/15 bg-black px-4 py-3 text-base text-white" /></label>
+              <label className="block"><span className="mb-2 block text-sm text-zinc-300">Confirm new password</span><input type="password" autoComplete="new-password" minLength={8} required value={repeatPassword} onChange={(event) => setRepeatPassword(event.target.value)} disabled={savingPassword} className="w-full rounded-xl border border-white/15 bg-black px-4 py-3 text-base text-white" /></label>
+              <button type="submit" disabled={savingPassword || newPassword.length < 8 || !repeatPassword} className="min-h-11 w-full rounded-xl bg-orange-500 px-5 py-3 font-bold text-black disabled:opacity-40">{savingPassword ? "Updating password…" : "Save new password"}</button>
+            </form>}
+            {message && <p className="mt-4 text-sm text-orange-200" role="status">{message}</p>}
+          </section>
         ) : !session ? (
           <section className="rounded-3xl border border-white/10 bg-zinc-950 p-7">
             <h2 className="text-xl font-black">You are not signed in</h2>

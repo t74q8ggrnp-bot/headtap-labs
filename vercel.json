@@ -1,4 +1,5 @@
 {
+  "regions": ["pdx1"],
   "crons": [
     {
       "path": "/api/signal-writer",
@@ -10,19 +11,19 @@
     },
     {
       "path": "/api/shadow-retrieval",
-      "schedule": "*/5 8-23 * * 1-5"
+      "schedule": "2-59/5 8-23 * * 1-5"
     },
     {
       "path": "/api/shadow-retrieval",
-      "schedule": "*/5 0 * * 2-6"
+      "schedule": "2-59/5 0 * * 2-6"
     },
     {
       "path": "/api/catalyst-discovery",
-      "schedule": "*/5 8-23 * * 1-5"
+      "schedule": "3-59/5 8-23 * * 1-5"
     },
     {
       "path": "/api/catalyst-discovery",
-      "schedule": "*/5 0 * * 2-6"
+      "schedule": "3-59/5 0 * * 2-6"
     },
     {
       "path": "/api/opportunity-ledger",
@@ -34,7 +35,7 @@
     },
     {
       "path": "/api/prox-sec-connector",
-      "schedule": "*/15 * * * *"
+      "schedule": "11-59/15 * * * *"
     },
     {
       "path": "/api/prox-market-sensor",
@@ -102,7 +103,15 @@
     },
     {
       "path": "/api/crypto/prox-sensor",
-      "schedule": "*/5 * * * *"
+      "schedule": "2-59/5 * * * *"
+    },
+    {
+      "path": "/api/crypto/coinapi-collector",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/crypto/evidence-maintenance",
+      "schedule": "3-59/5 * * * *"
     },
     {
       "path": "/api/paper-trading/match",
@@ -110,11 +119,7 @@
     },
     {
       "path": "/api/ht-agent/outcomes",
-      "schedule": "* 8-23 * * 1-5"
-    },
-    {
-      "path": "/api/ht-agent/outcomes",
-      "schedule": "* 0 * * 2-6"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/ht-agent/cycle",
@@ -126,7 +131,7 @@
     },
     {
       "path": "/api/trading-bot",
-      "schedule": "*/5 8-23 * * 1-5"
+      "schedule": "1-59/5 8-23 * * 1-5"
     }
   ]
 }
