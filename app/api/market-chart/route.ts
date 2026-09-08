@@ -174,6 +174,7 @@ async function fetchStockBars(symbol: string, requestStartedAt: Date): Promise<{
           frameVersion: display.frameVersion,
           frameBucket: display.frameBucket,
           frameCoordination: display.coordination,
+          ...(display.coordinationIssue ? { frameCoordinationIssue: display.coordinationIssue } : {}),
         } : {}),
       }
     : undefined;

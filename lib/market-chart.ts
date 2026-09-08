@@ -29,6 +29,7 @@ export type MarketChartDisplayQuote = {
   frameVersion?: "stock-display-frame-v1";
   frameBucket?: number;
   frameCoordination?: "database" | "instance_fallback";
+  frameCoordinationIssue?: "not_configured" | "rpc_error" | "invalid_rpc_response" | "transport_error";
 };
 
 export type MarketChartResponse = {

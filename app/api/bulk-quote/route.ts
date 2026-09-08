@@ -39,6 +39,7 @@ type BulkQuote = {
     version: "stock-display-frame-v1";
     bucket: number;
     coordination: "database" | "instance_fallback";
+    issue?: "not_configured" | "rpc_error" | "invalid_rpc_response" | "transport_error";
   } | null;
   timing: ReturnType<typeof buildMarketDataTimingReceipt>;
 };
@@ -100,6 +101,7 @@ async function fetchSnapshotBatch(
         version: display.frameVersion,
         bucket: display.frameBucket,
         coordination: display.coordination,
+        ...(display.coordinationIssue ? { issue: display.coordinationIssue } : {}),
       } : null,
       timing: buildMarketDataTimingReceipt({ marketAsOf, receivedAt }),
     };

@@ -146,6 +146,7 @@ export async function GET(request: Request) {
         version: display.frameVersion,
         bucket: display.frameBucket,
         coordination: display.coordination,
+        ...(display.coordinationIssue ? { issue: display.coordinationIssue } : {}),
       } : null,
       provider: "massive_polygon",
       dataMode: entitlement.dataMode,

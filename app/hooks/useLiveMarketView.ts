@@ -37,11 +37,13 @@ const store = new LiveMarketViews({
       const quote = value as { price: number; change: number; asOf: string; live?: boolean; priceKind?: "trade" | "minute_aggregate";
         source?: "massive_polygon_last_trade" | "massive_polygon_snapshot";
         displayFrame?: { id?: string; version?: "stock-display-frame-v1"; bucket?: number;
-          coordination?: "database" | "instance_fallback" } | null };
+          coordination?: "database" | "instance_fallback";
+          issue?: "not_configured" | "rpc_error" | "invalid_rpc_response" | "transport_error" } | null };
       result[symbol] = { price: quote.price, changePercent: quote.change, asOf: quote.asOf, live: quote.live === true,
         source: quote.source ?? "massive_polygon_snapshot", priceKind: quote.priceKind,
         frameId: quote.displayFrame?.id, frameVersion: quote.displayFrame?.version,
-        frameBucket: quote.displayFrame?.bucket, frameCoordination: quote.displayFrame?.coordination };
+        frameBucket: quote.displayFrame?.bucket, frameCoordination: quote.displayFrame?.coordination,
+        frameCoordinationIssue: quote.displayFrame?.issue };
     }
     return result;
   },

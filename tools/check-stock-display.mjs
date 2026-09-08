@@ -19,6 +19,7 @@ async function read(label, path, init = {}) {
   const result = { client: label, price: value.price, asOf: value.asOf, priceKind: value.priceKind,
     frameId: value.frameId ?? value.displayFrame?.id ?? body.displayFrame?.id ?? null,
     frameCoordination: value.frameCoordination ?? value.displayFrame?.coordination ?? body.displayFrame?.coordination ?? null,
+    frameCoordinationIssue: value.frameCoordinationIssue ?? value.displayFrame?.issue ?? body.displayFrame?.issue ?? null,
     live: value.live, startedAt: startedAt.toISOString(), receivedAt: receivedAt.toISOString(),
     providerAgeMs: receivedAt.getTime() - Date.parse(value.asOf), candleClose: body.bars?.at(-1)?.close,
     summaryClose: body.summary?.close };

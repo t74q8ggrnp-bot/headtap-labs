@@ -10,6 +10,7 @@ export type StockDisplayFrame = StockDisplayPrice & {
   frameId: string;
   frameVersion: typeof STOCK_DISPLAY_FRAME_VERSION;
   coordination: "database" | "instance_fallback";
+  coordinationIssue?: "not_configured" | "rpc_error" | "invalid_rpc_response" | "transport_error";
 };
 
 type Candidate = StockDisplayPrice & { symbol: string; frameBucket: number };
@@ -104,8 +105,8 @@ function displayFrameClient() {
       fetch: (input, init) => fetch(input, {
         ...init,
         signal: init?.signal
-          ? AbortSignal.any([init.signal, AbortSignal.timeout(1_500)])
-          : AbortSignal.timeout(1_500),
+          ? AbortSignal.any([init.signal, AbortSignal.timeout(4_000)])
+          : AbortSignal.timeout(4_000),
       }),
     },
   });
@@ -127,10 +128,12 @@ export async function publishStockDisplayFrames(
     const frame = selectLocalStockDisplayFrame(candidate);
     return frame ? [[candidate.symbol, frame]] : [];
   }));
+  const fallbackWithIssue = (issue: NonNullable<StockDisplayFrame["coordinationIssue"]>) =>
+    Object.fromEntries(Object.entries(fallback).map(([symbol, frame]) => [symbol, { ...frame, coordinationIssue: issue }]));
   if (!candidates.length) return fallback;
 
   const db = displayFrameClient();
-  if (!db) return fallback;
+  if (!db) return fallbackWithIssue("not_configured");
   try {
     const { data, error } = await db.rpc("ht_publish_stock_display_frames", {
       p_candidates: candidates.map((candidate) => ({
@@ -143,7 +146,14 @@ export async function publishStockDisplayFrames(
         frameBucket: candidate.frameBucket,
       })),
     });
-    if (error || !data || typeof data !== "object" || Array.isArray(data)) return fallback;
+    if (error) {
+      console.warn("[stock-display-frame] coordination RPC failed", { code: error.code ?? "unknown" });
+      return fallbackWithIssue("rpc_error");
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      console.warn("[stock-display-frame] coordination RPC returned an invalid response");
+      return fallbackWithIssue("invalid_rpc_response");
+    }
     const parsed = Object.fromEntries(Object.entries(data).flatMap(([symbol, value]) => {
       const frame = parseFrame(value);
       if (!frame || frame.symbol !== symbol) return [];
@@ -162,8 +172,11 @@ export async function publishStockDisplayFrames(
       return selected ? [[symbol, selected]] : [];
     }));
     return { ...fallback, ...parsed };
-  } catch {
-    return fallback;
+  } catch (error) {
+    console.warn("[stock-display-frame] coordination transport failed", {
+      name: error instanceof Error ? error.name : "unknown",
+    });
+    return fallbackWithIssue("transport_error");
   }
 }
 
