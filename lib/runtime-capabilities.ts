@@ -1,4 +1,14 @@
-export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v2-shared-display-frame";
+export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v3-market-workspace";
+
+export const HT_REQUIRED_MIGRATIONS = Object.freeze([
+  "0024_manual_paper_trading.sql",
+  "0025_prox_shadow_episode_scorecard.sql",
+  "0026_market_data_timestamp_authority.sql",
+  "0027_prox_realtime_microstructure_observations.sql",
+  "0028_paper_match_health.sql",
+  "0048_shared_stock_display_frames.sql",
+  "0049_secure_ht_labs_watchlist.sql",
+]);
 
 export const HT_REFRESH_RATES_MS = Object.freeze({
   canonicalScan: 120_000,
@@ -19,6 +29,8 @@ export const HT_MARKET_DATA_AUTHORITY = Object.freeze({
     scope: "presentation_only",
     sharedAcrossDesktopMobileChartsAndQuotes: true,
     requiredMigration: "0048_shared_stock_display_frames.sql",
-    unavailableFallback: "same_server_instance_only",
+    coordination: "database_required",
+    unavailableFallback: "none",
+    coordinationFailureBehavior: "fail_closed",
   }),
 });

@@ -6,6 +6,7 @@ import {
 import {
   HT_MARKET_DATA_AUTHORITY,
   HT_REFRESH_RATES_MS,
+  HT_REQUIRED_MIGRATIONS,
   HT_RUNTIME_CONTRACT_VERSION,
 } from "@/lib/runtime-capabilities";
 
@@ -43,14 +44,7 @@ export async function GET() {
         serverDerivesSideAndFullQuantity: true,
       },
     },
-    requiredMigrations: [
-      "0024_manual_paper_trading.sql",
-      "0025_prox_shadow_episode_scorecard.sql",
-      "0026_market_data_timestamp_authority.sql",
-      "0027_prox_realtime_microstructure_observations.sql",
-      "0028_paper_match_health.sql",
-      "0048_shared_stock_display_frames.sql",
-    ],
+    requiredMigrations: HT_REQUIRED_MIGRATIONS,
     scoring: {
       browserAuthority: "presentation_only",
       canonicalAuthorityChanged: false,
