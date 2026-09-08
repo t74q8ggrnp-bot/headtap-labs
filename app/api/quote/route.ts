@@ -18,6 +18,7 @@ import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
 import { fetchHydratedSessionSnapshot } from "@/lib/intraday-snapshot-hydration";
 import { getStockMarketClock } from "@/lib/stock-market-session";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
+import { publishStockDisplayFrame } from "@/lib/stock-display-frame-server";
 
 export const dynamic = "force-dynamic";
 
@@ -92,8 +93,8 @@ export async function GET(request: Request) {
       );
     }
 
-    const display = resolveStockDisplayPrice(snapshot, liveTrade, receivedAt.getTime());
-    if (!display) {
+    const providerDisplay = resolveStockDisplayPrice(snapshot, liveTrade, receivedAt.getTime());
+    if (!providerDisplay) {
       console.error("[quote] Massive returned no usable price", { symbol });
       return NextResponse.json(
         { error: "Verified price unavailable.", symbol, c: 0, dp: 0 },
@@ -101,6 +102,7 @@ export async function GET(request: Request) {
       );
     }
 
+    const display = await publishStockDisplayFrame(symbol, providerDisplay, requestStartedAt) ?? providerDisplay;
     const price = display.price;
     const marketAsOf = display.asOf;
     const timing = buildMarketDataTimingReceipt({ marketAsOf, receivedAt });
@@ -139,6 +141,12 @@ export async function GET(request: Request) {
       asOf: marketAsOf,
       source: display.source,
       priceKind: display.priceKind,
+      displayFrame: "frameId" in display ? {
+        id: display.frameId,
+        version: display.frameVersion,
+        bucket: display.frameBucket,
+        coordination: display.coordination,
+      } : null,
       provider: "massive_polygon",
       dataMode: entitlement.dataMode,
       marketSession: clock.session,

@@ -6,6 +6,7 @@ import { COINAPI_PILOT, collectCoinApiPilot, pilotFreshness } from "./coinapi-pi
 import type { PilotFrame, PilotState } from "./coinapi-pilot";
 import { canonicalCryptoJson, presentCoinApiPublication } from "./coinapi-publication";
 import { CryptoStorageError, cryptoStorageDiagnostic } from "./storage-diagnostics";
+import { COINAPI_RESEARCH_RUNTIME } from "./coinapi-runtime";
 
 export function coinApiPilotService() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -40,6 +41,15 @@ export async function coinApiPilotReaderAuthorized(request: Request) {
 
 export async function runCoinApiPilot() {
   const startedAt = Date.now();
+  if (COINAPI_RESEARCH_RUNTIME.paused) {
+    return {
+      status: "paused",
+      reason: COINAPI_RESEARCH_RUNTIME.reason,
+      provider: "coinapi",
+      providerRequests: 0,
+      executionAuthorized: false,
+    };
+  }
   // Deploying code alone cannot start provider spending. No preview deployment collectors.
   if (process.env.COINAPI_PILOT_ENABLED !== "true" || process.env.VERCEL_ENV !== "production") {
     return { status: "disabled", provider: "coinapi", executionAuthorized: false };
@@ -100,6 +110,16 @@ export async function runCoinApiPilot() {
  * exact-time outcome resolution. A failed audit remains visible in health. */
 export async function auditLegacyCryptoBatch() {
   const startedAt = Date.now();
+  if (COINAPI_RESEARCH_RUNTIME.paused) {
+    return {
+      ok: false,
+      paused: true,
+      reason: COINAPI_RESEARCH_RUNTIME.reason,
+      audited: 0,
+      providerRequests: 0,
+      elapsedMs: Date.now() - startedAt,
+    };
+  }
   const batchSize = 500;
   const maxBatches = 40;
   const workBudgetMs = 20_000;

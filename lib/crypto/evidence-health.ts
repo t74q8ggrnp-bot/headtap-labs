@@ -14,6 +14,40 @@ const number = (value: unknown) => (typeof value === "number" || typeof value ==
 const time = (value: unknown) => typeof value === "string" ? Date.parse(value) : NaN;
 const SOURCES = ["ht_crypto_prox_observations", "ht_crypto_discovery_observations"];
 
+export function assessPausedCryptoEvidenceHealth(configuration: {
+  production: boolean; environmentEnabled: boolean; credentialConfigured: boolean;
+}, reason: string) {
+  const detail = {
+    state: "intentionally_paused",
+    reason,
+    configuration,
+    databaseAuditRequests: 0,
+    providerRequests: 0,
+    executionAuthorized: false,
+    profitabilityEstablished: false,
+  };
+  const checks: CryptoEvidenceCheck[] = [
+    "crypto_legacy_evidence_audit",
+    "crypto_coinapi_collection",
+    "crypto_coinapi_outcomes",
+  ].map((name) => ({
+    name,
+    ok: false,
+    message: "CoinAPI research and its expensive legacy evidence audit are intentionally paused; no provider or archive-maintenance request was made.",
+    detail,
+  }));
+  return {
+    checks,
+    archiveBySource: Object.fromEntries(SOURCES.map((source) => [source, { ok: false, paused: true }])),
+    warnings: [{
+      name: "crypto_research_intentionally_paused",
+      message: "Crypto research remains isolated from stock systems while provider cost and archive-query behavior are audited.",
+      evaluationEligible: false,
+      providerRequests: 0,
+    }],
+  };
+}
+
 export function assessCryptoEvidenceHealth(snapshot: unknown, configuration: {
   production: boolean; environmentEnabled: boolean; credentialConfigured: boolean;
 }, now = Date.now(), readError: unknown = null) {

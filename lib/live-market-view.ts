@@ -112,8 +112,16 @@ export class LiveMarketViews {
   }
   async poll(force = false) {
     const now = this.transport.now();
-    const pending = [...this.listeners.keys()].filter(key => !this.inFlight.has(key) &&
-      (force || now - (this.attemptedAt.get(key) ?? -Infinity) >= (this.wantsChart(key) ? 5_000 : 10_000)));
+    const pending = [...this.listeners.keys()].filter(key => {
+      if (this.inFlight.has(key)) return false;
+      if (force) return true;
+      const cadence = key.startsWith("stock:") || this.wantsChart(key) ? 5_000 : 10_000;
+      const previous = this.attemptedAt.get(key);
+      // Stock clients follow the same wall-clock presentation buckets. This
+      // prevents desktop and mobile from permanently polling five seconds out
+      // of phase merely because their screens mounted at different moments.
+      return previous === undefined || Math.floor(now / cadence) > Math.floor(previous / cadence);
+    });
     for (const key of pending) { this.inFlight.add(key); this.attemptedAt.set(key, now); }
     const chartKeys = pending.filter(key => this.wantsChart(key));
     const quoteKeys = pending.filter(key => !this.wantsChart(key));

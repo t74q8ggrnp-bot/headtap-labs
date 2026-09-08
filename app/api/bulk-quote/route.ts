@@ -9,6 +9,7 @@ import {
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
 import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
+import { publishStockDisplayFrames } from "@/lib/stock-display-frame-server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,14 +32,21 @@ type BulkQuote = {
   asOf: string | null;
   live: boolean;
   dataMode: "real_time" | "delayed" | "unavailable";
-  source: "massive_polygon_snapshot";
+  source: "massive_polygon_last_trade" | "massive_polygon_snapshot";
   priceKind: "trade" | "minute_aggregate";
+  displayFrame: {
+    id: string;
+    version: "stock-display-frame-v1";
+    bucket: number;
+    coordination: "database" | "instance_fallback";
+  } | null;
   timing: ReturnType<typeof buildMarketDataTimingReceipt>;
 };
 
 async function fetchSnapshotBatch(
   symbols: string[],
   dataMode: BulkQuote["dataMode"],
+  requestStartedAt: Date,
 ): Promise<Record<string, BulkQuote>> {
   const response = await fetch(
     massiveStocksUrl(
@@ -52,11 +60,21 @@ async function fetchSnapshotBatch(
   }
   const receivedAt = new Date();
   const payload = (await response.json()) as { tickers?: PolygonSnapshotRow[] };
-  const result: Record<string, BulkQuote> = {};
+  const rows = new Map<string, { row: PolygonSnapshotRow; display: NonNullable<ReturnType<typeof resolveStockDisplayPrice>> }>();
   for (const row of payload.tickers ?? []) {
     const symbol = String(row.ticker ?? "").trim().toUpperCase();
     const display = resolveStockDisplayPrice(row, null, receivedAt.getTime());
     if (!SYMBOL_PATTERN.test(symbol) || !display) continue;
+    rows.set(symbol, { row, display });
+  }
+  const frames = await publishStockDisplayFrames(
+    [...rows].map(([symbol, value]) => ({ symbol, display: value.display })),
+    requestStartedAt,
+  );
+  const result: Record<string, BulkQuote> = {};
+  for (const [symbol, value] of rows) {
+    const { row } = value;
+    const display = frames[symbol] ?? value.display;
     const price = display.price;
     const marketAsOf = display.asOf;
     const timestampMs = Date.parse(marketAsOf);
@@ -75,8 +93,14 @@ async function fetchSnapshotBatch(
       live: display.priceKind === "trade" && dataMode === "real_time" && getStockMarketClock(receivedAt).active &&
         receivedAt.getTime() - timestampMs >= -2_000 && receivedAt.getTime() - timestampMs <= DISPLAY_LIVE_MAX_AGE_MS,
       dataMode,
-      source: "massive_polygon_snapshot",
+      source: display.source,
       priceKind: display.priceKind,
+      displayFrame: "frameId" in display ? {
+        id: display.frameId,
+        version: display.frameVersion,
+        bucket: display.frameBucket,
+        coordination: display.coordination,
+      } : null,
       timing: buildMarketDataTimingReceipt({ marketAsOf, receivedAt }),
     };
   }
@@ -84,6 +108,7 @@ async function fetchSnapshotBatch(
 }
 
 export async function POST(request: Request) {
+  const requestStartedAt = new Date();
   const rateLimit = checkApiRateLimit(request, {
     namespace: "public-bulk-quote",
     limit: 30,
@@ -135,7 +160,7 @@ export async function POST(request: Request) {
       try {
         Object.assign(
           merged,
-          await fetchSnapshotBatch(batch, entitlement.dataMode),
+          await fetchSnapshotBatch(batch, entitlement.dataMode, requestStartedAt),
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";

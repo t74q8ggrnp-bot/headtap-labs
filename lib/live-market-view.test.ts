@@ -161,6 +161,24 @@ test("quote-only lists batch symbols and cannot replace a newer quote with an ol
   assert.equal(store.acceptQuote("stock:TEST", frame(7, NOW - 1000).displayQuote!), false);
 });
 
+test("stock quote polling advances on shared five-second wall-clock buckets", async () => {
+  let now = NOW;
+  let requests = 0;
+  const store = new LiveMarketViews({
+    now: () => now,
+    chart: async () => frame(),
+    quotes: async () => { requests++; return { TEST: frame(1, now).displayQuote! }; },
+  });
+  store.subscribe("stock:TEST", () => {}, false);
+  await store.poll();
+  now += 4_000;
+  await store.poll();
+  assert.equal(requests, 1);
+  now += 1_000;
+  await store.poll();
+  assert.equal(requests, 2);
+});
+
 test("one current-price formatter retains sub-dollar and crypto precision", () => {
   assert.equal(formatMarketPrice(1.8001), "$1.8001");
   assert.equal(formatMarketPrice(0.12824), "$0.12824");

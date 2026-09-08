@@ -49,6 +49,7 @@ export async function GET() {
       "0026_market_data_timestamp_authority.sql",
       "0027_prox_realtime_microstructure_observations.sql",
       "0028_paper_match_health.sql",
+      "0048_shared_stock_display_frames.sql",
     ],
     scoring: {
       browserAuthority: "presentation_only",

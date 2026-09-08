@@ -8,7 +8,7 @@ test("publishes the release-approved stock refresh cadences", () => {
     canonicalScan: 120_000,
     proxSensing: 60_000,
     homeDecisions: 30_000,
-    selectedQuotes: 10_000,
+    selectedQuotes: 5_000,
     selectedStockCharts: 5_000,
   });
 });
@@ -17,4 +17,12 @@ test("keeps provider time authoritative and closed stock data non-live", () => {
   assert.equal(HT_MARKET_DATA_AUTHORITY.freshnessTimestamp, "provider_market_time");
   assert.equal(HT_MARKET_DATA_AUTHORITY.processingTimestampsAreFreshnessAuthority, false);
   assert.equal(HT_MARKET_DATA_AUTHORITY.closedMarketMayBeLabeledLive, false);
+  assert.deepEqual(HT_MARKET_DATA_AUTHORITY.displayFrame, {
+    version: "stock-display-frame-v1",
+    intervalMs: 5_000,
+    scope: "presentation_only",
+    sharedAcrossDesktopMobileChartsAndQuotes: true,
+    requiredMigration: "0048_shared_stock_display_frames.sql",
+    unavailableFallback: "same_server_instance_only",
+  });
 });

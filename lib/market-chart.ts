@@ -25,6 +25,10 @@ export type MarketChartDisplayQuote = {
   source: "massive_polygon_last_trade" | "massive_polygon_snapshot" | "massive_crypto_trade" | "massive_crypto_aggregate" | "coinbase_crypto_trade" | "coinbase_crypto_aggregate";
   changeBasis?: "previous_close" | "24h_reference" | "chart_open";
   priceKind?: "trade" | "minute_aggregate";
+  frameId?: string;
+  frameVersion?: "stock-display-frame-v1";
+  frameBucket?: number;
+  frameCoordination?: "database" | "instance_fallback";
 };
 
 export type MarketChartResponse = {

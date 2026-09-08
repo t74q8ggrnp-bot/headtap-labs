@@ -61,7 +61,8 @@ import { isHtAgentRiskAuditComplete } from "@/lib/ht-agent/risk-audit";
 import { assessHtAgentRunHealth } from "@/lib/ht-agent/run-health";
 import { assessProxOutcomeMemoryRunHealth } from "@/lib/prox/outcome-memory-run-health";
 import { legacyCryptoOutcomeQuarantine } from "@/lib/crypto/outcome-integrity";
-import { assessCryptoEvidenceHealth, isObservationOnlyRow } from "@/lib/crypto/evidence-health";
+import { assessCryptoEvidenceHealth, assessPausedCryptoEvidenceHealth, isObservationOnlyRow } from "@/lib/crypto/evidence-health";
+import { COINAPI_RESEARCH_RUNTIME } from "@/lib/crypto/coinapi-runtime";
 import { readCryptoOutcomeProcessingEvidence } from "@/lib/crypto/outcome-processing-health";
 import { probeDatabaseHealth } from "@/lib/database-health-probe";
 
@@ -2523,15 +2524,20 @@ export async function GET() {
     environmentEnabled: process.env.COINAPI_PILOT_ENABLED === "true",
     credentialConfigured: Boolean(process.env.COINAPI_API_KEY?.trim()),
   };
-  let cryptoEvidence = assessCryptoEvidenceHealth(null, cryptoConfiguration);
-  try {
-    const { data, error } = await supabase.rpc("ht_crypto_evidence_health_snapshot");
-    if (error || !data) throw error ?? new Error("Crypto evidence snapshot unavailable.");
-    const outcomeProcessing = await readCryptoOutcomeProcessingEvidence(supabase);
-    cryptoEvidence = assessCryptoEvidenceHealth({...data,outcomeProcessing}, cryptoConfiguration);
-  } catch (error) {
-    // Missing schema, timeout, and unverified evidence remain hard failures.
-    cryptoEvidence = assessCryptoEvidenceHealth(null, cryptoConfiguration, Date.now(), error);
+  let cryptoEvidence: ReturnType<typeof assessCryptoEvidenceHealth> = assessPausedCryptoEvidenceHealth(
+    cryptoConfiguration,
+    COINAPI_RESEARCH_RUNTIME.reason,
+  );
+  if (!COINAPI_RESEARCH_RUNTIME.paused) {
+    try {
+      const { data, error } = await supabase.rpc("ht_crypto_evidence_health_snapshot");
+      if (error || !data) throw error ?? new Error("Crypto evidence snapshot unavailable.");
+      const outcomeProcessing = await readCryptoOutcomeProcessingEvidence(supabase);
+      cryptoEvidence = assessCryptoEvidenceHealth({...data,outcomeProcessing}, cryptoConfiguration);
+    } catch (error) {
+      // Missing schema, timeout, and unverified evidence remain hard failures.
+      cryptoEvidence = assessCryptoEvidenceHealth(null, cryptoConfiguration, Date.now(), error);
+    }
   }
   checks.push(...cryptoEvidence.checks);
 

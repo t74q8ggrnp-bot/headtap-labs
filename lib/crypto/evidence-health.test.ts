@@ -2,12 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
 // @ts-expect-error Node source tests.
-import { assessCryptoEvidenceHealth, isObservationOnlyRow } from "./evidence-health.ts";
+import { assessCryptoEvidenceHealth, assessPausedCryptoEvidenceHealth, isObservationOnlyRow } from "./evidence-health.ts";
 // @ts-expect-error Node source tests.
 import { canonicalCryptoJson } from "./coinapi-publication.ts";
 const now=Date.parse("2026-09-03T02:00:30Z"), stamp=(offset=0)=>new Date(now+offset).toISOString();
 const config={ production:true,environmentEnabled:true,credentialConfigured:true };
 const mid="COINBASE_SPOT_TEST_USD";
+
+test("an owner pause makes zero provider and archive requests without claiming crypto is healthy",()=>{
+  const result=assessPausedCryptoEvidenceHealth(config,"cost_audit");
+  assert.ok(result.checks.every(check=>check.ok===false));
+  assert.ok(result.checks.every(check=>check.detail.providerRequests===0 && check.detail.databaseAuditRequests===0));
+  assert.equal(result.warnings[0].name,"crypto_research_intentionally_paused");
+});
 function fixture() {
   const frame={ version:"coinapi-vercel-pilot-v1",dataContractVersion:"coinapi-research-data-v2",provider:"coinapi",authority:"research_only",
     executionAuthorized:false,publicRankingChanged:false,profitabilityEstablished:false,intervalSeconds:60,decisionAt:stamp(),

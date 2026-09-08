@@ -34,9 +34,14 @@ const store = new LiveMarketViews({
     const body = await response.json();
     const result: Record<string, MarketChartDisplayQuote> = {};
     for (const [symbol, value] of Object.entries(body.quotes ?? {})) {
-      const quote = value as { price: number; change: number; asOf: string; live?: boolean; priceKind?: "trade" | "minute_aggregate" };
+      const quote = value as { price: number; change: number; asOf: string; live?: boolean; priceKind?: "trade" | "minute_aggregate";
+        source?: "massive_polygon_last_trade" | "massive_polygon_snapshot";
+        displayFrame?: { id?: string; version?: "stock-display-frame-v1"; bucket?: number;
+          coordination?: "database" | "instance_fallback" } | null };
       result[symbol] = { price: quote.price, changePercent: quote.change, asOf: quote.asOf, live: quote.live === true,
-        source: "massive_polygon_snapshot", priceKind: quote.priceKind };
+        source: quote.source ?? "massive_polygon_snapshot", priceKind: quote.priceKind,
+        frameId: quote.displayFrame?.id, frameVersion: quote.displayFrame?.version,
+        frameBucket: quote.displayFrame?.bucket, frameCoordination: quote.displayFrame?.coordination };
     }
     return result;
   },

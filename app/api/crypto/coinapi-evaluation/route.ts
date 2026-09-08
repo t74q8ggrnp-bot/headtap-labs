@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { canonicalCryptoJson } from "@/lib/crypto/coinapi-publication";
 import { assessCryptoEvidenceHealth } from "@/lib/crypto/evidence-health";
 import { readCryptoOutcomeProcessingEvidence } from "@/lib/crypto/outcome-processing-health";
+import { COINAPI_RESEARCH_RUNTIME } from "@/lib/crypto/coinapi-runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,6 +20,16 @@ export async function GET(request: Request) {
   }
   try {
     if (!await coinApiPilotReaderAuthorized(request)) return Response.json({ error: "Unauthorized." }, { status: 401, headers });
+    if (COINAPI_RESEARCH_RUNTIME.paused) {
+      return Response.json({
+        ok: false,
+        status: "paused",
+        reason: COINAPI_RESEARCH_RUNTIME.reason,
+        providerRequests: 0,
+        databaseAuditRequests: 0,
+        executionAuthorized: false,
+      }, { status: 503, headers });
+    }
     const db = coinApiPilotService();
     if (episodeId) {
       const episode = await db.from("ht_crypto_research_episodes").select("*").eq("id",episodeId).maybeSingle();

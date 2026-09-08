@@ -106,14 +106,6 @@
       "schedule": "2-59/5 * * * *"
     },
     {
-      "path": "/api/crypto/coinapi-collector",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/crypto/evidence-maintenance",
-      "schedule": "3-59/5 * * * *"
-    },
-    {
       "path": "/api/paper-trading/match",
       "schedule": "*/2 * * * *"
     },

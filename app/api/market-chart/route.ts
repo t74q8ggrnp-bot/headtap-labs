@@ -23,6 +23,7 @@ import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
 import { getStockMarketClock, stockHistoryLabel } from "@/lib/stock-market-session";
 import { fetchMassiveCryptoChart } from "@/lib/massive-crypto";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
+import { publishStockDisplayFrame } from "@/lib/stock-display-frame-server";
 
 const POLYGON_ORIGIN = "https://api.polygon.io";
 const STOCK_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -63,7 +64,7 @@ function responseWithCache(
   });
 }
 
-async function fetchStockBars(symbol: string): Promise<{
+async function fetchStockBars(symbol: string, requestStartedAt: Date): Promise<{
   bars: MarketChartBar[];
   realTimeSeconds: boolean;
   displayQuote?: MarketChartResponse["displayQuote"];
@@ -140,7 +141,10 @@ async function fetchStockBars(symbol: string): Promise<{
       ),
     );
   }
-  const display = resolveStockDisplayPrice(snapshot, lastTrade);
+  const providerDisplay = resolveStockDisplayPrice(snapshot, lastTrade);
+  const display = providerDisplay
+    ? await publishStockDisplayFrame(symbol, providerDisplay, requestStartedAt) ?? providerDisplay
+    : null;
   const displayPrice = display?.price ?? 0;
   const displayAsOf = display?.asOf ?? null;
   const mergedBars = selectLatestEasternSessionBars(
@@ -165,6 +169,12 @@ async function fetchStockBars(symbol: string): Promise<{
         changeBasis: "previous_close" as const,
         source: display!.source,
         priceKind: display!.priceKind,
+        ...(display && "frameId" in display ? {
+          frameId: display.frameId,
+          frameVersion: display.frameVersion,
+          frameBucket: display.frameBucket,
+          frameCoordination: display.coordination,
+        } : {}),
       }
     : undefined;
   return {
@@ -175,6 +185,7 @@ async function fetchStockBars(symbol: string): Promise<{
 }
 
 export async function GET(request: Request) {
+  const requestStartedAt = new Date();
   const rateLimit = checkApiRateLimit(request, {
     namespace: "public-market-chart",
     limit: 60,
@@ -213,7 +224,7 @@ export async function GET(request: Request) {
     let intervalSeconds = 60;
 
     if (asset === "stock") {
-      const stockFeed = await fetchStockBars(symbol);
+      const stockFeed = await fetchStockBars(symbol, requestStartedAt);
       bars = stockFeed.bars;
       displayQuote = stockFeed.displayQuote;
       sourceLabel = stockFeed.realTimeSeconds
