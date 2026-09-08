@@ -1,22 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AreaSeries,
-  CandlestickSeries,
-  ColorType,
-  HistogramSeries,
-  TickMarkType,
-  createChart,
-  type Time,
-  type UTCTimestamp,
-} from "lightweight-charts";
+import { useMemo, useState } from "react";
 import type {
   MarketChartAsset,
 } from "@/lib/market-chart";
-import { buildUniformMarketTimeSlots } from "@/lib/market-chart";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import { formatMarketPrice as formatPrice } from "@/lib/market-price-format";
+import MarketChartCanvas, {
+  MARKET_CHART_ACCENTS,
+  type MarketChartMode,
+} from "@/app/components/market/MarketChartCanvas";
 
 type HeroPriceChartProps = {
   asset: MarketChartAsset;
@@ -27,63 +20,6 @@ type HeroPriceChartProps = {
   height?: number;
 };
 
-type ChartMode = "graph" | "candles";
-
-type SeriesDataWriter = {
-  setData: (slots: ReturnType<typeof buildUniformMarketTimeSlots>) => void;
-};
-
-type SavedViewport = {
-  key: string;
-  pointCount: number;
-  range: { from: number; to: number };
-};
-
-const accents = {
-  violet: {
-    line: "#a78bfa",
-    border: "border-violet-400/15",
-    text: "text-violet-300",
-  },
-  orange: {
-    line: "#fb923c",
-    border: "border-orange-400/15",
-    text: "text-orange-300",
-  },
-  cyan: {
-    line: "#22d3ee",
-    border: "border-cyan-400/15",
-    text: "text-cyan-300",
-  },
-} as const;
-
-function chartTimeToDate(time: Time) {
-  if (typeof time === "number") return new Date(time * 1_000);
-  if (typeof time === "string") return new Date(`${time}T00:00:00.000Z`);
-  return new Date(Date.UTC(time.year, time.month - 1, time.day));
-}
-
-function formatChartTick(
-  time: Time,
-  tickMarkType: TickMarkType,
-  locale: string,
-  timeZone: string,
-) {
-  const date = chartTimeToDate(time);
-  if (tickMarkType <= TickMarkType.DayOfMonth) {
-    return new Intl.DateTimeFormat(locale, {
-      month: "short",
-      day: "numeric",
-      timeZone,
-    }).format(date);
-  }
-  return new Intl.DateTimeFormat(locale, {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone,
-  }).format(date);
-}
-
 export default function HeroPriceChart({
   asset,
   symbol,
@@ -92,18 +28,12 @@ export default function HeroPriceChart({
   compact = false,
   height,
 }: HeroPriceChartProps) {
-  const chartRef = useRef<HTMLDivElement | null>(null);
-  const chartApiRef = useRef<ReturnType<typeof createChart> | null>(null);
-  const priceWriterRef = useRef<SeriesDataWriter | null>(null);
-  const volumeWriterRef = useRef<SeriesDataWriter | null>(null);
-  const savedViewportRef = useRef<SavedViewport | null>(null);
-  const slotCountRef = useRef(0);
   const marketView = useLiveMarketView(symbol, { asset, productId, chart: true });
-  const [chartMode, setChartMode] = useState<ChartMode>("candles");
+  const [chartMode, setChartMode] = useState<MarketChartMode>("candles");
   const [timeZone] = useState(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
   );
-  const palette = accents[accent];
+  const palette = MARKET_CHART_ACCENTS[accent];
   const url = useMemo(() => {
     const params = new URLSearchParams({ asset, symbol });
     if (productId) params.set("productId", productId);
@@ -111,214 +41,8 @@ export default function HeroPriceChart({
   }, [asset, productId, symbol]);
   const data = marketView.chart;
   const failed = marketView.error && !data;
-  const dataReady = data !== null;
   const resolvedHeight = height ?? (compact ? 150 : 185);
   const viewportKey = `${url}:${compact ? "compact" : "full"}:${resolvedHeight}`;
-  const slots = useMemo(
-    () => buildUniformMarketTimeSlots(
-      data?.bars ?? [],
-      data?.intervalSeconds ?? 60,
-    ),
-    [data],
-  );
-
-  useEffect(() => {
-    if (!chartRef.current || !dataReady) return;
-
-    const container = chartRef.current;
-    const locale = navigator.language || "en-US";
-    const chartTimeFormatter = new Intl.DateTimeFormat(locale, {
-      hour: "numeric",
-      minute: "2-digit",
-      timeZone,
-    });
-    const chart = createChart(container, {
-      width: container.clientWidth,
-      height: resolvedHeight,
-      layout: {
-        background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#71717a",
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        fontSize: 10,
-      },
-      grid: {
-        vertLines: { color: "rgba(255,255,255,0.035)" },
-        horzLines: { color: "rgba(255,255,255,0.035)" },
-      },
-      rightPriceScale: {
-        borderColor: "rgba(255,255,255,0.08)",
-        scaleMargins: { top: 0.08, bottom: 0.28 },
-      },
-      timeScale: {
-        borderColor: "rgba(255,255,255,0.08)",
-        timeVisible: true,
-        secondsVisible: false,
-        rightOffset: 2,
-        tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) =>
-          formatChartTick(time, tickMarkType, locale, timeZone),
-      },
-      handleScroll: {
-        mouseWheel: true,
-        pressedMouseMove: true,
-        horzTouchDrag: true,
-        vertTouchDrag: false,
-      },
-      handleScale: {
-        axisPressedMouseMove: true,
-        axisDoubleClickReset: true,
-        mouseWheel: true,
-        pinch: true,
-      },
-      kineticScroll: {
-        mouse: true,
-        touch: true,
-      },
-      localization: {
-        locale,
-        priceFormatter: (price: number) => formatPrice(price),
-        timeFormatter: (time: Time) =>
-          chartTimeFormatter.format(chartTimeToDate(time)),
-      },
-    });
-
-    if (chartMode === "candles") {
-      const priceSeries = chart.addSeries(CandlestickSeries, {
-        upColor: "#22c55e",
-        downColor: "#ef4444",
-        borderVisible: true,
-        borderUpColor: "#4ade80",
-        borderDownColor: "#f87171",
-        wickVisible: true,
-        wickUpColor: "#86efac",
-        wickDownColor: "#fca5a5",
-        priceLineVisible: true,
-        priceLineColor: `${palette.line}66`,
-        lastValueVisible: true,
-      });
-      priceWriterRef.current = {
-        setData: (nextSlots) => priceSeries.setData(
-          nextSlots.map(({ time, bar }) => bar
-            ? {
-                time: time as UTCTimestamp,
-                open: bar.open,
-                high: bar.high,
-                low: bar.low,
-                close: bar.close,
-              }
-            : { time: time as UTCTimestamp }),
-        ),
-      };
-    } else {
-      const priceSeries = chart.addSeries(AreaSeries, {
-        lineColor: palette.line,
-        topColor: `${palette.line}38`,
-        bottomColor: `${palette.line}00`,
-        lineWidth: 2,
-        priceLineVisible: true,
-        priceLineColor: `${palette.line}66`,
-        lastValueVisible: true,
-      });
-      priceWriterRef.current = {
-        setData: (nextSlots) => priceSeries.setData(
-          nextSlots.map(({ time, bar }) => bar
-            ? { time: time as UTCTimestamp, value: bar.close }
-            : { time: time as UTCTimestamp }),
-        ),
-      };
-    }
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "volume",
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.78, bottom: 0 },
-    });
-    volumeWriterRef.current = {
-      setData: (nextSlots) => volumeSeries.setData(
-        nextSlots.map(({ time, bar }) => bar
-          ? {
-              time: time as UTCTimestamp,
-              value: bar.volume,
-              color: bar.close >= bar.open
-                ? "rgba(34, 197, 94, 0.28)"
-                : "rgba(239, 68, 68, 0.24)",
-            }
-          : { time: time as UTCTimestamp }),
-      ),
-    };
-    chartApiRef.current = chart;
-
-    const rememberViewport = (range: { from: number; to: number } | null) => {
-      if (!range) return;
-      savedViewportRef.current = {
-        key: viewportKey,
-        pointCount: slotCountRef.current,
-        range,
-      };
-    };
-    chart.timeScale().subscribeVisibleLogicalRangeChange(rememberViewport);
-
-    const resizeObserver = new ResizeObserver(() => {
-      chart.applyOptions({ width: container.clientWidth });
-    });
-    resizeObserver.observe(container);
-
-    return () => {
-      const range = chart.timeScale().getVisibleLogicalRange();
-      rememberViewport(range);
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(rememberViewport);
-      resizeObserver.disconnect();
-      chartApiRef.current = null;
-      priceWriterRef.current = null;
-      volumeWriterRef.current = null;
-      chart.remove();
-    };
-  }, [chartMode, compact, dataReady, palette, resolvedHeight, timeZone, viewportKey]);
-
-  useEffect(() => {
-    const chart = chartApiRef.current;
-    const priceWriter = priceWriterRef.current;
-    const volumeWriter = volumeWriterRef.current;
-    if (!chart || !priceWriter || !volumeWriter || slots.length === 0) return;
-
-    const previous = savedViewportRef.current?.key === viewportKey
-      ? savedViewportRef.current
-      : null;
-    const previousRange = chart.timeScale().getVisibleLogicalRange() ?? previous?.range;
-    const previousPointCount = previous?.pointCount ?? 0;
-    const wasFollowingLatest = !previousRange || previousPointCount === 0 ||
-      previousRange.to >= previousPointCount - 3;
-
-    slotCountRef.current = slots.length;
-    priceWriter.setData(slots);
-    volumeWriter.setData(slots);
-
-    if (previousRange && !wasFollowingLatest) {
-      chart.timeScale().setVisibleLogicalRange(previousRange);
-    } else {
-      const visibleMinutes = compact ? 90 : 180;
-      const intervalMinutes = (data?.intervalSeconds ?? 60) / 60;
-      const visiblePoints = Math.max(1, Math.floor(visibleMinutes / intervalMinutes));
-      const to = slots.length + 2;
-      chart.timeScale().setVisibleLogicalRange({
-        from: Math.max(0, to - visiblePoints),
-        to,
-      });
-    }
-
-    const range = chart.timeScale().getVisibleLogicalRange();
-    if (range) {
-      savedViewportRef.current = {
-        key: viewportKey,
-        pointCount: slots.length,
-        range,
-      };
-    }
-  }, [asset, chartMode, compact, data?.intervalSeconds, slots, viewportKey]);
-
   const latestTime = data
     ? new Intl.DateTimeFormat("en-US", {
         hour: "numeric",
@@ -406,7 +130,16 @@ export default function HeroPriceChart({
         </div>
       ) : (
         <>
-          <div ref={chartRef} className="w-full" />
+          <MarketChartCanvas
+            bars={data.bars}
+            intervalSeconds={data.intervalSeconds ?? 60}
+            mode={chartMode}
+            accent={accent}
+            compact={compact}
+            height={resolvedHeight}
+            timeZone={timeZone}
+            viewportKey={viewportKey}
+          />
           <div className="flex flex-wrap items-center justify-between gap-1 border-t border-white/7 px-3 py-1.5">
             <p className="text-[7px] font-semibold text-zinc-700">
               {chartMode === "candles"

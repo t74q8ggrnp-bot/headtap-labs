@@ -102,7 +102,14 @@ export async function GET(request: Request) {
       );
     }
 
-    const display = await publishStockDisplayFrame(symbol, providerDisplay, requestStartedAt) ?? providerDisplay;
+    const display = await publishStockDisplayFrame(
+      symbol,
+      providerDisplay,
+      requestStartedAt,
+    );
+    if (!display) {
+      throw new Error("Shared stock display frame was not published.");
+    }
     const price = display.price;
     const marketAsOf = display.asOf;
     const timing = buildMarketDataTimingReceipt({ marketAsOf, receivedAt });

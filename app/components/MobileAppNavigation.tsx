@@ -55,10 +55,12 @@ function TabIcon({ tab }: { tab: AppTab }) {
 export default function MobileAppNavigation() {
   const pathname = usePathname();
   const { homeTab, setHomeTab } = useMobileAppNavigation();
+  const isTradeWorkspace = pathname.startsWith("/trade/");
   const activeTab: AppTab =
     pathname === "/paper" ? "paper" :
     pathname === "/crypto" ? "crypto" :
     pathname === "/scanner" ? "scanner" :
+    isTradeWorkspace ? "home" :
     pathname === "/" ? homeTab : "home";
 
   const activateHomeTab = (tab: AppTab) => {

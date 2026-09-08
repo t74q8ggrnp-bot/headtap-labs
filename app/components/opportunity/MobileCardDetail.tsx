@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import LiveStockValue from "@/app/components/market/LiveStockValue";
 import {
@@ -157,6 +158,12 @@ export default function MobileCardDetail({
         <button onClick={() => onOpen(current)} className="w-full rounded-2xl bg-orange-500 py-4 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[0_0_20px_rgba(249,115,22,0.28)]">
           View Full Analysis →
         </button>
+        <Link
+          href={`/trade/${encodeURIComponent(current.ticker)}`}
+          className="mt-2 flex w-full items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.04] py-3 text-sm font-black uppercase tracking-[0.08em] text-cyan-300"
+        >
+          Open workspace ↗
+        </Link>
         <button onClick={() => onWatch(current.ticker)} className="mt-2 w-full rounded-2xl border border-white/10 bg-transparent py-3 text-sm font-black uppercase tracking-[0.08em] text-zinc-500">
           {watched ? "✓ In Watchlist" : "Add to Watchlist ☆"}
         </button>

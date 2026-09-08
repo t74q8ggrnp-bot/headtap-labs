@@ -97,6 +97,11 @@ export default function MobileExperience({
   selectedOpportunityPresentation, selectedOpportunityError, selectedOpportunityFramework,
   bullBearLoading, bullBearTicker,
 }: MobileExperienceProps) {
+  const normalizedWorkspaceTicker = ticker.trim().toUpperCase();
+  const workspaceSearchTicker = /^[A-Z][A-Z0-9.-]{0,9}$/.test(normalizedWorkspaceTicker)
+    ? normalizedWorkspaceTicker
+    : null;
+
   return (
     <div className="ht-mobile-page-shell md:hidden fixed inset-0 bg-[#050505] text-white flex flex-col z-[200]">
 
@@ -122,6 +127,15 @@ export default function MobileExperience({
                   >
                     GO
                   </button>
+                )}
+                {workspaceSearchTicker && (
+                  <Link
+                    href={`/trade/${encodeURIComponent(workspaceSearchTicker)}`}
+                    aria-label={`Open ${workspaceSearchTicker} trading workspace`}
+                    className="shrink-0 rounded-lg border border-cyan-400/25 bg-cyan-500/[0.06] px-2.5 py-1 text-[10px] font-black text-cyan-300"
+                  >
+                    ↗
+                  </Link>
                 )}
               </div>
             </div>
@@ -540,6 +554,12 @@ export default function MobileExperience({
               )}
 
               <div className="px-5 py-4">
+                <Link
+                  href={`/trade/${encodeURIComponent(selectedStock.symbol)}`}
+                  className="mb-2 flex w-full items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.05] py-3.5 text-sm font-black text-cyan-300"
+                >
+                  Open trading workspace ↗
+                </Link>
                 <button
                   onClick={() => setSelectedStock(null)}
                   className="w-full rounded-2xl border border-white/10 bg-white/[0.04] py-3.5 text-sm font-black text-zinc-400"

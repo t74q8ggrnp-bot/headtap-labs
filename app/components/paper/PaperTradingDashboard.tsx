@@ -655,7 +655,19 @@ export default function PaperTradingDashboard() {
                   <div className="mt-5 flex h-[440px] animate-pulse items-center justify-center rounded-2xl bg-white/[0.015]"><p className="text-xs font-semibold text-zinc-700">Loading verified market data…</p></div>
                 ) : loadedInstrument ? (
                   <div className="mt-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3"><p className="text-[11px] font-semibold text-zinc-600">Verified session chart</p><div className="flex items-center gap-2 text-[10px] font-semibold"><span className="rounded-full bg-cyan-500/[0.07] px-3 py-1.5 capitalize text-cyan-300">{loadedInstrument.marketSession.replace("_", " ")}</span><span className="text-zinc-700">{marketView.label}</span></div></div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
+                      <p className="text-[11px] font-semibold text-zinc-600">Verified session chart</p>
+                      <div className="flex flex-wrap items-center justify-end gap-2 text-[10px] font-semibold">
+                        <span className="rounded-full bg-cyan-500/[0.07] px-3 py-1.5 capitalize text-cyan-300">{loadedInstrument.marketSession.replace("_", " ")}</span>
+                        <span className="text-zinc-700">{marketView.label}</span>
+                        <Link
+                          href={`/trade/${encodeURIComponent(loadedInstrument.symbol)}`}
+                          className="rounded-full border border-white/10 px-3 py-1.5 font-black text-zinc-400 transition hover:border-cyan-400/30 hover:text-cyan-300"
+                        >
+                          Open workspace ↗
+                        </Link>
+                      </div>
+                    </div>
                     <HeroPriceChart asset="stock" symbol={loadedInstrument.symbol} accent="cyan" height={330} />
                     <div className="mt-4 grid grid-cols-2 gap-y-4 border-t border-white/8 pt-4 sm:grid-cols-4">
                       <AccountMetric label="Open" value={money(loadedInstrument.sessionOpen || null)} />

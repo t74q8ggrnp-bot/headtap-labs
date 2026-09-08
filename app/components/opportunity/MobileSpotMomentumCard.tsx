@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import type { DecisionTraceDisplay, TradeFrameworkDisplay } from "@/lib/contracts/market";
@@ -160,6 +161,12 @@ export default function MobileSpotMomentumCard({
             {watched ? "★" : "☆"}
           </button>
         </div>
+        <Link
+          href={`/trade/${encodeURIComponent(opportunity.ticker)}`}
+          className="mt-2 flex w-full items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/[0.04] py-3 text-xs font-black text-cyan-300"
+        >
+          Open trading workspace ↗
+        </Link>
         <p className="mt-2.5 text-center text-[8px] font-semibold text-zinc-700">Signals are for research only, not financial advice.</p>
       </div>
     </div>

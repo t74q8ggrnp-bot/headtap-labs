@@ -75,7 +75,10 @@ async function fetchSnapshotBatch(
   const result: Record<string, BulkQuote> = {};
   for (const [symbol, value] of rows) {
     const { row } = value;
-    const display = frames[symbol] ?? value.display;
+    const display = frames[symbol];
+    if (!display) {
+      throw new Error(`Shared stock display frame was not published for ${symbol}.`);
+    }
     const price = display.price;
     const marketAsOf = display.asOf;
     const timestampMs = Date.parse(marketAsOf);

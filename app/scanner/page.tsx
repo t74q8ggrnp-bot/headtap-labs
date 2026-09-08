@@ -8,6 +8,7 @@ import {
   mergeOpportunityLists,
   type Opportunity as HTOpportunity,
 } from "@/lib/opportunity-model";
+import { useWatchlist } from "@/app/hooks/useWatchlist";
 
 // ─────────────────────────────────────────────────────────────
 //  app/scanner/page.tsx
@@ -64,27 +65,14 @@ export default function ScannerPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [filter, setFilter] = useState<ScannerFilter>("all");
   const [search, setSearch] = useState("");
-  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const {
+    symbols: watchlist,
+    toggle: toggleWatchlistSymbol,
+  } = useWatchlist();
   const [sortBy, setSortBy] = useState<"score" | "change" | "symbol">("score");
 
-  // Same localStorage key Home uses — so a star toggled here shows up
-  // there too. These were previously two different, disconnected lists.
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        const saved = localStorage.getItem("headtap-watchlist");
-        if (saved) setWatchlist(JSON.parse(saved));
-      } catch {}
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
   const toggleWatchlist = (symbol: string) => {
-    setWatchlist(prev => {
-      const next = prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol];
-      localStorage.setItem("headtap-watchlist", JSON.stringify(next));
-      return next;
-    });
+    void toggleWatchlistSymbol(symbol);
   };
 
   const fetchAll = useCallback(async () => {
@@ -334,12 +322,18 @@ export default function ScannerPage() {
                         Last Verified
                       </div>
                     )}
-                    <a
-                      href={`/?ticker=${o.ticker}`}
-                      className="ml-auto rounded-full border border-orange-500/30 px-3 py-1 text-[10px] font-black text-orange-400 transition hover:bg-orange-500/10"
+                    <Link
+                      href={`/?ticker=${encodeURIComponent(o.ticker)}`}
+                      className="ml-auto rounded-full border border-white/10 px-3 py-1 text-[10px] font-black text-zinc-300 transition hover:border-orange-500/30 hover:text-orange-300"
                     >
-                      Full Read →
-                    </a>
+                      Full read →
+                    </Link>
+                    <Link
+                      href={`/trade/${encodeURIComponent(o.ticker)}`}
+                      className="rounded-full border border-orange-500/30 px-3 py-1 text-[10px] font-black text-orange-400 transition hover:bg-orange-500/10"
+                    >
+                      Workspace ↗
+                    </Link>
                   </div>
                 </div>
               );

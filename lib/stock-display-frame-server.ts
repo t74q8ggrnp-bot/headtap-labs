@@ -13,6 +13,20 @@ export type StockDisplayFrame = StockDisplayPrice & {
   coordinationIssue?: "not_configured" | "rpc_error" | "invalid_rpc_response" | "transport_error";
 };
 
+export type StockDisplayFrameCoordinationIssue = NonNullable<
+  StockDisplayFrame["coordinationIssue"]
+>;
+
+export class StockDisplayFrameCoordinationError extends Error {
+  readonly issue: StockDisplayFrameCoordinationIssue;
+
+  constructor(issue: StockDisplayFrameCoordinationIssue) {
+    super(`Shared stock display-frame coordination failed: ${issue}.`);
+    this.name = "StockDisplayFrameCoordinationError";
+    this.issue = issue;
+  }
+}
+
 type Candidate = StockDisplayPrice & { symbol: string; frameBucket: number };
 
 const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -84,13 +98,20 @@ export function selectLocalStockDisplayFrame(
   return next;
 }
 
-function parseFrame(value: unknown): StockDisplayFrame | null {
+export function parseStockDisplayFrame(value: unknown): StockDisplayFrame | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
+  const rawAsOf = String(row.asOf ?? "");
+  const providerAt = Date.parse(rawAsOf);
   const candidate: Candidate = {
     symbol: String(row.symbol ?? ""),
     price: Number(row.price),
-    asOf: String(row.asOf ?? ""),
+    // Postgres jsonb_build_object serializes timestamptz values with a numeric
+    // offset. Emit one canonical ISO clock so downstream frame equality never
+    // mistakes two spellings of the same provider instant for a mismatch.
+    asOf: Number.isFinite(providerAt)
+      ? new Date(providerAt).toISOString()
+      : rawAsOf,
     source: row.source as Candidate["source"],
     priceKind: row.priceKind as Candidate["priceKind"],
     size: row.size === null || row.size === undefined ? null : Number(row.size),
@@ -132,16 +153,12 @@ export async function publishStockDisplayFrames(
     ...display,
     frameBucket,
   })).filter((candidate) => validCandidate(candidate));
-  const fallback = Object.fromEntries(candidates.flatMap((candidate) => {
-    const frame = selectLocalStockDisplayFrame(candidate);
-    return frame ? [[candidate.symbol, frame]] : [];
-  }));
-  const fallbackWithIssue = (issue: NonNullable<StockDisplayFrame["coordinationIssue"]>) =>
-    Object.fromEntries(Object.entries(fallback).map(([symbol, frame]) => [symbol, { ...frame, coordinationIssue: issue }]));
-  if (!candidates.length) return fallback;
+  if (!candidates.length) return {};
 
   const db = displayFrameClient();
-  if (!db) return fallbackWithIssue("not_configured");
+  if (!db) {
+    throw new StockDisplayFrameCoordinationError("not_configured");
+  }
   try {
     const { data, error } = await db.rpc("ht_publish_stock_display_frames", {
       p_candidates: candidates.map((candidate) => ({
@@ -156,19 +173,19 @@ export async function publishStockDisplayFrames(
     });
     if (error) {
       console.warn("[stock-display-frame] coordination RPC failed", { code: error.code ?? "unknown" });
-      return fallbackWithIssue("rpc_error");
+      throw new StockDisplayFrameCoordinationError("rpc_error");
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       console.warn("[stock-display-frame] coordination RPC returned an invalid response");
-      return fallbackWithIssue("invalid_rpc_response");
+      throw new StockDisplayFrameCoordinationError("invalid_rpc_response");
     }
     const parsed = Object.fromEntries(Object.entries(data).flatMap(([symbol, value]) => {
-      const frame = parseFrame(value);
+      const frame = parseStockDisplayFrame(value);
       if (!frame || frame.symbol !== symbol) return [];
       // Seed the local fallback with the database-selected cross-instance frame.
       // If this process has already seen newer provider evidence, retain it
       // instead of allowing a late database response to regress the display.
-      const selected = selectLocalStockDisplayFrame({
+      selectLocalStockDisplayFrame({
         symbol: frame.symbol,
         price: frame.price,
         asOf: frame.asOf,
@@ -177,14 +194,23 @@ export async function publishStockDisplayFrames(
         size: frame.size,
         frameBucket: frame.frameBucket,
       }, "database");
-      return selected ? [[symbol, selected]] : [];
+      return [[symbol, frame]];
     }));
-    return { ...fallback, ...parsed };
+    const expectedSymbols = new Set(candidates.map((candidate) => candidate.symbol));
+    if (
+      Object.keys(parsed).length !== expectedSymbols.size ||
+      [...expectedSymbols].some((symbol) => !parsed[symbol])
+    ) {
+      console.warn("[stock-display-frame] coordination RPC omitted a requested symbol");
+      throw new StockDisplayFrameCoordinationError("invalid_rpc_response");
+    }
+    return parsed;
   } catch (error) {
+    if (error instanceof StockDisplayFrameCoordinationError) throw error;
     console.warn("[stock-display-frame] coordination transport failed", {
       name: error instanceof Error ? error.name : "unknown",
     });
-    return fallbackWithIssue("transport_error");
+    throw new StockDisplayFrameCoordinationError("transport_error");
   }
 }
 

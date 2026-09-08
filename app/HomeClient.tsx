@@ -33,6 +33,7 @@ import {
   type OpportunityPayload,
 } from "./hooks/useOpportunityFeed";
 import { useCryptoOpportunityFeed } from "./hooks/useCryptoOpportunityFeed";
+import { useWatchlist } from "./hooks/useWatchlist";
 import type { CryptoOpportunityFeed } from "@/lib/crypto/contracts";
 import {
   getOpportunityPresentation,
@@ -214,12 +215,15 @@ export default function HomeClient({
 
   const [stocks, setStocks] = useState<Stock[]>(initialStocks);
   const [ticker, setTicker] = useState("");
-  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const normalizedWorkspaceTicker = ticker.trim().toUpperCase();
+  const workspaceSearchTicker = /^[A-Z][A-Z0-9.-]{0,9}$/.test(normalizedWorkspaceTicker)
+    ? normalizedWorkspaceTicker
+    : null;
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [selectedOpportunity, setSelectedOpportunity] = useState<APIOpportunity | null>(null);
   const [selectedOpportunityLoading, setSelectedOpportunityLoading] = useState(false);
   const [selectedOpportunityError, setSelectedOpportunityError] = useState("");
-  // Deep-link support: Scanner's "Full Read ->" links to /?ticker=SYMBOL.
+  // Legacy deep-link support for existing inbound /?ticker=SYMBOL URLs.
   // This opens that ticker's detail view on load, whether or not it's
   // already in the currently loaded `stocks` universe. Runs once per
   // page load — doesn't fight the user if they close the modal.
@@ -239,6 +243,14 @@ export default function HomeClient({
   const [news, setNews] = useState<Record<string, NewsItem[]>>({});
   const [newsIntel, setNewsIntel] = useState<Record<string, NewsIntel>>({});
   const [session, setSession] = useState<Session | null>(null);
+  const {
+    symbols: watchlist,
+    add: addWatchlistSymbol,
+    toggle: toggleWatchlistSymbol,
+    cloudEnabled: watchlistCloudEnabled,
+    syncState: watchlistSyncState,
+    error: watchlistSyncError,
+  } = useWatchlist({ userId: session?.user?.id ?? null });
   const [mounted, setMounted] = useState(false);
   const [mobileCardIndex, setMobileCardIndex] = useState(0);
 
@@ -342,7 +354,13 @@ export default function HomeClient({
   const [authLoading, setAuthLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [, setSearchStatus] = useState("Search any ticker to pull it into HT instantly.");
-  const [cloudSyncMessage, setCloudSyncMessage] = useState("");
+  const cloudSyncMessage = watchlistSyncError
+    ? `Cloud sync unavailable: ${watchlistSyncError}`
+    : watchlistSyncState === "syncing"
+      ? "Syncing cloud watchlist..."
+      : watchlistCloudEnabled && watchlistSyncState === "synced"
+        ? "Cloud watchlist synced."
+        : "";
   const signalMemoryInsight: { tracked: number; successRate: number | null } | null = null;
   const [savedSetups, setSavedSetups] = useState<string[]>([]);
   const [, setViewedTickers] = useState<string[]>([]);
@@ -887,12 +905,7 @@ export default function HomeClient({
   useEffect(() => {
     setMounted(true);
 
-    const savedWatchlist = localStorage.getItem("headtap-watchlist");
     const savedAiSetups = localStorage.getItem("htlabs-saved-setups");
-
-    if (savedWatchlist) {
-      setWatchlist(JSON.parse(savedWatchlist));
-    }
 
     if (savedAiSetups) {
       setSavedSetups(JSON.parse(savedAiSetups));
@@ -921,9 +934,8 @@ export default function HomeClient({
     return () => clearInterval(interval);
   }, []);
 
-  // Deep-link: open /?ticker=SYMBOL directly, whether or not that ticker
-  // is already in the currently loaded `stocks` universe. Scanner's
-  // "Full Read ->" links relied on this existing — it never did.
+  // Legacy deep-link: open /?ticker=SYMBOL directly, whether or not that
+  // ticker is already in the currently loaded `stocks` universe.
   useEffect(() => {
     if (deepLinkHandledRef.current) return;
     const ticker = searchParams?.get("ticker");
@@ -981,14 +993,6 @@ export default function HomeClient({
 
     return () => subscription.unsubscribe();
   }, []);
-
-  useEffect(() => {
-    if (session?.user?.id) {
-      loadCloudWatchlist();
-    }
-    // Depend only on the user ID string, not the whole session object,
-    // to avoid re-running every time Supabase refreshes the session token.
-  }, [session?.user?.id]);
 
   // AUTH STABILITY PATCH v149:
   // Temporarily disable automatic Signal Memory Supabase writes after login/signup.
@@ -1110,51 +1114,6 @@ export default function HomeClient({
     setAuthMessage("Signed out.");
   };
 
-  const syncWatchlistToCloud = async (symbols: string[]) => {
-    if (!session?.user?.id) return;
-
-    try {
-      await supabase.from("ht_labs_watchlist").delete().eq("user_id", session.user.id);
-
-      if (symbols.length === 0) return;
-
-      const payload = symbols.map((symbol) => ({
-        user_id: session.user.id,
-        symbol,
-      }));
-
-      await supabase.from("ht_labs_watchlist").insert(payload);
-
-      setCloudSyncMessage("Cloud watchlist synced.");
-    } catch (error) {
-      console.error("WATCHLIST SYNC ERROR:", error);
-      setCloudSyncMessage("Cloud sync failed.");
-    }
-  };
-
-  const loadCloudWatchlist = async () => {
-    if (!session?.user?.id) return;
-
-    try {
-      const { data, error } = await supabase
-        .from("ht_labs_watchlist")
-        .select("symbol")
-        .eq("user_id", session.user.id);
-
-      if (error) {
-        console.error(error);
-        return;
-      }
-
-      if (data) {
-        const symbols = (data as Array<{ symbol: string }>).map((item) => item.symbol);
-        setWatchlist(symbols);
-      }
-    } catch (error) {
-      console.error("LOAD WATCHLIST ERROR:", error);
-    }
-  };
-
   const handleTickerSearch = async () => {
     const cleanTicker = ticker.toUpperCase().trim();
 
@@ -1217,34 +1176,13 @@ export default function HomeClient({
       return updated.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
     });
 
-    if (!watchlist.includes(cleanTicker)) {
-      const updatedWatchlist = [...watchlist, cleanTicker];
-      setWatchlist(updatedWatchlist);
-
-      localStorage.setItem(
-        "headtap-watchlist",
-        JSON.stringify(updatedWatchlist),
-      );
-
-      if (session?.user?.id) {
-        syncWatchlistToCloud(updatedWatchlist);
-      }
-    }
+    await addWatchlistSymbol(cleanTicker);
 
     setTicker("");
   };
 
   const toggleWatchlist = (symbol: string) => {
-    let updatedWatchlist: string[];
-
-    if (watchlist.includes(symbol)) {
-      updatedWatchlist = watchlist.filter((item) => item !== symbol);
-    } else {
-      updatedWatchlist = [...watchlist, symbol];
-    }
-
-    setWatchlist(updatedWatchlist);
-    localStorage.setItem("headtap-watchlist", JSON.stringify(updatedWatchlist));
+    void toggleWatchlistSymbol(symbol);
   };
 
 
@@ -1619,6 +1557,14 @@ export default function HomeClient({
                       className="min-w-0 flex-1 bg-transparent text-xs font-black uppercase text-white outline-none placeholder:normal-case placeholder:text-zinc-600"
                     />
                   </div>
+                  {workspaceSearchTicker && (
+                    <Link
+                      href={`/trade/${encodeURIComponent(workspaceSearchTicker)}`}
+                      className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.05] px-3 py-2.5 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-300 transition hover:border-cyan-400/40 hover:text-cyan-200"
+                    >
+                      Workspace ↗
+                    </Link>
+                  )}
                   {session?.user ? (
                     <div className="flex items-center gap-2">
                       <span className="max-w-[180px] truncate rounded-full border border-green-400/20 bg-green-500/10 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-green-300">
@@ -2246,17 +2192,25 @@ export default function HomeClient({
                 </div>
                 )}
 
-                <div className="mt-4 flex items-center justify-start border-t border-white/10 pt-4">
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
                   <p className="text-xs text-zinc-500">Powered by HT Labs AI</p>
 
-                  <motion.button
-                    onClick={() => setSelectedStock(null)}
-                    className="rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 text-sm font-black text-white transition"
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.97 }}
-                  >
-                    Done
-                  </motion.button>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/trade/${encodeURIComponent(selectedStock.symbol)}`}
+                      className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.05] px-4 py-2 text-sm font-black text-cyan-300 transition hover:border-cyan-400/40"
+                    >
+                      Open workspace ↗
+                    </Link>
+                    <motion.button
+                      onClick={() => setSelectedStock(null)}
+                      className="rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2 text-sm font-black text-white transition"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                    >
+                      Done
+                    </motion.button>
+                  </div>
                 </div>
               </div>
             </motion.div>

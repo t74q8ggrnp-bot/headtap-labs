@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
-import { selectLocalStockDisplayFrame, stockDisplayFrameBucket } from "./stock-display-frame-server.ts";
+import { parseStockDisplayFrame, publishStockDisplayFrame, selectLocalStockDisplayFrame, StockDisplayFrameCoordinationError, stockDisplayFrameBucket } from "./stock-display-frame-server.ts";
 
 const trade = (symbol: string, price: number, asOf: number, frameBucket: number) => ({
   symbol,
@@ -52,4 +52,54 @@ test("new buckets advance without allowing late responses to regress provider ti
   assert.equal(staleNextBucket?.price, 11);
   assert.equal(staleNextBucket?.asOf, advanced?.asOf);
   assert.equal(staleNextBucket?.frameBucket, bucket + 10_000);
+});
+
+test("database timestamptz offsets normalize to the canonical provider clock", () => {
+  const now = Date.now();
+  const bucket = stockDisplayFrameBucket(now);
+  const frame = parseStockDisplayFrame({
+    symbol: "SYNCTZ",
+    price: 7.555,
+    asOf: new Date(now - 500).toISOString().replace("Z", "+00:00"),
+    source: "massive_polygon_last_trade",
+    priceKind: "trade",
+    size: 10,
+    frameBucket: bucket,
+    frameId: `stock-display-frame-v1:SYNCTZ:${bucket}`,
+    frameVersion: "stock-display-frame-v1",
+  });
+  assert.ok(frame);
+  assert.equal(frame.asOf, new Date(now - 500).toISOString());
+});
+
+test("shared publication fails closed when database coordination is unavailable", async () => {
+  const priorUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const priorServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const priorServiceKey = process.env.SUPABASE_SERVICE_KEY;
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.SUPABASE_SERVICE_KEY;
+
+  try {
+    const now = Date.now();
+    await assert.rejects(
+      publishStockDisplayFrame("SYNCFAIL", {
+        price: 7.555,
+        asOf: new Date(now - 250).toISOString(),
+        source: "massive_polygon_last_trade",
+        priceKind: "trade",
+        size: 10,
+      }, now),
+      (error: unknown) =>
+        error instanceof StockDisplayFrameCoordinationError &&
+        error.issue === "not_configured",
+    );
+  } finally {
+    if (priorUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = priorUrl;
+    if (priorServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = priorServiceRoleKey;
+    if (priorServiceKey === undefined) delete process.env.SUPABASE_SERVICE_KEY;
+    else process.env.SUPABASE_SERVICE_KEY = priorServiceKey;
+  }
 });
