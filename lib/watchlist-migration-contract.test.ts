@@ -106,6 +106,10 @@ test("watchlist security migration installs the exact owner contract", () => {
   );
   assert.match(normalized, /select pol\.polname[\s\S]*drop policy %i/);
   assert.match(normalized, /pg_catalog\.aclexplode/);
+  assert.doesNotMatch(
+    normalized,
+    /aclexplode\(\s*coalesce\([^)]*'\{\}'::pg_catalog\.aclitem\[\]/,
+  );
   assert.match(
     normalized,
     /grant select, insert, update, delete on table public\.ht_labs_watchlist\s+to authenticated;/,

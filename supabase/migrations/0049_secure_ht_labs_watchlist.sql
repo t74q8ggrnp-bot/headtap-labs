@@ -273,16 +273,12 @@ begin
     from (
       select expanded.grantee
       from pg_catalog.pg_class c
-      cross join lateral pg_catalog.aclexplode(
-        coalesce(c.relacl, '{}'::pg_catalog.aclitem[])
-      ) expanded
+      cross join lateral pg_catalog.aclexplode(c.relacl) expanded
       where c.oid = table_oid
       union
       select expanded.grantee
       from pg_catalog.pg_attribute a
-      cross join lateral pg_catalog.aclexplode(
-        coalesce(a.attacl, '{}'::pg_catalog.aclitem[])
-      ) expanded
+      cross join lateral pg_catalog.aclexplode(a.attacl) expanded
       where a.attrelid = table_oid
         and a.attnum > 0
         and not a.attisdropped
@@ -458,9 +454,7 @@ begin
   if exists (
     select 1
     from pg_catalog.pg_class c
-    cross join lateral pg_catalog.aclexplode(
-      coalesce(c.relacl, '{}'::pg_catalog.aclitem[])
-    ) expanded
+    cross join lateral pg_catalog.aclexplode(c.relacl) expanded
     where c.oid = watchlist_oid
       and expanded.grantee not in (
         table_owner_oid,
@@ -474,9 +468,7 @@ begin
   if exists (
     select 1
     from pg_catalog.pg_attribute a
-    cross join lateral pg_catalog.aclexplode(
-      coalesce(a.attacl, '{}'::pg_catalog.aclitem[])
-    ) expanded
+    cross join lateral pg_catalog.aclexplode(a.attacl) expanded
     where a.attrelid = watchlist_oid
       and a.attnum > 0
       and not a.attisdropped
