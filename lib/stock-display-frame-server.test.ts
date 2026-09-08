@@ -24,6 +24,20 @@ test("one presentation bucket keeps one exact price across callers", () => {
   assert.equal(second?.frameId, `stock-display-frame-v1:SYNC1:${bucket}`);
 });
 
+test("the database winner replaces a provisional instance value in the same bucket", () => {
+  const now = Date.now();
+  const bucket = stockDisplayFrameBucket(now);
+  const provisional = selectLocalStockDisplayFrame(trade("SYNCDB", 9.71, now - 100, bucket));
+  const databaseWinner = selectLocalStockDisplayFrame(
+    trade("SYNCDB", 9.6954, now - 300, bucket),
+    "database",
+  );
+  assert.equal(provisional?.coordination, "instance_fallback");
+  assert.equal(databaseWinner?.price, 9.6954);
+  assert.equal(databaseWinner?.coordination, "database");
+  assert.equal(databaseWinner?.frameId, provisional?.frameId);
+});
+
 test("new buckets advance without allowing late responses to regress provider time", () => {
   const now = Date.now();
   const bucket = stockDisplayFrameBucket(now);

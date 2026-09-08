@@ -60,6 +60,14 @@ export function selectLocalStockDisplayFrame(
     localFrames.set(candidate.symbol, next);
     return next;
   }
+  // A valid database response is the cross-instance winner for its bucket.
+  // Replace the provisional instance candidate even when both share the same
+  // bucket; otherwise each Vercel instance keeps its own first observation.
+  if (coordination === "database" && candidate.frameBucket >= prior.frameBucket) {
+    const next = framed(candidate, "database");
+    localFrames.set(candidate.symbol, next);
+    return next;
+  }
   if (candidate.frameBucket <= prior.frameBucket) return prior;
   const next = Date.parse(candidate.asOf) >= Date.parse(prior.asOf)
     ? framed(candidate, coordination)
