@@ -3,7 +3,7 @@ import test from "node:test";
 // @ts-expect-error Node's built-in TypeScript test runner requires the source extension.
 import { scoreCryptoOpportunity } from "./opportunity-engine.ts";
 // @ts-expect-error Node's built-in TypeScript test runner requires the source extension.
-import { applyCryptoDecisionAuthority, rankCryptoDecisionFrame } from "./decision-authority.ts";
+import { applyCryptoDecisionAuthority, rankCryptoDecisionFrame, selectCryptoFrameObservations } from "./decision-authority.ts";
 
 const base = scoreCryptoOpportunity({
   productId: "TEST-USD",
@@ -180,4 +180,19 @@ test("publishes the strongest backend-ranked radar name as developing, not quali
     ["RADAR1", "RADAR2", "RADAR3"],
   );
   assert.equal(frame.radarProducts, 4);
+
+  const observed = selectCryptoFrameObservations(frame);
+  assert.deepEqual(
+    observed.map(({ opportunity, role, rank }) => ({
+      symbol: opportunity.symbol,
+      role,
+      rank,
+    })),
+    [
+      { symbol: "RADAR0", role: "radar", rank: 1 },
+      { symbol: "RADAR1", role: "radar", rank: 2 },
+      { symbol: "RADAR2", role: "radar", rank: 3 },
+      { symbol: "RADAR3", role: "radar", rank: 4 },
+    ],
+  );
 });

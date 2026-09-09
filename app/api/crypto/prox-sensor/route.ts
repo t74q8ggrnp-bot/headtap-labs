@@ -9,18 +9,13 @@ import type {
   CryptoOpportunity,
   CryptoOpportunityFeed,
 } from "@/lib/crypto/contracts";
+import { selectCryptoFrameObservations } from "@/lib/crypto/decision-authority";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
-type ObservationRole = "hero" | "contender" | "radar";
-type ObservedOpportunity = {
-  opportunity: CryptoOpportunity;
-  role: ObservationRole;
-  rank: number;
-};
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key =
@@ -35,30 +30,6 @@ function getSupabase() {
 function isAuthorized(request: Request) {
   return Boolean(CRON_SECRET) &&
     request.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
-}
-
-function selectObserved(feed: CryptoOpportunityFeed) {
-  const ranked: ObservedOpportunity[] = [
-    ...(feed.hero
-      ? [{ opportunity: feed.hero, role: "hero" as const, rank: 1 }]
-      : []),
-    ...feed.contenders.map((opportunity, index) => ({
-      opportunity,
-      role: "contender" as const,
-      rank: index + 2,
-    })),
-    ...feed.radar.map((opportunity, index) => ({
-      opportunity,
-      role: "radar" as const,
-      rank: index + 1,
-    })),
-  ];
-  const seen = new Set<string>();
-  return ranked.filter(({ opportunity }) => {
-    if (seen.has(opportunity.productId)) return false;
-    seen.add(opportunity.productId);
-    return true;
-  });
 }
 
 function decisionSnapshot(opportunity: CryptoOpportunity) {
@@ -89,8 +60,7 @@ async function persistDecisionFrame({
   observationMinute: string;
   observedAt: string;
 }) {
-  const opportunityCount =
-    Number(feed.hero !== null) + feed.contenders.length + feed.radar.length;
+  const opportunityCount = selectCryptoFrameObservations(feed).length;
   const { error } = await supabase
     .from("ht_crypto_decision_frames")
     .upsert({
@@ -247,7 +217,7 @@ async function collect() {
   ).toISOString();
   const feedState = await buildFreshCryptoOpportunityFeedState();
   const feed = feedState.feed;
-  const observed = selectObserved(feed);
+  const observed = selectCryptoFrameObservations(feed);
   const frameOpportunityCount = await persistDecisionFrame({
     supabase,
     feed,

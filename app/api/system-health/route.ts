@@ -2771,11 +2771,16 @@ export async function GET() {
       const contenders = Array.isArray(feed.contenders)
         ? feed.contenders as Array<Record<string, unknown>>
         : [];
+      const developingLeader = feed.developingLeader &&
+          typeof feed.developingLeader === "object" &&
+          !Array.isArray(feed.developingLeader)
+        ? feed.developingLeader as Record<string, unknown>
+        : null;
       const radar = Array.isArray(feed.radar)
         ? feed.radar as Array<Record<string, unknown>>
         : [];
       const actualOpportunityCount = Number(hero !== null) +
-        contenders.length + radar.length;
+        Number(developingLeader !== null) + contenders.length + radar.length;
       const expectedOpportunityCount = Number(
         cryptoFrame.expected_opportunity_count,
       );
@@ -2825,6 +2830,9 @@ export async function GET() {
           expectedOpportunityCount,
           actualOpportunityCount,
           heroSymbol: hero ? String(hero.symbol ?? "") : null,
+          developingLeaderSymbol: developingLeader
+            ? String(developingLeader.symbol ?? "")
+            : null,
           contenderCount: contenders.length,
           radarCount: radar.length,
           frameFresh,

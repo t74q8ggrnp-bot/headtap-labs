@@ -1,6 +1,7 @@
 import type {
   CryptoDiscoveryCandidate,
   CryptoOpportunity,
+  CryptoOpportunityFeed,
   CryptoShadowDiscovery,
 } from "@/lib/crypto/contracts";
 
@@ -231,4 +232,48 @@ export function rankCryptoDecisionFrame(opportunities: CryptoOpportunity[]) {
       (opportunity) => opportunity.proxIntelligence?.fresh === false,
     ).length,
   };
+}
+
+export type CryptoObservedOpportunity = {
+  opportunity: CryptoOpportunity;
+  role: "hero" | "contender" | "radar";
+  rank: number;
+};
+
+/** Preserve every displayed decision in the observation ledger, including the
+ * entry-withheld developing leader that is separated from the radar array. */
+export function selectCryptoFrameObservations(
+  feed: Pick<
+    CryptoOpportunityFeed,
+    "hero" | "developingLeader" | "contenders" | "radar"
+  >,
+) {
+  const ranked: CryptoObservedOpportunity[] = [
+    ...(feed.hero
+      ? [{ opportunity: feed.hero, role: "hero" as const, rank: 1 }]
+      : []),
+    ...feed.contenders.map((opportunity, index) => ({
+      opportunity,
+      role: "contender" as const,
+      rank: index + 2,
+    })),
+    ...(feed.developingLeader
+      ? [{
+          opportunity: feed.developingLeader,
+          role: "radar" as const,
+          rank: 1,
+        }]
+      : []),
+    ...feed.radar.map((opportunity, index) => ({
+      opportunity,
+      role: "radar" as const,
+      rank: index + (feed.developingLeader ? 2 : 1),
+    })),
+  ];
+  const seen = new Set<string>();
+  return ranked.filter(({ opportunity }) => {
+    if (seen.has(opportunity.productId)) return false;
+    seen.add(opportunity.productId);
+    return true;
+  });
 }
