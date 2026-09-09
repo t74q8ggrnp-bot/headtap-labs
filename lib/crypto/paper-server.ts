@@ -1,5 +1,6 @@
 import { coinApiPilotService, readCoinApiPilot } from "./coinapi-pilot-server";
 import { CRYPTO_PAPER_CONTRACT, type CryptoPaperDashboard, type CryptoPaperIntent, type CryptoPaperPreview } from "./paper-contracts";
+import { isCryptoCapabilityEnabled } from "./product-capabilities";
 
 export class CryptoPaperError extends Error {
   constructor(message: string, readonly status = 409) { super(message); }
@@ -24,18 +25,34 @@ async function rpc<T>(name: string, args: Record<string, unknown> = {}): Promise
   return data as T;
 }
 
+function requireCryptoPaperEntry() {
+  if (!isCryptoCapabilityEnabled("paperOrderEntryEnabled")) {
+    throw new CryptoPaperError("Crypto is currently unavailable.", 503);
+  }
+}
+
+function requireCryptoPaperRead() {
+  if (!isCryptoCapabilityEnabled("publicApiEnabled")) {
+    throw new CryptoPaperError("Crypto is currently unavailable.", 503);
+  }
+}
+
 export async function openCryptoPaper(user: string) {
+  requireCryptoPaperEntry();
   return rpc<{ ok: boolean; created: boolean }>("ht_crypto_paper_open", { p_user:user });
 }
 export async function previewCryptoPaper(user: string, intent: CryptoPaperIntent) {
+  requireCryptoPaperEntry();
   return rpc<CryptoPaperPreview>("ht_crypto_paper_preview", {
     p_user:user, p_market:intent.marketId, p_side:intent.side, p_quantity:intent.quantity, p_limit:intent.limitPrice,
   });
 }
 export async function previewCryptoPaperBudget(user: string, market: string, amount: string, limit: string) {
+  requireCryptoPaperEntry();
   return rpc<CryptoPaperPreview>("ht_crypto_paper_preview_budget",{p_user:user,p_market:market,p_amount:amount,p_limit:limit});
 }
 export async function submitCryptoPaper(user: string, intent: CryptoPaperIntent, clientId: string, previewCycleId: string) {
+  requireCryptoPaperEntry();
   // The server and database recalculate availability; client preview totals are ignored.
   return rpc<{ok:boolean; orderId:string; status:string; duplicate:boolean}>("ht_crypto_paper_submit", {
     p_user:user, p_client:clientId, p_market:intent.marketId, p_side:intent.side,
@@ -43,6 +60,7 @@ export async function submitCryptoPaper(user: string, intent: CryptoPaperIntent,
   });
 }
 export async function cancelCryptoPaper(user: string, orderId: string) {
+  requireCryptoPaperEntry();
   return rpc<{ok:boolean}>("ht_crypto_paper_cancel", { p_user:user, p_order:orderId });
 }
 
@@ -52,6 +70,7 @@ type StoredDashboard = Pick<CryptoPaperDashboard,"account"|"enabled"|"reservedCa
 
 /** Read-only: account, display and chart all use one shared saved publication. */
 export async function readCryptoPaper(user: string): Promise<CryptoPaperDashboard> {
+  requireCryptoPaperRead();
   const [stored, feed] = await Promise.all([
     rpc<StoredDashboard>("ht_crypto_paper_dashboard", { p_user:user }), readCoinApiPilot(),
   ]);
@@ -76,6 +95,16 @@ export async function readCryptoPaper(user: string): Promise<CryptoPaperDashboar
 /** Called only by the existing authenticated cron AFTER collection. No provider
  * calls, no trade proposals: fills only explicit outstanding user orders. */
 export async function matchCryptoPaperOrders() {
+  if (!isCryptoCapabilityEnabled("paperMatchingEnabled")) {
+    return {
+      ok: true,
+      status: "shelved",
+      schemaReady: true,
+      processed: 0,
+      fills: 0,
+      providerRequests: 0,
+    };
+  }
   const db = coinApiPilotService();
   const started = Date.now();
   const { data, error } = await db.from("ht_crypto_paper_orders").select("id")

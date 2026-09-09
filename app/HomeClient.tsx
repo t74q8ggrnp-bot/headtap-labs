@@ -32,9 +32,7 @@ import {
   useOpportunityFeed,
   type OpportunityPayload,
 } from "./hooks/useOpportunityFeed";
-import { useCryptoOpportunityFeed } from "./hooks/useCryptoOpportunityFeed";
 import { useWatchlist } from "./hooks/useWatchlist";
-import type { CryptoOpportunityFeed } from "@/lib/crypto/contracts";
 import {
   getOpportunityPresentation,
   normalizeOpportunity,
@@ -49,21 +47,11 @@ const ScannerGrid = dynamic(() => import("./components/desktop/ScannerGrid"), {
     <div className="mx-auto h-48 max-w-7xl animate-pulse rounded-3xl border border-white/5 bg-white/[0.02]" />
   ),
 });
-const CryptoMomentumPreview = dynamic(
-  () => import("./components/crypto/CryptoMomentumPreview"),
-  {
-    loading: () => (
-      <div className="h-44 animate-pulse rounded-3xl border border-cyan-400/10 bg-cyan-500/[0.025]" />
-    ),
-  },
-);
-
 type ScannerFilter = "all" | "hot" | "bullish" | "watchlist";
 
 type HomeClientProps = {
   initialMomentumPayload: OpportunityPayload | null;
   initialBeforeCrowdPayload: OpportunityPayload | null;
-  initialCryptoFeed: CryptoOpportunityFeed | null;
 };
 
 type NewsItem = {
@@ -202,7 +190,6 @@ const scannerFilters: { label: string; value: ScannerFilter }[] = [
 export default function HomeClient({
   initialMomentumPayload,
   initialBeforeCrowdPayload,
-  initialCryptoFeed,
 }: HomeClientProps) {
   const searchParams = useSearchParams();
   const { homeTab: mobileTab, setHomeTab: setMobileTab } = useMobileAppNavigation();
@@ -337,12 +324,6 @@ export default function HomeClient({
     momentum: initialMomentumPayload,
     beforeCrowd: initialBeforeCrowdPayload,
   });
-  const {
-    feed: cryptoFeed,
-    error: cryptoError,
-    loading: cryptoLoading,
-  } = useCryptoOpportunityFeed(initialCryptoFeed);
-
   // Bull/Bear case state — generated when top conviction ticker changes
   const [bullBearData, setBullBearData] = useState<BullBearAnalysis | null>(null);
   const [bullBearLoading, setBullBearLoading] = useState(false);
@@ -1530,9 +1511,6 @@ export default function HomeClient({
                     <Link href="/news-feed" className="transition hover:text-white">
                       News
                     </Link>
-                    <Link href="/crypto" className="text-cyan-400 transition hover:text-white">
-                      Crypto
-                    </Link>
                     <Link href="/paper" className="transition hover:text-white">
                       Paper
                     </Link>
@@ -1821,14 +1799,6 @@ export default function HomeClient({
 
 
 
-
-        <section id="crypto-momentum" className="mx-auto hidden max-w-[1488px] px-3 py-3 md:block md:px-6">
-          <CryptoMomentumPreview
-            feed={cryptoFeed}
-            loading={cryptoLoading}
-            error={cryptoError}
-          />
-        </section>
 
         <section id="watchlist" className="mx-auto max-w-7xl px-5 py-5">
           <motion.div
@@ -2317,9 +2287,6 @@ export default function HomeClient({
         apiBeforeCrowdPick={apiBeforeCrowdPick}
         btcFramework={btcFramework}
         btcTrace={btcTrace}
-        cryptoFeed={cryptoFeed}
-        cryptoLoading={cryptoLoading}
-        cryptoError={cryptoError}
         mobileScannerReads={apiFullRankedList}
         openReadTicker={openReadTicker}
         watchlistStocks={watchlistStocks}

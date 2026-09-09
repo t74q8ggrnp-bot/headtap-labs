@@ -10,6 +10,15 @@ manufacture market-data freshness.
 sync work should stop if its `contractVersion` or Paper Trading contract is
 newer than the app understands.
 
+## Crypto product state
+
+Crypto is intentionally shelved under `crypto-product-shelving-v1`. Native
+clients must require `crypto.status` to be `shelved`, require every published
+crypto capability to be `false`, expose no crypto endpoint links, and render no
+crypto navigation, screen, placeholder, promotion, or paper action. A saved or
+resumed crypto URL is expected to fail closed at the web boundary. Reactivation
+requires a reviewed web contract change before any native surface returns.
+
 ## Paper Trading v2
 
 The authoritative API is `POST /api/paper-trading/orders` under
@@ -80,8 +89,10 @@ Before copying or syncing native assets:
 2. `npm run lint`, `npx tsc --noEmit`, all Node tests, and `npm run build` must
    pass;
 3. `/api/mobile-capabilities` must return HTTP 200;
-4. `/api/system-health` must return healthy;
-5. the Paper Trading matcher heartbeat must be current; and
-6. the first active-session Massive validation must confirm real-time
+4. its crypto state must match the intentionally shelved contract above;
+5. `/api/system-health` must return healthy and report crypto as
+   `intentionally_disabled`, not stale or failed;
+6. the stock Paper Trading matcher heartbeat must be current; and
+7. the first active-session Massive validation must confirm real-time
    snapshots, trades, NBBO, second aggregates, ProX microstructure, and
    canonical persistence.

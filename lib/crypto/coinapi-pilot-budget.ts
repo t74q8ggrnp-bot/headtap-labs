@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+// @ts-expect-error Node's strip-types test runner requires source extensions.
+import { CRYPTO_PRODUCT_CAPABILITIES, assertCryptoCapabilitiesEnabled, type CryptoProductCapabilities } from "./product-capabilities.ts";
 
 export type PilotUsageLedger = {
   reserve(id: string, path: string): Promise<boolean>;
@@ -7,10 +9,15 @@ export type PilotUsageLedger = {
 
 /** Every provider request needs a durable reservation, including metadata and failures. */
 export function budgetedCoinApiFetch(ledger: PilotUsageLedger, fetcher: typeof fetch = fetch,
-  now = Date.now): typeof fetch {
+  now = Date.now,
+  capabilities: CryptoProductCapabilities = CRYPTO_PRODUCT_CAPABILITIES): typeof fetch {
   const startedAt = now();
   let stopped = false;
   return async (input, init) => {
+    assertCryptoCapabilitiesEnabled(
+      "coinApiResearchCollectionEnabled",
+      capabilities,
+    );
     const url = new URL(String(input));
     if (url.origin !== "https://rest.coinapi.io" || stopped || now() - startedAt > 40_000) {
       throw new Error("CoinAPI pilot request blocked.");

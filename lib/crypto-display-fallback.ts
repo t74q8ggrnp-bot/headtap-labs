@@ -1,10 +1,12 @@
 import "server-only";
 import { mergeVerifiedTradeIntoBars, normalizeMarketBars, type MarketChartDisplayQuote } from "@/lib/market-chart";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
+import { assertCryptoCapabilitiesEnabled } from "@/lib/crypto/product-capabilities";
 
 // Preserve coverage of existing Coinbase USD listings that Massive explicitly
 // does not carry. Never invoke on Massive timeouts, authorization or rate limits.
 async function coinbase(product: string, resource: "ticker" | "candles") {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   if (!/^[A-Z0-9]{1,20}-USD$/.test(product)) throw new Error("Invalid USD product");
   const response = await fetch(`https://api.exchange.coinbase.com/products/${encodeURIComponent(product)}/${resource}${resource === "candles" ? "?granularity=300" : ""}`, {
     cache: "no-store", signal: AbortSignal.timeout(10_000), headers: { Accept: "application/json" },

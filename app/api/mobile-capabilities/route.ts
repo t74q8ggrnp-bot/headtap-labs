@@ -9,10 +9,19 @@ import {
   HT_REQUIRED_MIGRATIONS,
   HT_RUNTIME_CONTRACT_VERSION,
 } from "@/lib/runtime-capabilities";
+import {
+  CRYPTO_PRODUCT_CAPABILITIES,
+  CRYPTO_PRODUCT_CAPABILITY_POLICY_VERSION,
+  cryptoProviderCallsAreProhibited,
+  isCryptoProductIntentionallyShelved,
+} from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const cryptoShelved = isCryptoProductIntentionallyShelved();
+  const cryptoProviderCallsAllowed = !cryptoProviderCallsAreProhibited();
+
   return NextResponse.json({
     ok: true,
     contractVersion: HT_RUNTIME_CONTRACT_VERSION,
@@ -43,6 +52,14 @@ export async function GET() {
         compatibleAction: { action: PAPER_CLOSE_ACTION },
         serverDerivesSideAndFullQuantity: true,
       },
+    },
+    crypto: {
+      status: cryptoShelved ? "shelved" : "active_or_partial",
+      policyVersion: CRYPTO_PRODUCT_CAPABILITY_POLICY_VERSION,
+      capabilities: CRYPTO_PRODUCT_CAPABILITIES,
+      endpointLinks: {},
+      providerCallsAllowed: cryptoProviderCallsAllowed,
+      reactivationRequiresReviewedCodeChange: true,
     },
     requiredMigrations: HT_REQUIRED_MIGRATIONS,
     scoring: {

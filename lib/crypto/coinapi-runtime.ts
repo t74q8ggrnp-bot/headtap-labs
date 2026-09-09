@@ -1,3 +1,5 @@
+import { isCryptoCapabilityEnabled } from "./product-capabilities";
+
 /**
  * Owner-approved temporary cost isolation.
  *
@@ -6,8 +8,12 @@
  * be an explicit reviewed code change after its request economics are fixed.
  */
 export const COINAPI_RESEARCH_RUNTIME = Object.freeze({
-  paused: true,
+  paused: !isCryptoCapabilityEnabled("coinApiResearchCollectionEnabled"),
   reason: "owner_paused_for_cost_and_query_audit_2026_09_08",
-  providerRequestsAllowed: false,
-  archiveMaintenanceAllowed: false,
+  providerRequestsAllowed: isCryptoCapabilityEnabled(
+    "coinApiResearchCollectionEnabled",
+  ),
+  archiveMaintenanceAllowed: isCryptoCapabilityEnabled(
+    "coinApiEvidenceMaintenanceEnabled",
+  ),
 });

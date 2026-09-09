@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
 import { legacyCryptoOutcomeQuarantine } from "@/lib/crypto/outcome-integrity";
+import { withCryptoCapabilities } from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -29,7 +30,7 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-export async function GET(req: Request) {
+async function getCryptoOutcomeDiagnostics(req: Request) {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -77,3 +78,8 @@ export async function GET(req: Request) {
     );
   }
 }
+
+export const GET = withCryptoCapabilities(
+  "publicApiEnabled",
+  getCryptoOutcomeDiagnostics,
+);

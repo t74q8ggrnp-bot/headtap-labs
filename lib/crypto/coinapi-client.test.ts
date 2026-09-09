@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node strip-types requires source extensions.
 import { createCoinApiClient } from "./coinapi-client.ts";
+// @ts-expect-error Node strip-types requires source extensions.
+import { createCryptoProductCapabilities } from "./product-capabilities.ts";
 
 const path = "/v1/quotes/COINBASE_SPOT_BTC_USD/current";
+const capabilities = createCryptoProductCapabilities({
+  coinApiResearchCollectionEnabled: true,
+});
 test("CoinAPI credentials stay in headers on the fixed provider origin", async () => {
-  const client = createCoinApiClient({ apiKey: "test-only-placeholder", fetcher: async (url, init) => {
+  const client = createCoinApiClient({ apiKey: "test-only-placeholder", capabilities, fetcher: async (url, init) => {
     assert.equal(new URL(String(url)).origin, "https://rest.coinapi.io");
     assert.ok(!String(url).includes("test-only-placeholder"));
     assert.equal(new Headers(init?.headers).get("X-CoinAPI-Key"), "test-only-placeholder");
@@ -21,7 +26,7 @@ test("CoinAPI credentials stay in headers on the fixed provider origin", async (
 
 test("concurrent consumers share one request and cached values cannot be mutated", async () => {
   let calls = 0, now = 0;
-  const client = createCoinApiClient({ apiKey: "test", now: () => now, fetcher: async () => {
+  const client = createCoinApiClient({ apiKey: "test", capabilities, now: () => now, fetcher: async () => {
     calls++; return Response.json({ nested: { price: calls } });
   } });
   const [one, two] = await Promise.all([client.get(path, 1_000), client.get(path, 1_000)]) as Array<{ nested: { price: number } }>;
@@ -36,7 +41,7 @@ test("concurrent consumers share one request and cached values cannot be mutated
 for (const status of [401, 403, 429]) {
   test(`${status} opens a local circuit without exposing error bodies or retrying`, async () => {
     let calls = 0;
-    const client = createCoinApiClient({ apiKey: "test", fetcher: async () => {
+    const client = createCoinApiClient({ apiKey: "test", capabilities, fetcher: async () => {
       calls++; return new Response("sensitive-provider-body", { status });
     } });
     await assert.rejects(client.get(path), error => error instanceof Error && !error.message.includes("sensitive-provider-body"));
@@ -47,7 +52,7 @@ for (const status of [401, 403, 429]) {
 
 test("manual diagnostic request allowance blocks additional network requests", async () => {
   let calls = 0;
-  const client = createCoinApiClient({ apiKey: "test", maxRequests: 1, fetcher: async () => {
+  const client = createCoinApiClient({ apiKey: "test", capabilities, maxRequests: 1, fetcher: async () => {
     calls++; return Response.json({});
   } });
   await client.get(path);
@@ -57,7 +62,7 @@ test("manual diagnostic request allowance blocks additional network requests", a
 
 test("malformed response and connection errors do not echo provider secrets", async () => {
   for (const fetcher of [async () => new Response("sensitive-provider-body"), async () => { throw new Error("sensitive-provider-body"); }]) {
-    const client = createCoinApiClient({ apiKey: "test", fetcher });
+    const client = createCoinApiClient({ apiKey: "test", capabilities, fetcher });
     await assert.rejects(client.get(path), error => error instanceof Error && !error.message.includes("sensitive-provider-body"));
   }
 });

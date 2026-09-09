@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { buildFreshCryptoOpportunityFeedState } from "@/lib/crypto/coinbase-public";
 import { loadLatestCryptoDecisionFeed } from "@/lib/crypto/decision-frame";
+import { withCryptoCapabilities } from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET() {
+async function getCryptoDiscovery() {
   try {
     const feed = await loadLatestCryptoDecisionFeed() ??
       (await buildFreshCryptoOpportunityFeedState()).feed;
@@ -35,3 +36,8 @@ export async function GET() {
     );
   }
 }
+
+export const GET = withCryptoCapabilities(
+  "publicApiEnabled",
+  getCryptoDiscovery,
+);

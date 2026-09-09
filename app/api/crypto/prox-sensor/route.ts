@@ -10,6 +10,10 @@ import type {
   CryptoOpportunityFeed,
 } from "@/lib/crypto/contracts";
 import { selectCryptoFrameObservations } from "@/lib/crypto/decision-authority";
+import {
+  assertCryptoCapabilitiesEnabled,
+  withCryptoCapabilities,
+} from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -209,6 +213,7 @@ async function persistShadowDiscovery({
 }
 
 async function collect() {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   const supabase = getSupabase();
   const now = new Date();
   const observedAt = now.toISOString();
@@ -320,7 +325,7 @@ async function collect() {
   };
 }
 
-export async function GET(request: Request) {
+async function getCryptoProxSensor(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -341,3 +346,8 @@ export async function GET(request: Request) {
     );
   }
 }
+
+export const GET = withCryptoCapabilities(
+  "providerCollectionEnabled",
+  getCryptoProxSensor,
+);

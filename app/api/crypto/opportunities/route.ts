@@ -4,11 +4,12 @@ import {
   loadLatestCryptoDecisionFeed,
   makeCryptoFrameSafeForStaleDisplay,
 } from "@/lib/crypto/decision-frame";
+import { withCryptoCapabilities } from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET() {
+async function getCryptoOpportunities() {
   try {
     const materialized = await loadLatestCryptoDecisionFeed();
     let feed = materialized;
@@ -42,3 +43,8 @@ export async function GET() {
     );
   }
 }
+
+export const GET = withCryptoCapabilities(
+  "publicApiEnabled",
+  getCryptoOpportunities,
+);

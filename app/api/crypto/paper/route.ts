@@ -2,6 +2,7 @@ import { checkApiRateLimit } from "@/lib/api-rate-limit";
 import { authenticatePaperRequest } from "@/lib/paper-trading/server";
 import { CRYPTO_PAPER_CONTRACT, parseCryptoPaperIntent, validCryptoPaperUuid } from "@/lib/crypto/paper-contracts";
 import { CryptoPaperError, cancelCryptoPaper, openCryptoPaper, previewCryptoPaper, previewCryptoPaperBudget, readCryptoPaper, submitCryptoPaper } from "@/lib/crypto/paper-server";
+import { withCryptoCapabilities } from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -44,5 +45,8 @@ async function handle(request: Request) {
   }
 }
 
-export const GET = handle;
-export const POST = handle;
+export const GET = withCryptoCapabilities("publicApiEnabled", handle);
+export const POST = withCryptoCapabilities(
+  ["publicApiEnabled", "paperOrderEntryEnabled"],
+  handle,
+);

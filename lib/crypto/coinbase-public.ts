@@ -26,6 +26,7 @@ import {
   applyCryptoDecisionAuthority,
   rankCryptoDecisionFrame,
 } from "@/lib/crypto/decision-authority";
+import { assertCryptoCapabilitiesEnabled } from "@/lib/crypto/product-capabilities";
 
 const COINBASE_ORIGIN = "https://api.exchange.coinbase.com";
 const PROVIDER_BATCH_SIZE = 8;
@@ -98,6 +99,7 @@ const finite = (value: unknown) => {
 };
 
 async function fetchCoinbase<T>(path: string, revalidate: number): Promise<T> {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   const response = await fetch(`${COINBASE_ORIGIN}${path}`, {
     headers: {
       Accept: "application/json",
@@ -414,18 +416,22 @@ const buildCachedCryptoOpportunityFeedState = unstable_cache(
 );
 
 export async function buildCryptoOpportunityFeedState() {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   return buildCachedCryptoOpportunityFeedState();
 }
 
 export async function buildFreshCryptoOpportunityFeedState() {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   return buildUncachedCryptoOpportunityFeedState();
 }
 
 export async function buildCryptoOpportunityFeed() {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   return (await buildCachedCryptoOpportunityFeedState()).feed;
 }
 
 export async function loadCoinbaseCurrentPrices(productIds: string[]) {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   const uniqueProductIds = [...new Set(productIds.map((id) => id.trim()).filter(Boolean))];
   const prices = new Map<string, number>();
   for (let index = 0; index < uniqueProductIds.length; index += PROVIDER_BATCH_SIZE) {

@@ -18,7 +18,7 @@ export default function SupportPage() {
       <section>
         <h2>Contact support</h2>
         <p>
-          Email <a href="mailto:support@gethtlabs.com">support@gethtlabs.com</a> and include a short description of the problem. If possible, include the screen you were using, the ticker or crypto asset involved, and whether you were on the website or iPhone app.
+          Email <a href="mailto:support@gethtlabs.com">support@gethtlabs.com</a> and include a short description of the problem. If possible, include the screen you were using, the ticker or instrument involved, and whether you were on the website or iPhone app.
         </p>
         <p>Do not email passwords, authentication codes, payment information, brokerage credentials, or other sensitive information.</p>
       </section>

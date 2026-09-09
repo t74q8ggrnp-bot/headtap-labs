@@ -20,6 +20,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
+import vercelConfig from "@/vercel.json";
 import { assessCryptoPaperHealth } from "@/lib/crypto/paper-health";
 import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
@@ -65,6 +66,11 @@ import { assessCryptoEvidenceHealth, assessPausedCryptoEvidenceHealth, isObserva
 import { COINAPI_RESEARCH_RUNTIME } from "@/lib/crypto/coinapi-runtime";
 import { readCryptoOutcomeProcessingEvidence } from "@/lib/crypto/outcome-processing-health";
 import { probeDatabaseHealth } from "@/lib/database-health-probe";
+import {
+  buildShelvedCryptoHealthCheck,
+  isCryptoProductIntentionallyShelved,
+  type CryptoShelvingOperationalEvidence,
+} from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -87,6 +93,11 @@ const ACTIVE_MAX_LEDGER_AGE_HOURS = 12 / 60;
 const MAX_CRYPTO_PROX_AGE_HOURS = 15 / 60;
 const CRYPTO_OUTCOME_GRACE_MINUTES = 10;
 const MAX_PAPER_MATCH_AGE_HOURS = 6 / 60;
+const CONFIGURED_CRYPTO_SCHEDULES = Object.freeze(
+  vercelConfig.crons
+    .map((cron) => cron.path)
+    .filter((path) => path.startsWith("/api/crypto/")),
+);
 
 type HealthCheck = {
   name: string;
@@ -154,6 +165,78 @@ function getSupabase() {
   }
 
   return createClient(supabaseUrl, supabaseKey);
+}
+
+function latestIsoTimestamp(...values: unknown[]) {
+  const timestamps = values
+    .map((value) => typeof value === "string" ? Date.parse(value) : NaN)
+    .filter(Number.isFinite);
+  return timestamps.length > 0
+    ? new Date(Math.max(...timestamps)).toISOString()
+    : null;
+}
+
+async function readShelvedCryptoOperationalEvidence(
+  supabase: NonNullable<ReturnType<typeof getSupabase>>,
+): Promise<CryptoShelvingOperationalEvidence> {
+  const [publicCollectionResult, coinApiRequestResult, coinApiControlResult] =
+    await Promise.allSettled([
+      supabase
+        .from("ht_crypto_prox_collection_runs")
+        .select("observed_at")
+        .order("observed_at", { ascending: false })
+        .limit(1)
+        .abortSignal(AbortSignal.timeout(3_000))
+        .maybeSingle(),
+      supabase
+        .from("ht_coinapi_pilot_requests")
+        .select("reserved_at")
+        .order("reserved_at", { ascending: false })
+        .limit(1)
+        .abortSignal(AbortSignal.timeout(3_000))
+        .maybeSingle(),
+      supabase
+        .from("ht_coinapi_pilot_control")
+        .select("enabled")
+        .eq("id", "global")
+        .abortSignal(AbortSignal.timeout(3_000))
+        .maybeSingle(),
+    ]);
+
+  const publicCollection = publicCollectionResult.status === "fulfilled" &&
+      !publicCollectionResult.value.error
+    ? publicCollectionResult.value.data as { observed_at?: unknown } | null
+    : null;
+  const coinApiRequest = coinApiRequestResult.status === "fulfilled" &&
+      !coinApiRequestResult.value.error
+    ? coinApiRequestResult.value.data as { reserved_at?: unknown } | null
+    : null;
+  const coinApiControl = coinApiControlResult.status === "fulfilled" &&
+      !coinApiControlResult.value.error
+    ? coinApiControlResult.value.data as { enabled?: unknown } | null
+    : null;
+  const latestPublicCollectionAt = latestIsoTimestamp(publicCollection?.observed_at);
+  const latestCoinApiRequestAt = latestIsoTimestamp(coinApiRequest?.reserved_at);
+  const completeReads = [
+    publicCollectionResult,
+    coinApiRequestResult,
+    coinApiControlResult,
+  ].filter((result) => result.status === "fulfilled" && !result.value.error).length;
+
+  return {
+    configuredCryptoSchedules: CONFIGURED_CRYPTO_SCHEDULES,
+    activityReadStatus: completeReads === 3 ? "verified" : "partial",
+    latestPublicCollectionAt,
+    latestCoinApiRequestAt,
+    latestRecordedProviderActivityAt: latestIsoTimestamp(
+      latestPublicCollectionAt,
+      latestCoinApiRequestAt,
+    ),
+    coinApiDatabaseCollectionEnabled: typeof coinApiControl?.enabled === "boolean"
+      ? coinApiControl.enabled
+      : null,
+    checkedAt: new Date().toISOString(),
+  };
 }
 
 type ProxRoutedObservationHealthRow = {
@@ -234,9 +317,47 @@ export async function GET() {
       : "Missing POLYGON_API_KEY.",
   });
 
+  // This state is code-owned and remains verifiable even when the database is
+  // unavailable. Emit it once, ahead of every early-returning infrastructure
+  // probe, so an operator can always distinguish shelving from an outage.
+  const cryptoIntentionallyShelved = isCryptoProductIntentionallyShelved();
+  const pendingCryptoOperationalEvidence: CryptoShelvingOperationalEvidence = {
+    configuredCryptoSchedules: CONFIGURED_CRYPTO_SCHEDULES,
+    activityReadStatus: "pending_database_probe",
+    latestPublicCollectionAt: null,
+    latestCoinApiRequestAt: null,
+    latestRecordedProviderActivityAt: null,
+    coinApiDatabaseCollectionEnabled: null,
+    checkedAt: null,
+  };
+  const cryptoHealthCheckIndex = cryptoIntentionallyShelved
+    ? checks.length
+    : null;
+  if (cryptoIntentionallyShelved) {
+    checks.push(buildShelvedCryptoHealthCheck(
+      undefined,
+      pendingCryptoOperationalEvidence,
+    ));
+  }
+
+  const updateShelvedCryptoOperationalEvidence = (
+    evidence: CryptoShelvingOperationalEvidence,
+  ) => {
+    if (cryptoHealthCheckIndex === null) return;
+    checks[cryptoHealthCheckIndex] = buildShelvedCryptoHealthCheck(
+      undefined,
+      evidence,
+    );
+  };
+
   const supabase = getSupabase();
 
   if (!supabase) {
+    updateShelvedCryptoOperationalEvidence({
+      ...pendingCryptoOperationalEvidence,
+      activityReadStatus: "unavailable",
+      checkedAt: new Date().toISOString(),
+    });
     return NextResponse.json({
       ok: false,
       status: "unhealthy",
@@ -263,12 +384,17 @@ export async function GET() {
     detail: databaseProbe,
   });
   if (!databaseProbe.ok) {
+    updateShelvedCryptoOperationalEvidence({
+      ...pendingCryptoOperationalEvidence,
+      activityReadStatus: "unavailable",
+      checkedAt: new Date().toISOString(),
+    });
     return NextResponse.json({
       ok: false,
       status: "needs_attention",
       message: "Database availability failed. Full pipeline health could not be verified.",
       auditComplete: false,
-      unverified: ["canonical", "prox", "crypto", "paper_trading", "ht_agent", "massive_entitlement"],
+      unverified: ["canonical", "prox", "paper_trading", "ht_agent", "massive_entitlement"],
       summary: {
         latestTicker: null,
         latestSignalAt: null,
@@ -279,6 +405,12 @@ export async function GET() {
       warnings: [],
       timestamp: new Date().toISOString(),
     }, { status: 503, headers: { "Cache-Control": "private, no-store", "Retry-After": "30" } });
+  }
+
+  if (cryptoIntentionallyShelved) {
+    updateShelvedCryptoOperationalEvidence(
+      await readShelvedCryptoOperationalEvidence(supabase),
+    );
   }
 
   if (hasPolygonKey) {
@@ -2519,6 +2651,8 @@ export async function GET() {
   // A source is closed only after a per-record audit and intact protections.
   // CoinAPI collection/outcomes are separate HARD checks, never assumed healthy
   // merely because old data was quarantined or a cron returned HTTP 200.
+  let cryptoWarnings: ReturnType<typeof assessCryptoEvidenceHealth>["warnings"] = [];
+  if (!cryptoIntentionallyShelved) {
   const cryptoConfiguration = {
     production: process.env.VERCEL_ENV === "production",
     environmentEnabled: process.env.COINAPI_PILOT_ENABLED === "true",
@@ -3018,6 +3152,9 @@ export async function GET() {
     });
   }
 
+  cryptoWarnings = cryptoEvidence.warnings;
+  }
+
   // HT Agent is an isolated paper-only consumer. Schema integrity is always
   // required after migration 0030; cycle freshness is required only for
   // unlocked active profiles, so Observe-mode onboarding does not make the
@@ -3162,7 +3299,7 @@ export async function GET() {
     },
     checks,
     warnings: [
-      ...cryptoEvidence.warnings,
+      ...cryptoWarnings,
       ...checks.flatMap((check) => {
         if (check.name !== "prox_realtime_microstructure_observations") return [];
         const detail = check.detail as { activeMarketSession?: boolean; sourceCoverage?: ReturnType<typeof describeProxMicrostructureCoverage> } | undefined;

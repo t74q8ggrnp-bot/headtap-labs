@@ -8,6 +8,7 @@ import type {
   CryptoShadowDiscovery,
 } from "@/lib/crypto/contracts";
 import { isAllowedMainstreamCryptoAsset } from "@/lib/crypto/asset-policy";
+import { assertCryptoCapabilitiesEnabled } from "@/lib/crypto/product-capabilities";
 
 const KRAKEN_ORIGIN = "https://api.kraken.com";
 const CRYPTO_COM_ORIGIN = "https://api.crypto.com/exchange/v1";
@@ -184,6 +185,7 @@ function safeErrorMessage(error: unknown) {
 }
 
 async function fetchPublicJson<T>(url: string, revalidate: number): Promise<T> {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
@@ -402,6 +404,7 @@ async function loadCoinGeckoAttention(): Promise<AttentionLoadResult> {
 }
 
 export async function loadCryptoDiscoverySources(): Promise<CryptoDiscoverySources> {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   const [kraken, cryptoCom, attention] = await Promise.all([
     loadKrakenMarkets(),
     loadCryptoComMarkets(),

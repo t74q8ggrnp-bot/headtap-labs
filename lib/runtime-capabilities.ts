@@ -1,4 +1,4 @@
-export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v3-market-workspace";
+export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v4-crypto-shelved";
 
 export const HT_REQUIRED_MIGRATIONS = Object.freeze([
   "0024_manual_paper_trading.sql",

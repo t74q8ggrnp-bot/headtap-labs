@@ -3,10 +3,12 @@ import { buildMassiveCryptoChart } from "@/lib/massive-crypto-chart";
 import type { MarketChartDisplayQuote } from "@/lib/market-chart";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
 import { fetchCoverageFallbackChart, fetchCoverageFallbackQuote } from "@/lib/crypto-display-fallback";
+import { assertCryptoCapabilitiesEnabled } from "@/lib/crypto/product-capabilities";
 
 const ORIGIN = "https://api.massive.com";
 class MassivePairUnavailable extends Error {}
 export async function fetchMassiveCryptoQuotes(products: string[]) {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   const key = process.env.MASSIVE_CRYPTO_API_KEY?.trim() || process.env.POLYGON_API_KEY?.trim();
   if (!key) throw new Error("Massive crypto is not configured.");
   const tickers = products.map(product => `X:${product.replace(/-USD$/, "USD")}`);
@@ -39,6 +41,7 @@ export async function fetchMassiveCryptoQuotes(products: string[]) {
 }
 
 export async function fetchMassiveCryptoChart(symbol: string, productId: string) {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   if (!/^[A-Z0-9]{1,20}$/.test(symbol) || productId !== `${symbol}-USD`) {
     throw new Error("A matching, unambiguous USD crypto product is required.");
   }

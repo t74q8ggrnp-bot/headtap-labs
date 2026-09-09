@@ -23,6 +23,10 @@ import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
 import { getStockMarketClock, stockHistoryLabel } from "@/lib/stock-market-session";
 import { fetchMassiveCryptoChart } from "@/lib/massive-crypto";
+import {
+  areCryptoCapabilitiesEnabled,
+  cryptoUnavailableResponse,
+} from "@/lib/crypto/product-capabilities";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
 import { publishStockDisplayFrame } from "@/lib/stock-display-frame-server";
 import {
@@ -428,6 +432,15 @@ export async function GET(request: Request) {
     | MarketChartAsset
     | undefined;
   const symbol = searchParams.get("symbol")?.trim().toUpperCase() ?? "";
+  if (
+    asset === "crypto" &&
+    !areCryptoCapabilitiesEnabled([
+      "publicApiEnabled",
+      "providerCollectionEnabled",
+    ])
+  ) {
+    return cryptoUnavailableResponse();
+  }
   const requestedSessionScope = searchParams.get("sessionScope");
   if (
     requestedSessionScope !== null &&

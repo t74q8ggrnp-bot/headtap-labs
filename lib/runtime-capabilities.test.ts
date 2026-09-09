@@ -16,7 +16,7 @@ test("publishes the release-approved stock refresh cadences", () => {
 test("keeps provider time authoritative and closed stock data non-live", () => {
   assert.equal(
     HT_RUNTIME_CONTRACT_VERSION,
-    "ht-runtime-capabilities-v3-market-workspace",
+    "ht-runtime-capabilities-v4-crypto-shelved",
   );
   assert.equal(HT_MARKET_DATA_AUTHORITY.freshnessTimestamp, "provider_market_time");
   assert.equal(HT_MARKET_DATA_AUTHORITY.processingTimestampsAreFreshnessAuthority, false);

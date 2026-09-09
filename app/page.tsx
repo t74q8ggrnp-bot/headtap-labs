@@ -1,20 +1,15 @@
 import { Suspense } from "react";
 import HomeClient from "./HomeClient";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
-import {
-  loadLatestCryptoDecisionFeed,
-  makeCryptoFrameSafeForStaleDisplay,
-} from "@/lib/crypto/decision-frame";
 import { compactHomeInitialOpportunityPayload } from "@/lib/home-initial-payload";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [momentumResult, beforeCrowdResult, cryptoResult] =
+  const [momentumResult, beforeCrowdResult] =
     await Promise.allSettled([
       getRollingCanonicalDecisionFrame("momentum"),
       getRollingCanonicalDecisionFrame("before_crowd"),
-      loadLatestCryptoDecisionFeed({ allowStale: true }),
     ]);
 
   if (momentumResult.status === "rejected") {
@@ -29,15 +24,6 @@ export default async function Home() {
       beforeCrowdResult.reason,
     );
   }
-  if (cryptoResult.status === "rejected") {
-    console.error("[home] initial Crypto snapshot failed:", cryptoResult.reason);
-  }
-  const initialCryptoFeed =
-    cryptoResult.status === "fulfilled" && cryptoResult.value
-      ? cryptoResult.value.decisionFrame.fresh
-        ? cryptoResult.value
-        : makeCryptoFrameSafeForStaleDisplay(cryptoResult.value)
-      : null;
   const initialMomentumPayload =
     momentumResult.status === "fulfilled"
       ? compactHomeInitialOpportunityPayload(momentumResult.value, 15)
@@ -52,7 +38,6 @@ export default async function Home() {
       <HomeClient
         initialMomentumPayload={initialMomentumPayload}
         initialBeforeCrowdPayload={initialBeforeCrowdPayload}
-        initialCryptoFeed={initialCryptoFeed}
       />
     </Suspense>
   );

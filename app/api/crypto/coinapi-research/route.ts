@@ -1,10 +1,11 @@
 import { checkApiRateLimit } from "@/lib/api-rate-limit";
 import { coinApiPilotReaderAuthorized, readCoinApiPilot } from "@/lib/crypto/coinapi-pilot-server";
+import { withCryptoCapabilities } from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+async function getCoinApiResearch(request: Request) {
   const rate = checkApiRateLimit(request, { namespace: "coinapi-research-read", limit: 20, windowMs: 60_000 });
   const headers = { "Cache-Control": "private, no-store", ...rate.headers };
   if (!rate.allowed) return Response.json({ error: "Too many requests." }, { status: 429, headers });
@@ -21,3 +22,8 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "CoinAPI research storage unavailable. No provider requests were made." }, { status: 503, headers });
   }
 }
+
+export const GET = withCryptoCapabilities(
+  "publicApiEnabled",
+  getCoinApiResearch,
+);

@@ -7,6 +7,7 @@ import type { PilotFrame, PilotState } from "./coinapi-pilot";
 import { canonicalCryptoJson, presentCoinApiPublication } from "./coinapi-publication";
 import { CryptoStorageError, cryptoStorageDiagnostic } from "./storage-diagnostics";
 import { COINAPI_RESEARCH_RUNTIME } from "./coinapi-runtime";
+import { isCryptoCapabilityEnabled } from "./product-capabilities";
 
 export function coinApiPilotService() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -41,7 +42,10 @@ export async function coinApiPilotReaderAuthorized(request: Request) {
 
 export async function runCoinApiPilot() {
   const startedAt = Date.now();
-  if (COINAPI_RESEARCH_RUNTIME.paused) {
+  if (
+    !isCryptoCapabilityEnabled("coinApiResearchCollectionEnabled") ||
+    COINAPI_RESEARCH_RUNTIME.paused
+  ) {
     return {
       status: "paused",
       reason: COINAPI_RESEARCH_RUNTIME.reason,
@@ -110,7 +114,10 @@ export async function runCoinApiPilot() {
  * exact-time outcome resolution. A failed audit remains visible in health. */
 export async function auditLegacyCryptoBatch() {
   const startedAt = Date.now();
-  if (COINAPI_RESEARCH_RUNTIME.paused) {
+  if (
+    !isCryptoCapabilityEnabled("coinApiEvidenceMaintenanceEnabled") ||
+    !COINAPI_RESEARCH_RUNTIME.archiveMaintenanceAllowed
+  ) {
     return {
       ok: false,
       paused: true,

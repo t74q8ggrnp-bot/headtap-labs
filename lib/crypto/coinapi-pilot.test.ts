@@ -8,6 +8,12 @@ import { collectCoinApiPilot, parsePilotQuotes, selectPilotMarkets, pilotFreshne
 import { budgetedCoinApiFetch } from "./coinapi-pilot-budget.ts";
 // @ts-expect-error Node source imports.
 import { createCoinApiClient } from "./coinapi-client.ts";
+// @ts-expect-error Node source imports.
+import { createCryptoProductCapabilities } from "./product-capabilities.ts";
+
+const capabilities = createCryptoProductCapabilities({
+  coinApiResearchCollectionEnabled: true,
+});
 
 const time = Date.parse("2026-09-02T22:00:00Z");
 const iso = (n: number) => new Date(n).toISOString();
@@ -123,7 +129,7 @@ test("a provider/budget error aborts the cycle without subsequent calls", async 
 });
 
 test("batch metadata transport keeps the API key in the header and fixed origin", async () => {
-  const client = createCoinApiClient({ apiKey: "test", fetcher: async (input, init) => {
+  const client = createCoinApiClient({ apiKey: "test", capabilities, fetcher: async (input, init) => {
     assert.equal(new URL(String(input)).origin, "https://rest.coinapi.io");
     assert.equal(new Headers(init?.headers).get("X-CoinAPI-Key"), "test");
     return Response.json([]);
@@ -136,7 +142,7 @@ test("durable budget denial prevents network calls", async () => {
   let calls = 0;
   const wrapped = budgetedCoinApiFetch({ reserve: async () => false, settle: async () => true }, async () => {
     calls++; return Response.json({});
-  });
+  }, Date.now, capabilities);
   await assert.rejects(wrapped("https://rest.coinapi.io/v1/quotes/current"));
   assert.equal(calls, 0);
 });
@@ -144,7 +150,7 @@ test("durable budget denial prevents network calls", async () => {
 test("uncertain reservation stops a process; no network or optimistic retry", async () => {
   let reservations = 0, calls = 0;
   const wrapped = budgetedCoinApiFetch({ reserve: async () => { reservations++; throw new Error("DB timeout"); },
-    settle: async () => true }, async () => { calls++; return Response.json({}); });
+    settle: async () => true }, async () => { calls++; return Response.json({}); }, Date.now, capabilities);
   await assert.rejects(wrapped("https://rest.coinapi.io/v1/quotes/current"));
   await assert.rejects(wrapped("https://rest.coinapi.io/v1/quotes/current"));
   assert.equal(reservations, 1); assert.equal(calls, 0);
@@ -155,7 +161,7 @@ for (const header of [null, "", "abc", "-1", "Infinity", "2"]) {
     let calls = 0, receipts = 0;
     const wrapped = budgetedCoinApiFetch({ reserve: async () => true, settle: async () => { receipts++; return true; } }, async () => {
       calls++; return Response.json({}, { headers: header === null ? {} : { "x-ratelimit-request-cost": header } });
-    });
+    }, Date.now, capabilities);
     await assert.rejects(wrapped("https://rest.coinapi.io/v1/quotes/current"));
     await assert.rejects(wrapped("https://rest.coinapi.io/v1/quotes/current"));
     assert.equal(calls, 1); assert.equal(receipts, 1);
@@ -166,14 +172,14 @@ test("network timeout is settled as unknown, not refunded or retried", async () 
   const receipts: unknown[] = [];
   const wrapped = budgetedCoinApiFetch({ reserve: async () => true, settle: async (_id, cost, status) => {
     receipts.push([cost, status]); return false;
-  } }, async () => { throw new Error("credential-leaking-error"); });
+  } }, async () => { throw new Error("credential-leaking-error"); }, Date.now, capabilities);
   await assert.rejects(wrapped("https://rest.coinapi.io/v1/quotes/current"), /uncertain/);
   assert.deepEqual(receipts, [[null, 0]]);
 });
 
 test("accounting outage prevents using a response as verified/accounted data", async () => {
   const wrapped = budgetedCoinApiFetch({ reserve: async () => true, settle: async () => { throw new Error("DB down"); } },
-    async () => Response.json({}, { headers: { "x-ratelimit-request-cost": "1" } }));
+    async () => Response.json({}, { headers: { "x-ratelimit-request-cost": "1" } }), Date.now, capabilities);
   await assert.rejects(wrapped("https://rest.coinapi.io/v1/quotes/current"), /accounting/);
 });
 
@@ -181,7 +187,7 @@ test("valid cost is settled once before exposing the payload", async () => {
   const receipts: unknown[] = [];
   const wrapped = budgetedCoinApiFetch({ reserve: async () => true, settle: async (_id, cost, status) => {
     receipts.push([cost, status]); return true;
-  } }, async () => Response.json({ good: true }, { headers: { "x-ratelimit-request-cost": "1" } }));
+  } }, async () => Response.json({ good: true }, { headers: { "x-ratelimit-request-cost": "1" } }), Date.now, capabilities);
   const response = await wrapped("https://rest.coinapi.io/v1/quotes/current");
   assert.deepEqual(receipts, [[1, 200]]);
   assert.deepEqual(await response.json(), { good: true });

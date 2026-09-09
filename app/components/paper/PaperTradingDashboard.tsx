@@ -592,18 +592,12 @@ export default function PaperTradingDashboard() {
               <Link href="/" className="transition hover:text-white">Top Convictions</Link>
               <Link href="/scanner" className="transition hover:text-white">Scanner</Link>
               <Link href="/trade" className="transition hover:text-white">Workspace</Link>
-              <Link href="/crypto" className="transition hover:text-white">Crypto</Link>
               <span className="text-orange-300">Paper</span>
               <Link href="/agent" className="transition hover:text-white">HT Agent</Link>
             </nav>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-semibold text-zinc-500"><span className="h-2 w-2 rounded-full bg-green-400 shadow-[0_0_14px_rgba(74,222,128,0.55)]" />Paper account active</div>
         </header>
-
-        <nav aria-label="Paper asset class" className="flex gap-5 border-b border-white/10 px-5 py-3 text-sm sm:px-7">
-          <span className="font-semibold text-orange-300">Stock paper</span>
-          <Link href="/paper/crypto" className="text-cyan-300 hover:text-cyan-100">Crypto paper →</Link>
-        </nav>
 
         {!authReady || loading ? (
           <div className="min-h-[650px] animate-pulse bg-white/[0.015]" />

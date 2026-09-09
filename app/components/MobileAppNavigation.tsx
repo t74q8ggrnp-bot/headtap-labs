@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMobileAppNavigation } from "./MobileAppNavigationContext";
 
-type AppTab = "home" | "convictions" | "scanner" | "workspace" | "watchlist" | "profile" | "crypto" | "paper";
+type AppTab = "home" | "convictions" | "scanner" | "workspace" | "watchlist" | "profile" | "paper";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "home", label: "Home", href: "/" },
@@ -13,7 +13,6 @@ const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "workspace", label: "Trade", href: "/trade" },
   { tab: "watchlist", label: "Saved", href: "/?tab=watchlist" },
   { tab: "profile", label: "Profile", href: "/?tab=profile" },
-  { tab: "crypto", label: "Crypto", href: "/crypto" },
   { tab: "paper", label: "Paper", href: "/paper" },
 ];
 
@@ -51,9 +50,7 @@ function TabIcon({ tab }: { tab: AppTab }) {
   if (tab === "paper") return (
     <svg {...common}><path d="M4 5.5h16v13H4z"/><path d="M7 9h10M7 13h5M15.5 13v3M14 14.5h3"/></svg>
   );
-  return (
-    <svg {...common}><circle cx="12" cy="12" r="8.5"/><path d="M9.4 7.2h3.7a2.4 2.4 0 0 1 0 4.8H9.4h4.2a2.4 2.4 0 0 1 0 4.8H9.4"/><path d="M11 5v14M14 5.8v1.5M14 16.7v1.5"/></svg>
-  );
+  return null;
 }
 
 export default function MobileAppNavigation() {
@@ -62,19 +59,18 @@ export default function MobileAppNavigation() {
   const isTradeWorkspace = pathname === "/trade" || pathname.startsWith("/trade/");
   const activeTab: AppTab =
     pathname === "/paper" ? "paper" :
-    pathname === "/crypto" ? "crypto" :
     pathname === "/scanner" ? "scanner" :
     isTradeWorkspace ? "workspace" :
     pathname === "/" ? homeTab : "home";
 
   const activateHomeTab = (tab: AppTab) => {
-    if (tab !== "crypto" && tab !== "paper" && tab !== "workspace") setHomeTab(tab);
+    if (tab !== "paper" && tab !== "workspace") setHomeTab(tab);
   };
 
   return (
     <nav className="ht-mobile-global-nav" aria-label="Primary app navigation">
       <div className="w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="grid min-w-[352px] grid-cols-8 px-1 pt-1">
+        <div className="grid min-w-[308px] grid-cols-7 px-1 pt-1">
           {items.map(({ tab, label, href }) => {
             const active = activeTab === tab;
             const className = `relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition active:scale-95 ${active ? "text-orange-400" : "text-zinc-600"}`;
@@ -88,7 +84,7 @@ export default function MobileAppNavigation() {
               </>
             );
 
-            if (pathname === "/" && tab !== "crypto" && tab !== "paper" && tab !== "workspace") {
+            if (pathname === "/" && tab !== "paper" && tab !== "workspace") {
               return (
                 <button
                   key={tab}

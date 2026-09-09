@@ -9,6 +9,10 @@
 
 import { NextResponse } from "next/server";
 import { getErrorMessage } from "@/lib/error-message";
+import {
+  assertCryptoCapabilitiesEnabled,
+  withCryptoCapabilities,
+} from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +43,7 @@ async function fetchLatestCandle(
   productId: string,
   cacheMode: "no-store" | "revalidate-60",
 ) {
+  assertCryptoCapabilitiesEnabled("providerCollectionEnabled");
   const fetchStartedAt = Date.now();
   const url = `${COINBASE_ORIGIN}/products/${encodeURIComponent(productId)}/candles?granularity=60&limit=5`;
   const response = await fetch(url, {
@@ -70,7 +75,7 @@ async function fetchLatestCandle(
   };
 }
 
-export async function GET(req: Request) {
+async function getCryptoFreshnessDiagnostics(req: Request) {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -113,3 +118,8 @@ export async function GET(req: Request) {
     );
   }
 }
+
+export const GET = withCryptoCapabilities(
+  "providerCollectionEnabled",
+  getCryptoFreshnessDiagnostics,
+);

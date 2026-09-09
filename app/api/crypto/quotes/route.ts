@@ -1,7 +1,8 @@
 import { checkApiRateLimit } from "@/lib/api-rate-limit";
 import { fetchMassiveCryptoQuotes } from "@/lib/massive-crypto";
+import { withCryptoCapabilities } from "@/lib/crypto/product-capabilities";
 
-export async function POST(request: Request) {
+async function postCryptoQuotes(request: Request) {
   const limit = checkApiRateLimit(request, { namespace: "public-crypto-quotes", limit: 60, windowMs: 60_000 });
   const headers = { "Cache-Control": "private, no-store", ...limit.headers };
   if (!limit.allowed) return Response.json({ quotes: {}, error: "Too many requests." }, { status: 429, headers });
@@ -20,3 +21,8 @@ export async function POST(request: Request) {
     return Response.json({ quotes: {}, error: "Massive crypto prices unavailable." }, { status: 502, headers });
   }
 }
+
+export const POST = withCryptoCapabilities(
+  ["publicApiEnabled", "providerCollectionEnabled"],
+  postCryptoQuotes,
+);

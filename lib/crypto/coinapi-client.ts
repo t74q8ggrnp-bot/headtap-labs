@@ -1,3 +1,6 @@
+// @ts-expect-error Node's strip-types test runner requires source extensions.
+import { CRYPTO_PRODUCT_CAPABILITIES, assertCryptoCapabilitiesEnabled, type CryptoProductCapabilities } from "./product-capabilities.ts";
+
 // Injectable transport for bounded diagnostics and the server-only provider adapter.
 // No endpoints accept an arbitrary origin and no response exposes the credential.
 export function createCoinApiClient({
@@ -5,11 +8,13 @@ export function createCoinApiClient({
   fetcher = fetch,
   now = Date.now,
   maxRequests = 12,
+  capabilities = CRYPTO_PRODUCT_CAPABILITIES,
 }: {
   apiKey: string;
   fetcher?: typeof fetch;
   now?: () => number;
   maxRequests?: number;
+  capabilities?: CryptoProductCapabilities;
 }) {
   if (!apiKey.trim()) throw new Error("CoinAPI is not configured.");
   if (!Number.isSafeInteger(maxRequests) || maxRequests < 1 || maxRequests > 5_000) {
@@ -23,6 +28,10 @@ export function createCoinApiClient({
   const pending = new Map<string, Promise<unknown>>();
 
   async function get(path: string, ttlMs = 0): Promise<unknown> {
+    assertCryptoCapabilitiesEnabled(
+      "coinApiResearchCollectionEnabled",
+      capabilities,
+    );
     if (!/^\/v1\/(?:symbols(?:\/|\?|$)|(?:trades|quotes|ohlcv)\/)/.test(path) ||
         /[\\\r\n]/.test(path) || /(?:api.?key|token)=/i.test(path)) {
       throw new Error("Unsupported CoinAPI data path.");

@@ -25,8 +25,6 @@ import MobileConvictionsList from "@/app/components/opportunity/MobileConviction
 import MobileWatchlist from "@/app/components/opportunity/MobileWatchlist";
 import MomentumContenders from "@/app/components/opportunity/MomentumContenders";
 import ProxPulse from "@/app/components/opportunity/ProxPulse";
-import CryptoMomentumPreview from "@/app/components/crypto/CryptoMomentumPreview";
-import type { CryptoOpportunityFeed } from "@/lib/crypto/contracts";
 
 type MobileTab = "home" | "convictions" | "scanner" | "watchlist" | "profile";
 
@@ -57,9 +55,6 @@ export type MobileExperienceProps = {
   apiBeforeCrowdPick: APIOpportunity | null;
   btcFramework: TradeFramework | null;
   btcTrace: DecisionTraceModel | null;
-  cryptoFeed: CryptoOpportunityFeed | null;
-  cryptoLoading: boolean;
-  cryptoError: string | null;
   mobileScannerReads: APIOpportunity[];
   openReadTicker: (ticker: string) => void;
   watchlistStocks: Stock[];
@@ -89,8 +84,8 @@ export default function MobileExperience({
   canonicalMobileOpportunities, momentumRunnersUp, momentumRadar, mobileCardIndex, setMobileCardIndex, mobileTouchStart,
   setMobileTouchStart, apiOpportunitiesLoading, apiMomentum, smFramework, smTrace,
   bullBearData, isDualEngineConfirmation, watchlist, setSelectedStock, toggleWatchlist,
-  opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace, cryptoFeed,
-  cryptoLoading, cryptoError, mobileScannerReads,
+  opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace,
+  mobileScannerReads,
   openReadTicker, watchlistStocks, session, handleSignOut, savedSetups,
   signalMemoryInsight, authEmail, setAuthEmail, authPassword, setAuthPassword, handleAuth,
   authLoading, authMessage, selectedStock, selectedOpportunity, selectedOpportunityLoading,
@@ -152,7 +147,7 @@ export default function MobileExperience({
           {/* HOME TAB — Before The Crowd + Swipeable conviction cards */}
           {mobileTab === "home" && (() => {
             // Show mobile skeleton on first load — same gate as desktop
-            if (!lastUpdated && cryptoLoading) return (
+            if (!lastUpdated && apiOpportunitiesLoading) return (
               <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2 space-y-4 animate-pulse">
                 <div className="rounded-2xl border border-white/8 bg-black overflow-hidden">
                   <div className="px-5 pt-4 pb-0 flex items-center gap-2">
@@ -247,14 +242,6 @@ export default function MobileExperience({
                     onWatch={() => toggleWatchlist(apiBeforeCrowdPick.ticker)}
                   />
                 )}
-
-                <div className="mx-4 mb-3 flex-shrink-0">
-                  <CryptoMomentumPreview
-                    feed={cryptoFeed}
-                    loading={cryptoLoading}
-                    error={cryptoError}
-                  />
-                </div>
 
                 {current && (
                   <MobileCardDetail

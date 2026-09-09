@@ -19,5 +19,10 @@ test("expensive crypto evidence maintenance remains unscheduled during the owner
   assert.deepEqual(config.crons.filter((job: { path: string }) => job.path === "/api/crypto/evidence-maintenance"),
     []);
   assert.deepEqual(config.crons.filter((job: { path: string }) => job.path === "/api/crypto/prox-sensor"),
-    [{ path: "/api/crypto/prox-sensor", schedule: "2-59/5 * * * *" }]);
+    []);
+  assert.deepEqual(config.crons.filter((job: { path: string }) => job.path.startsWith("/api/crypto/")),
+    []);
+  assert.deepEqual(config.crons.filter((job: { path: string }) => job.path === "/api/paper-trading/match").map((job: { schedule: string }) => job.schedule),
+    ["*/2 * * * *"]);
+  assert.equal(config.crons.some((job: { path: string }) => job.path.startsWith("/api/prox-")), true);
 });

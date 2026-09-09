@@ -45,6 +45,13 @@ function harness(options = {}) {
       trace.processingReads++;return {version:"coinapi-outcome-processing-v1",available:!options.processingUnavailable,
         checkedAt:new Date().toISOString(),oldestPendingTargetAt:null};
     } },
+    "@/lib/crypto/coinapi-runtime":{COINAPI_RESEARCH_RUNTIME:{paused:false,reason:"fixture-active"}},
+    "@/lib/crypto/product-capabilities":{ withCryptoCapabilities:(required,handler)=>{
+      assert.equal(required,"publicApiEnabled");
+      return options.publicApiEnabled === true ? handler : async()=>Response.json({
+        ok:false,code:"CRYPTO_PRODUCT_UNAVAILABLE",error:"Crypto is currently unavailable.",
+      },{status:503,headers:{"Cache-Control":"private, no-store"}});
+    } },
   };
   const handlers = Object.fromEntries(paths.map(name=>{
     const exports = {};
@@ -55,8 +62,19 @@ function harness(options = {}) {
   }));
   return { handlers,trace };
 }
+test("shelved research reads reject before auth, database, evidence, or provider work",async()=>{
+  const {handlers,trace}=harness();
+  for(const name of paths) {
+    const response=await handlers[name](new Request(`https://test.invalid/api/crypto/${name}`));
+    assert.equal(response.status,503);
+    assert.deepEqual(await response.json(),{
+      ok:false,code:"CRYPTO_PRODUCT_UNAVAILABLE",error:"Crypto is currently unavailable.",
+    });
+  }
+  assert.deepEqual(trace,{auth:0,read:0,db:0,providerRequests:0,processingReads:0,assessed:[]});
+});
 test("both reads reject unauthenticated requests before database reads",async()=>{
-  const { handlers,trace } = harness();
+  const { handlers,trace } = harness({publicApiEnabled:true});
   for(const name of paths) {
     const response = await handlers[name](new Request(`https://test.invalid/api/crypto/${name}`));
     assert.equal(response.status,401); assert.match(response.headers.get("cache-control"),/private.*no-store/);
@@ -64,14 +82,14 @@ test("both reads reject unauthenticated requests before database reads",async()=
   assert.equal(trace.db,0); assert.equal(trace.read,0);
 });
 test("authenticated empty research is a successful connection, not a profitable active collector",async()=>{
-  const { handlers } = harness({ authorized:true });
+  const { handlers } = harness({ publicApiEnabled:true,authorized:true });
   const response = await handlers["coinapi-research"](new Request("https://test.invalid"));
   assert.equal(response.status,200);
   const body = await response.json();
   assert.equal(body.status,"disabled"); assert.equal(body.ok,false); assert.equal(body.providerRequests,0);
 });
 test("authenticated evaluation preserves the legacy warning and reports no invented performance",async()=>{
-  const { handlers } = harness({ authorized:true });
+  const { handlers } = harness({ publicApiEnabled:true,authorized:true });
   const response = await handlers["coinapi-evaluation"](new Request("https://test.invalid"));
   assert.equal(response.status,200);
   const body = await response.json();
@@ -83,7 +101,7 @@ test("authenticated evaluation preserves the legacy warning and reports no inven
   assert.equal(body.healthChecks.length,3);assert.ok(body.healthChecks.every(check=>!check.ok));
 });
 test("missing observation retirement migration stays explicit without pretending 0036 is broken",async()=>{
-  const { handlers } = harness({ authorized:true,missing0037:true });
+  const { handlers } = harness({ publicApiEnabled:true,authorized:true,missing0037:true });
   const response = await handlers["coinapi-evaluation"](new Request("https://test.invalid"));
   assert.equal(response.status,200);
   const body = await response.json();
@@ -91,12 +109,12 @@ test("missing observation retirement migration stays explicit without pretending
   assert.match(body.legacyTracking.message,/0037/); assert.deepEqual(body.legacyTracking.rows,[]);
 });
 test("unavailable core evidence is not reported as a successful connection",async()=>{
-  const { handlers } = harness({ authorized:true,brokenSchema:true });
+  const { handlers } = harness({ publicApiEnabled:true,authorized:true,brokenSchema:true });
   for(const name of paths) assert.equal((await handlers[name](new Request("https://test.invalid"))).status,503);
 });
 test("authenticated evaluation passes fresh operational proof into the same health policy",async()=>{
   for(const processingUnavailable of [false,true]) {
-    const {handlers,trace}=harness({authorized:true,snapshot:{version:"test-incomplete-evidence"},processingUnavailable});
+    const {handlers,trace}=harness({publicApiEnabled:true,authorized:true,snapshot:{version:"test-incomplete-evidence"},processingUnavailable});
     const response=await handlers["coinapi-evaluation"](new Request("https://test.invalid"));
     const body=await response.json();
     assert.equal(trace.processingReads,1);
@@ -107,10 +125,10 @@ test("authenticated evaluation passes fresh operational proof into the same heal
   }
 });
 test("invalid market/episode identity and rate limits fail before database work",async()=>{
-  const { handlers,trace } = harness({ authorized:true });
+  const { handlers,trace } = harness({ publicApiEnabled:true,authorized:true });
   assert.equal((await handlers["coinapi-research"](new Request("https://test.invalid?marketId=BTC"))).status,400);
   assert.equal((await handlers["coinapi-evaluation"](new Request("https://test.invalid?episodeId=wrong"))).status,400);
-  const limited = harness({ authorized:true,rateLimited:true });
+  const limited = harness({ publicApiEnabled:true,authorized:true,rateLimited:true });
   for(const name of paths) assert.equal((await limited.handlers[name](new Request("https://test.invalid"))).status,429);
   assert.equal(trace.db,0); assert.equal(trace.read,0); assert.equal(limited.trace.auth,0);
 });

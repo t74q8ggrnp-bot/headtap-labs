@@ -47,7 +47,11 @@ function harness(options = {}) {
   const bindings = { "node:crypto":crypto,"@supabase/supabase-js":{ createClient:()=>{ trace.factories++; return db; } },
     "./coinapi-client":{ createCoinApiClient:()=>{ trace.providerClients++; throw new Error("Provider requests prohibited in offline test"); } },
     "./coinapi-pilot-budget":{ budgetedCoinApiFetch:()=>{ throw new Error("Network prohibited in offline test"); } },
-    "./coinapi-pilot":pilot,"./coinapi-publication":publication,"./storage-diagnostics":diagnostics };
+    "./coinapi-pilot":pilot,"./coinapi-publication":publication,"./storage-diagnostics":diagnostics,
+    "./coinapi-runtime":{COINAPI_RESEARCH_RUNTIME:{paused:options.shelved===true,
+      reason:"fixture-code-owned-shelving",archiveMaintenanceAllowed:options.shelved!==true}},
+    "./product-capabilities":{isCryptoCapabilityEnabled:capability=>options.shelved!==true &&
+      ["coinApiResearchCollectionEnabled","coinApiEvidenceMaintenanceEnabled"].includes(capability)} };
   vm.runInNewContext(compiled,{ exports,Buffer,AbortSignal,Date:class extends Date { static now(){ return clock; } },
     process:{ env:{ NEXT_PUBLIC_SUPABASE_URL:"https://storage.invalid",SUPABASE_SERVICE_ROLE_KEY:"fixture-not-a-key",
       COINAPI_API_KEY:"fixture-not-a-key",VERCEL_ENV:"production",CRON_SECRET:"fixture-cron",...options.env } },
@@ -55,6 +59,15 @@ function harness(options = {}) {
     fetch:()=>{ throw new Error("Network prohibited in offline test"); } },{ timeout:1000 });
   return { api:exports,trace };
 }
+
+test("code-owned shelving blocks collection and archive work before database or provider setup",async()=>{
+  const {api,trace}=harness({shelved:true,env:{COINAPI_PILOT_ENABLED:"true"}});
+  const collection=await api.runCoinApiPilot();
+  const archive=await api.auditLegacyCryptoBatch();
+  assert.equal(collection.status,"paused");assert.equal(collection.providerRequests,0);
+  assert.equal(archive.paused,true);assert.equal(archive.providerRequests,0);
+  assert.equal(trace.factories,0);assert.equal(trace.providerClients,0);assert.deepEqual(trace.rpc,[]);
+});
 
 test("deploy/preview cannot start CoinAPI requests or database collection", async()=>{
   for (const env of [{},{ COINAPI_PILOT_ENABLED:"false" },{ COINAPI_PILOT_ENABLED:"true",VERCEL_ENV:"preview" }]) {

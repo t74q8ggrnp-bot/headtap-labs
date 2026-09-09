@@ -5,12 +5,13 @@ import { canonicalCryptoJson } from "@/lib/crypto/coinapi-publication";
 import { assessCryptoEvidenceHealth } from "@/lib/crypto/evidence-health";
 import { readCryptoOutcomeProcessingEvidence } from "@/lib/crypto/outcome-processing-health";
 import { COINAPI_RESEARCH_RUNTIME } from "@/lib/crypto/coinapi-runtime";
+import { withCryptoCapabilities } from "@/lib/crypto/product-capabilities";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /** Shared evidence/coverage, not a profitability or trade-authorization endpoint. */
-export async function GET(request: Request) {
+async function getCoinApiEvaluation(request: Request) {
   const rate = checkApiRateLimit(request, { namespace: "coinapi-evaluation", limit: 5, windowMs: 60_000 });
   const headers = { "Cache-Control": "private, no-store", ...rate.headers };
   if (!rate.allowed) return Response.json({ error: "Too many requests." }, { status: 429, headers });
@@ -95,3 +96,8 @@ export async function GET(request: Request) {
       executionAuthorized: false }, { status: 503, headers });
   }
 }
+
+export const GET = withCryptoCapabilities(
+  "publicApiEnabled",
+  getCoinApiEvaluation,
+);
