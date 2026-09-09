@@ -6,7 +6,7 @@ export async function GET(req: Request) {
     const symbol = searchParams.get("symbol")?.toUpperCase();
 
     if (!symbol) {
-      return NextResponse.json([]);
+      return NextResponse.redirect(new URL("/news-feed", req.url));
     }
 
     const apiKey = process.env.FINNHUB_API_KEY;

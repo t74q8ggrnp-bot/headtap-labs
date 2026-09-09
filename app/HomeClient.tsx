@@ -1524,7 +1524,7 @@ export default function HomeClient({
                     <Link href="/scanner" className="transition hover:text-white">
                       Scanner
                     </Link>
-                    <Link href="/news" className="transition hover:text-white">
+                    <Link href="/news-feed" className="transition hover:text-white">
                       News
                     </Link>
                     <Link href="/crypto" className="text-cyan-400 transition hover:text-white">

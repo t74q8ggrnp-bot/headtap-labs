@@ -144,7 +144,7 @@ export default function ScannerPage() {
             <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-500 md:flex">
               <Link href="/" className="transition hover:text-orange-300">Dashboard</Link>
               <span className="text-orange-400">Scanner</span>
-              <Link href="/news" className="transition hover:text-orange-300">News</Link>
+              <Link href="/news-feed" className="transition hover:text-orange-300">News</Link>
             </nav>
           </div>
           <div className="flex items-center gap-3">

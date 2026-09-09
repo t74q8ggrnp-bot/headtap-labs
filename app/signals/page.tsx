@@ -83,7 +83,7 @@ export default function SignalsPage() {
             <Link className="transition hover:text-orange-300" href="/">Top Convictions</Link>
             <Link className="transition hover:text-orange-300" href="/scanner">Scanner</Link>
             <Link className="text-orange-400" href="/signals">Signals</Link>
-            <Link className="transition hover:text-orange-300" href="/news">News</Link>
+            <Link className="transition hover:text-orange-300" href="/news-feed">News</Link>
           </nav>
         </div>
       </header>
