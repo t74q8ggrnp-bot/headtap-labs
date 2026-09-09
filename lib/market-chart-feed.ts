@@ -109,6 +109,16 @@ export type MarketChartFeedRequest = {
   displayedSessionDate?: string;
 };
 
+export function marketChartFeedFrameForSymbol(
+  frame: MarketChartFeedFrame | null,
+  symbol: string,
+) {
+  return frame?.chart.asset === "stock" &&
+      frame.chart.symbol === symbol.trim().toUpperCase()
+    ? frame
+    : null;
+}
+
 export type MarketChartTransport = {
   loadBootstrap: (
     request: MarketChartFeedRequest,
@@ -119,7 +129,21 @@ export type MarketChartTransport = {
     listener: (delta: MarketChartDeltaResponse) => void,
     onError?: (error: unknown) => void,
   ) => () => void;
+  /**
+   * Optional server-anchored presentation clock. Polling and a future socket
+   * transport can provide this without coupling chart components to either
+   * delivery mechanism.
+   */
+  trustedNow?: () => number;
+  acceptTrustedTime?: (
+    value: string | number | Date | null | undefined,
+  ) => boolean;
 };
+
+export function marketChartTransportNow(transport: MarketChartTransport) {
+  const candidate = transport.trustedNow?.();
+  return Number.isFinite(candidate) ? Number(candidate) : Date.now();
+}
 
 /**
  * Return a minute-aligned start for a window containing `minuteBuckets`
@@ -177,12 +201,13 @@ const MARKET_CHART_FUTURE_TOLERANCE_MS = 2_000;
 /**
  * The transport boundary owns the shape of the shared stock quote. Components
  * must never infer truth from JavaScript coercion (for example, the string
- * `"false"` becoming a truthy Live label), and a provider clock cannot be
- * accepted when it is materially ahead of the receiving device.
+ * `"false"` becoming a truthy Live label). When REST telemetry is present,
+ * compare provider time with the trusted server completion clock—not a phone
+ * or desktop wall clock that may be skewed.
  */
 function validStockMarketChartDisplayQuote(
   value: unknown,
-  receivedAt = Date.now(),
+  trustedServerAt?: number,
 ): value is MarketChartDisplayQuote {
   if (!value || typeof value !== "object") return false;
   const quote = value as Partial<MarketChartDisplayQuote>;
@@ -201,7 +226,8 @@ function validStockMarketChartDisplayQuote(
     Number(quote.price) > 0 &&
     validChange &&
     Number.isFinite(providerAt) &&
-    providerAt <= receivedAt + MARKET_CHART_FUTURE_TOLERANCE_MS &&
+    (!Number.isFinite(trustedServerAt) ||
+      providerAt <= Number(trustedServerAt) + MARKET_CHART_FUTURE_TOLERANCE_MS) &&
     typeof quote.live === "boolean" &&
     validSource &&
     validPriceKind &&
@@ -328,6 +354,11 @@ export function validMarketChartDeltaResponse(
   const delta = value as Partial<MarketChartDeltaResponse>;
   const quote = delta.displayQuote;
   const authority = delta.sessionAuthority;
+  const instrumentationValid = delta.instrumentation === undefined ||
+    validInstrumentation(delta.instrumentation, "delta");
+  const trustedServerAt = delta.instrumentation && instrumentationValid
+    ? Date.parse(delta.instrumentation.responseCompletedAt)
+    : undefined;
   return delta.success === true &&
     delta.asset === "stock" &&
     delta.symbol === request.symbol &&
@@ -335,13 +366,17 @@ export function validMarketChartDeltaResponse(
     delta.feedPhase === "delta" &&
     delta.intervalSeconds === 60 &&
     validOrderedMarketChartBars(delta.bars) &&
-    validStockMarketChartDisplayQuote(quote) &&
+    validStockMarketChartDisplayQuote(quote, trustedServerAt) &&
     Boolean(authority && authority.sessionScope === (request.sessionScope ?? "extended")) &&
     Boolean(authority && (!request.displayedSessionDate || authority.displayedSessionDate === request.displayedSessionDate)) &&
     Boolean(quote && authority && authorityMatchesProviderQuote(authority, quote)) &&
     Boolean(authority && deltaBarsMatchProviderFrame(delta.bars ?? [], delta.latestAt, authority)) &&
-    (delta.instrumentation === undefined ||
-      validInstrumentation(delta.instrumentation, "delta"));
+    Boolean(authority && marketChartFrameHasSharedPriceInvariant({
+      bars: delta.bars ?? [],
+      displayQuote: quote,
+      sessionAuthority: authority,
+    })) &&
+    instrumentationValid;
 }
 
 export function marketChartFrameHasSharedPriceInvariant(input: {
@@ -372,6 +407,13 @@ export function validMarketChartBootstrapResponse(
   const bootstrap = value as Partial<MarketChartBootstrapResponse>;
   const quote = bootstrap.displayQuote;
   const authority = bootstrap.sessionAuthority;
+  const instrumentationValid = validInstrumentation(
+    bootstrap.instrumentation,
+    "bootstrap",
+  );
+  const trustedServerAt = bootstrap.instrumentation && instrumentationValid
+    ? Date.parse(bootstrap.instrumentation.responseCompletedAt)
+    : undefined;
   return bootstrap.success === true &&
     bootstrap.asset === "stock" &&
     bootstrap.symbol === request.symbol &&
@@ -381,7 +423,7 @@ export function validMarketChartBootstrapResponse(
     Number.isFinite(Date.parse(bootstrap.latestAt ?? "")) &&
     validOrderedMarketChartBars(bootstrap.bars) &&
     bootstrap.bars.length >= 1 &&
-    validStockMarketChartDisplayQuote(quote) &&
+    validStockMarketChartDisplayQuote(quote, trustedServerAt) &&
     Boolean(authority && authority.sessionScope === (request.sessionScope ?? "extended")) &&
     Boolean(quote && authority && authorityMatchesProviderQuote(authority, quote)) &&
     Boolean(authority && deltaBarsMatchProviderFrame(
@@ -394,7 +436,47 @@ export function validMarketChartBootstrapResponse(
       displayQuote: quote,
       sessionAuthority: authority,
     })) &&
-    validInstrumentation(bootstrap.instrumentation, "bootstrap");
+    instrumentationValid;
+}
+
+/**
+ * Validate an already-admitted, transport-neutral current stock frame. Legacy
+ * chart consumers keep this shape between deltas, but must not revalidate a
+ * newer quote against the original bootstrap receipt's completion timestamp.
+ */
+export function validCurrentMarketChartFrame(
+  value: unknown,
+  request: MarketChartFeedRequest,
+  trustedServerAt?: number,
+): value is MarketChartBootstrapResponse {
+  if (!value || typeof value !== "object") return false;
+  const current = value as Partial<MarketChartBootstrapResponse>;
+  const quote = current.displayQuote;
+  const authority = current.sessionAuthority;
+  return current.success === true &&
+    current.asset === "stock" &&
+    current.symbol === request.symbol &&
+    current.feedVersion === MARKET_CHART_FEED_VERSION &&
+    current.feedPhase === "bootstrap" &&
+    current.intervalSeconds === 60 &&
+    Number.isFinite(Date.parse(current.latestAt ?? "")) &&
+    validOrderedMarketChartBars(current.bars) &&
+    Boolean(current.bars && current.bars.length >= 1) &&
+    validStockMarketChartDisplayQuote(quote, trustedServerAt) &&
+    Boolean(authority && authority.sessionScope === (request.sessionScope ?? "extended")) &&
+    Boolean(authority && (!request.displayedSessionDate ||
+      authority.displayedSessionDate === request.displayedSessionDate)) &&
+    Boolean(quote && authority && authorityMatchesProviderQuote(authority, quote)) &&
+    Boolean(authority && deltaBarsMatchProviderFrame(
+      current.bars ?? [],
+      current.latestAt,
+      authority,
+    )) &&
+    Boolean(authority && marketChartFrameHasSharedPriceInvariant({
+      bars: current.bars ?? [],
+      displayQuote: quote,
+      sessionAuthority: authority,
+    }));
 }
 
 export function createProviderRequestInstrumentation(input: {
@@ -643,7 +725,29 @@ export function mergeMarketChartFeedDelta(
   const nextAsOf = Date.parse(delta.displayQuote.asOf);
   // A provider timestamp is the immutable frame boundary. Replaying an equal
   // timestamp must not allow a duplicate payload to rewrite price or OHLC.
-  if (!Number.isFinite(nextAsOf) || nextAsOf <= previousAsOf) {
+  if (!Number.isFinite(nextAsOf) || nextAsOf < previousAsOf) {
+    return measuredFrame;
+  }
+  if (nextAsOf === previousAsOf) {
+    if (
+      current.chart.displayQuote?.live === true &&
+      delta.displayQuote.live === false &&
+      current.chart.displayQuote.price === delta.displayQuote.price
+    ) {
+      return {
+        ...measuredFrame,
+        chart: {
+          ...current.chart,
+          displayQuote: {
+            ...current.chart.displayQuote,
+            live: false,
+          },
+        },
+        // Equal provider time is the same immutable market frame. It may
+        // downgrade Live, but it can never renew the receipt age.
+        receivedAt: current.receivedAt,
+      };
+    }
     return measuredFrame;
   }
 

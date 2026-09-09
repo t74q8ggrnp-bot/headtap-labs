@@ -42,7 +42,7 @@ export default function HeroPriceChart({
   const data = marketView.chart;
   const failed = marketView.error && !data;
   const resolvedHeight = height ?? (compact ? 150 : 185);
-  const viewportKey = `${url}:${compact ? "compact" : "full"}:${resolvedHeight}`;
+  const viewportKey = `${url}:${compact ? "compact" : "full"}`;
   const latestTime = data
     ? new Intl.DateTimeFormat("en-US", {
         hour: "numeric",

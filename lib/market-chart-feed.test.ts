@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
-import { createProviderRequestInstrumentation, marketBarsAtOrBeforeProviderTimestamp, marketChartBarsInDisplayedSession, marketChartFeedFrameFromBootstrap, marketChartSecondAggregateWindowStart, mergeMarketChartFeedDelta, resolveMarketChartDisplayedSessionDate, resolveMarketChartSessionAuthority, summarizeMarketChartFeedEfficiency, validMarketChartBootstrapResponse, validMarketChartDeltaResponse, type MarketChartBootstrapResponse, type MarketChartDeltaResponse, type MarketProviderRequestKind } from "./market-chart-feed.ts";
+import { createProviderRequestInstrumentation, marketBarsAtOrBeforeProviderTimestamp, marketChartBarsInDisplayedSession, marketChartFeedFrameForSymbol, marketChartFeedFrameFromBootstrap, marketChartSecondAggregateWindowStart, mergeMarketChartFeedDelta, resolveMarketChartDisplayedSessionDate, resolveMarketChartSessionAuthority, summarizeMarketChartFeedEfficiency, validCurrentMarketChartFrame, validMarketChartBootstrapResponse, validMarketChartDeltaResponse, type MarketChartBootstrapResponse, type MarketChartDeltaResponse, type MarketProviderRequestKind } from "./market-chart-feed.ts";
 
 function bootstrap(): MarketChartBootstrapResponse {
   const time = Date.parse("2026-09-08T14:00:00.000Z") / 1_000;
@@ -139,6 +139,48 @@ test("a delta advances the same immutable frame without reloading history", () =
   assert.equal(next.instrumentation.legacyEquivalentRequests, 8);
 });
 
+test("a legacy chart validates its current frame without stale bootstrap telemetry", () => {
+  const initial = bootstrap();
+  initial.instrumentation = createProviderRequestInstrumentation({
+    phase: "bootstrap",
+    requestStartedAt: "2026-09-08T14:00:20.000Z",
+    responseCompletedAt: "2026-09-08T14:00:21.000Z",
+    requests: (["minute_history", "second_delta", "snapshot", "last_trade"] as MarketProviderRequestKind[]).map(
+      (kind) => ({ kind, attempted: true, succeeded: true }),
+    ),
+  });
+  const advanced = mergeMarketChartFeedDelta(
+    marketChartFeedFrameFromBootstrap(initial),
+    delta("2026-09-08T14:00:45.000Z", 101),
+  );
+  const legacyCurrent = {
+    ...advanced.chart,
+    feedVersion: "market-chart-feed-v1" as const,
+    feedPhase: "bootstrap" as const,
+    previousClose: advanced.previousClose,
+    sessionAuthority: advanced.sessionAuthority,
+    instrumentation: initial.instrumentation,
+  };
+  const request = {
+    asset: "stock" as const,
+    symbol: "SPY",
+    sessionScope: "extended" as const,
+    displayedSessionDate: "2026-09-08",
+  };
+  assert.equal(validMarketChartBootstrapResponse(legacyCurrent, request), false);
+  assert.equal(validCurrentMarketChartFrame(
+    legacyCurrent,
+    request,
+    Date.parse("2026-09-08T14:00:46.000Z"),
+  ), true);
+});
+
+test("a prior ticker frame is hidden immediately when navigation changes the symbol", () => {
+  const current = marketChartFeedFrameFromBootstrap(bootstrap());
+  assert.equal(marketChartFeedFrameForSymbol(current, "SPY"), current);
+  assert.equal(marketChartFeedFrameForSymbol(current, "TSLA"), null);
+});
+
 test("a future streaming delta can omit REST request telemetry", () => {
   const current = marketChartFeedFrameFromBootstrap(bootstrap());
   const streamed = delta("2026-09-08T14:00:45.000Z", 101);
@@ -177,6 +219,21 @@ test("an equal provider timestamp is idempotent and cannot rewrite price", () =>
   assert.equal(next.chart.displayQuote?.price, 100);
   assert.equal(next.chart.bars.at(-1)?.close, 100);
   assert.equal(next.instrumentation.totalProviderRequests, 6);
+});
+
+test("an equal provider timestamp can downgrade Live but cannot renew freshness", () => {
+  const current = marketChartFeedFrameFromBootstrap(bootstrap(), 1_000);
+  const unchanged = delta("2026-09-08T14:00:20.000Z", 100);
+  unchanged.displayQuote.live = false;
+  const next = mergeMarketChartFeedDelta(current, unchanged, 99_000);
+  assert.equal(next.chart.displayQuote?.live, false);
+  assert.equal(next.receivedAt, 1_000);
+  assert.equal(validCurrentMarketChartFrame(next.chart, {
+    asset: "stock",
+    symbol: "SPY",
+    sessionScope: "extended",
+    displayedSessionDate: "2026-09-08",
+  }, Date.parse("2026-09-08T14:01:00.000Z")), true);
 });
 
 test("instrumentation proves two delta calls replace each legacy four-call refresh", () => {
@@ -256,6 +313,19 @@ test("runtime contracts reject a mismatched shared price or requested symbol", (
     sessionScope: "extended",
     displayedSessionDate: "2026-09-08",
   }), true);
+  assert.equal(validMarketChartDeltaResponse({
+    ...validDelta,
+    bars: validDelta.bars.map((bar, index) =>
+      index === validDelta.bars.length - 1
+        ? { ...bar, close: validDelta.displayQuote.price - 0.01 }
+        : bar
+    ),
+  }, {
+    asset: "stock",
+    symbol: "SPY",
+    sessionScope: "extended",
+    displayedSessionDate: "2026-09-08",
+  }), false);
   assert.equal(validMarketChartDeltaResponse(validDelta, {
     asset: "stock",
     symbol: "QQQ",

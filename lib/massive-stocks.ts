@@ -46,6 +46,9 @@ export type MassiveRealtimeEntitlement = {
   lastQuote: boolean;
   checkedAt: string;
   errors: string[];
+  /** Provider throttle metadata, when any entitlement probe was throttled. */
+  rateLimitStatus: number | null;
+  retryAfter: string | null;
 };
 
 export type MassiveLastTrade = {
@@ -62,6 +65,19 @@ export type MassiveLastQuote = {
   timestamp: string;
 };
 
+export function massiveLastQuoteHasUsableNbbo(
+  quote: MassiveLastQuote | null | undefined,
+) {
+  return Boolean(
+    quote &&
+      quote.bid !== null &&
+      quote.ask !== null &&
+      quote.bid > 0 &&
+      quote.ask >= quote.bid &&
+      Number.isFinite(Date.parse(quote.timestamp)),
+  );
+}
+
 export type MassiveTradePrint = {
   id: string | null;
   price: number;
@@ -74,6 +90,11 @@ export type MassiveTradePrint = {
 export type MassiveProviderResult<T> = {
   value: T;
   error: string | null;
+};
+
+export type MassiveProviderHttpResult<T> = MassiveProviderResult<T> & {
+  status: number;
+  retryAfter: string | null;
 };
 
 export type MassiveRecentTrades = {
@@ -130,6 +151,7 @@ async function massiveJson(
     return {
       ok: false,
       status: 0,
+      retryAfter: null,
       payload: {} as MassivePayload,
       error: "Missing POLYGON_API_KEY.",
     };
@@ -148,6 +170,7 @@ async function massiveJson(
     return {
       ok: response.ok,
       status: response.status,
+      retryAfter: response.headers.get("Retry-After"),
       payload,
       error: response.ok ? null : providerError(payload, response.status),
     };
@@ -155,6 +178,7 @@ async function massiveJson(
     return {
       ok: false,
       status: 0,
+      retryAfter: null,
       payload: {} as MassivePayload,
       error: error instanceof Error ? error.message : "Massive request failed.",
     };
@@ -170,19 +194,44 @@ function payloadResult<T>(payload: MassivePayload): T | null {
 export async function fetchMassiveLastTrade(
   symbol: string,
 ): Promise<MassiveLastTrade | null> {
+  return (await fetchMassiveLastTradeResult(symbol)).value;
+}
+
+export async function fetchMassiveLastTradeResult(
+  symbol: string,
+): Promise<MassiveProviderHttpResult<MassiveLastTrade | null>> {
   const result = await massiveJson(
     `/v2/last/trade/${encodeURIComponent(symbol)}`,
   );
-  if (!result.ok) return null;
+  if (!result.ok) {
+    return {
+      value: null,
+      error: result.error,
+      status: result.status,
+      retryAfter: result.retryAfter,
+    };
+  }
   const trade = payloadResult<MassiveTradeResult>(result.payload);
   const price = positiveNumber(trade?.p);
   const timestampMs = massiveTimestampMs(trade?.sip_timestamp ?? trade?.t);
-  if (price === null || timestampMs === null) return null;
+  if (price === null || timestampMs === null) {
+    return {
+      value: null,
+      error: "Massive trade had no verified price or provider timestamp.",
+      status: result.status,
+      retryAfter: result.retryAfter,
+    };
+  }
   const size = positiveNumber(trade?.s);
   return {
-    price,
-    size,
-    timestamp: new Date(timestampMs).toISOString(),
+    value: {
+      price,
+      size,
+      timestamp: new Date(timestampMs).toISOString(),
+    },
+    error: null,
+    status: result.status,
+    retryAfter: result.retryAfter,
   };
 }
 
@@ -195,25 +244,48 @@ export async function fetchMassiveLastQuote(
 
 export async function fetchMassiveLastQuoteResult(
   symbol: string,
-): Promise<MassiveProviderResult<MassiveLastQuote | null>> {
+): Promise<MassiveProviderHttpResult<MassiveLastQuote | null>> {
   const result = await massiveJson(
     `/v2/last/nbbo/${encodeURIComponent(symbol)}`,
   );
-  if (!result.ok) return { value: null, error: result.error };
+  if (!result.ok) {
+    return {
+      value: null,
+      error: result.error,
+      status: result.status,
+      retryAfter: result.retryAfter,
+    };
+  }
   const quote = payloadResult<MassiveQuoteResult>(result.payload);
   const timestampMs = massiveTimestampMs(quote?.sip_timestamp ?? quote?.t);
   if (timestampMs === null) {
-    return { value: null, error: "Massive quote had no provider timestamp." };
+    return {
+      value: null,
+      error: "Massive quote had no provider timestamp.",
+      status: result.status,
+      retryAfter: result.retryAfter,
+    };
   }
-  return {
-    value: {
+  const value: MassiveLastQuote = {
       bid: positiveNumber(quote?.p),
       ask: positiveNumber(quote?.P),
       bidSize: positiveNumber(quote?.s),
       askSize: positiveNumber(quote?.S),
       timestamp: new Date(timestampMs).toISOString(),
-    },
+  };
+  if (!massiveLastQuoteHasUsableNbbo(value)) {
+    return {
+      value: null,
+      error: "Massive quote had no usable, non-crossed NBBO bid and ask.",
+      status: result.status,
+      retryAfter: result.retryAfter,
+    };
+  }
+  return {
+    value,
     error: null,
+    status: result.status,
+    retryAfter: result.retryAfter,
   };
 }
 
@@ -301,12 +373,23 @@ export async function fetchMassiveRecentTrades(
 export async function fetchMassiveStockSnapshot(
   symbol: string,
 ): Promise<PolygonSnapshotRow | null> {
+  return (await fetchMassiveStockSnapshotResult(symbol)).value;
+}
+
+export async function fetchMassiveStockSnapshotResult(
+  symbol: string,
+): Promise<MassiveProviderHttpResult<PolygonSnapshotRow | null>> {
   const result = await massiveJson(
     `/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(symbol)}`,
   );
-  return result.ok && result.payload.ticker
-    ? result.payload.ticker
-    : null;
+  return {
+    value: result.ok && result.payload.ticker ? result.payload.ticker : null,
+    error: result.ok && result.payload.ticker
+      ? null
+      : result.error ?? "Massive snapshot had no ticker payload.",
+    status: result.status,
+    retryAfter: result.retryAfter,
+  };
 }
 
 export async function probeMassiveRealtimeEntitlement(options: {
@@ -327,6 +410,8 @@ export async function probeMassiveRealtimeEntitlement(options: {
       lastQuote: false,
       checkedAt: new Date(now).toISOString(),
       errors: ["Missing POLYGON_API_KEY."],
+      rateLimitStatus: null,
+      retryAfter: null,
     };
   }
 
@@ -343,6 +428,12 @@ export async function probeMassiveRealtimeEntitlement(options: {
   const lastQuote = quoteResult.ok && Boolean(quoteResult.payload.results);
   const errors = [snapshotResult, tradeResult, quoteResult]
     .flatMap((result) => result.error ? [result.error] : []);
+  const throttled = [snapshotResult, tradeResult, quoteResult].find(
+    (result) =>
+      result.status === 429 ||
+      result.status === 503 ||
+      Boolean(result.retryAfter?.trim()),
+  );
   const value: MassiveRealtimeEntitlement = {
     configured,
     dataMode: snapshot && lastTrade && lastQuote ? "real_time" : snapshot ? "delayed" : "unavailable",
@@ -351,7 +442,23 @@ export async function probeMassiveRealtimeEntitlement(options: {
     lastQuote,
     checkedAt: new Date().toISOString(),
     errors,
+    rateLimitStatus: throttled?.status ?? null,
+    retryAfter: throttled?.retryAfter ?? null,
   };
-  cachedEntitlement = { expiresAt: now + 5 * 60 * 1_000, value };
+  // A transient provider error must not poison serving routes for five
+  // minutes. Cache only complete entitlement proof for the long window; a
+  // partial result receives a short Retry-After-bounded cooldown.
+  const parsedRetryAfterMs = (() => {
+    const raw = value.retryAfter?.trim();
+    if (!raw) return 0;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1_000);
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.max(0, date - now) : 0;
+  })();
+  const ttlMs = value.dataMode === "real_time"
+    ? 5 * 60 * 1_000
+    : Math.min(30_000, Math.max(2_000, parsedRetryAfterMs));
+  cachedEntitlement = { expiresAt: now + ttlMs, value };
   return value;
 }

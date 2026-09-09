@@ -3,6 +3,8 @@ import test from "node:test";
 // @ts-expect-error strip-types runner
 import { LiveMarketViews, displayQuoteIsLive, displayQuoteLabel, validDisplayQuote } from "./live-market-view.ts";
 // @ts-expect-error strip-types runner
+import { MarketChartHttpError } from "./market-chart-polling.ts";
+// @ts-expect-error strip-types runner
 import { formatMarketPrice } from "./market-price-format.ts";
 import type { MarketChartResponse } from "./market-chart.ts";
 
@@ -45,14 +47,16 @@ test("a minute-bar fallback is not labeled as a live trade even if its clock is 
 });
 
 test("separate browser stores converge on the same published provider frame, without sharing memory", async () => {
+  let now = NOW;
   let published = frame();
-  const make = () => new LiveMarketViews({ now: () => NOW, chart: async () => published, quotes: async () => ({}) });
+  const make = () => new LiveMarketViews({ now: () => now, chart: async () => published, quotes: async () => ({}) });
   const desktop = make(), mobile = make();
   desktop.subscribe("stock:TEST", () => {}, true);
   mobile.subscribe("stock:TEST", () => {}, true);
   await desktop.poll(); await mobile.poll();
   assert.deepEqual(desktop.get("stock:TEST").quote, mobile.get("stock:TEST").quote);
-  published = frame(1.28);
+  now += 5_000;
+  published = frame(1.28, now);
   await desktop.poll(true);
   // Explicitly document the limit: separate poll cycles are not simultaneous.
   assert.notEqual(desktop.get("stock:TEST").quote!.price, mobile.get("stock:TEST").quote!.price);
@@ -87,23 +91,62 @@ test("malformed candle data cannot enter the shared display", () => {
   }
 });
 
-test("future, missing and invalid provider timestamps never become Live", () => {
-  assert.equal(validDisplayQuote(frame(1, NOW + 3000).displayQuote, NOW), false);
+test("device clock skew cannot reject a server-verified shared quote", () => {
+  assert.equal(validDisplayQuote(frame(1, NOW + 3000).displayQuote, NOW), true);
   assert.equal(validDisplayQuote({ ...frame().displayQuote!, asOf: "" }, NOW), false);
   assert.equal(validDisplayQuote({ ...frame().displayQuote!, price: NaN }, NOW), false);
 });
 
-test("Live expires by source age, not by the fact a request just succeeded", () => {
+test("device clock skew cannot downgrade the same fresh transport frame", () => {
+  const quote = frame(1, NOW).displayQuote!;
+  const aheadDeviceView = {
+    quote,
+    chart: frame(1, NOW),
+    receivedAt: NOW + 60_000,
+    error: false,
+  };
+  assert.equal(
+    displayQuoteIsLive(aheadDeviceView, NOW + 60_000, "crypto"),
+    true,
+  );
+});
+
+test("Live expires when the verified transport frame stops updating", () => {
   const { store, advance, now } = setup();
   store.acceptChart("stock:TEST", frame());
   assert.equal(displayQuoteIsLive(store.get("stock:TEST"), now()), true);
   advance(31_000);
-  store.acceptChart("stock:TEST", frame());
   assert.equal(displayQuoteIsLive(store.get("stock:TEST"), now()), false);
   assert.match(displayQuoteLabel(store.get("stock:TEST"), now()), /Last trade/);
   const closed = frame(1, now()); closed.displayQuote!.live = false;
   store.acceptChart("stock:TEST", closed);
   assert.equal(displayQuoteIsLive(store.get("stock:TEST"), now()), false);
+});
+
+test("repeated HTTP deltas with one unchanged provider frame cannot renew Live", async () => {
+  let now = NOW;
+  const unchanged = frame(1.2345, NOW);
+  const store = new LiveMarketViews({
+    now: () => now,
+    chart: async () => unchanged,
+    chartDelta: async () => unchanged,
+    quotes: async () => ({}),
+  });
+  store.subscribe("stock:TEST", () => {}, true);
+  await store.poll();
+  const admittedAt = store.get("stock:TEST").receivedAt;
+  for (let index = 0; index < 7; index += 1) {
+    now += 5_000;
+    await store.poll();
+  }
+  assert.equal(store.get("stock:TEST").receivedAt, admittedAt);
+  assert.equal(displayQuoteIsLive(store.get("stock:TEST"), now), false);
+
+  const downgrade = frame(1.2345, NOW);
+  downgrade.displayQuote!.live = false;
+  assert.equal(store.acceptChart("stock:TEST", downgrade), true);
+  assert.equal(store.get("stock:TEST").quote!.live, false);
+  assert.equal(store.get("stock:TEST").receivedAt, admittedAt);
 });
 
 test("desktop/mobile shared stock view loses Live at the close without waiting for polling", async () => {
@@ -124,16 +167,132 @@ test("desktop/mobile shared stock view loses Live at the close without waiting f
 });
 
 test("network failure retains matching data but removes Live; resume recovers", async () => {
+  let now = NOW;
   let failed = false;
-  const store = new LiveMarketViews({ now: () => NOW, chart: async () => { if (failed) throw Error("offline"); return frame(); }, quotes: async () => ({}) });
+  const store = new LiveMarketViews({ now: () => now, random: () => 0.5, chart: async () => { if (failed) throw Error("offline"); return frame(1.2345, now); }, quotes: async () => ({}) });
   store.subscribe("stock:TEST", () => {}, true);
-  await store.poll(); failed = true;
+  await store.poll(); failed = true; now += 5_000;
   await store.poll(true);
   assert.equal(store.get("stock:TEST").quote!.price, 1.2345);
   assert.equal(displayQuoteIsLive(store.get("stock:TEST"), NOW), false);
   assert.match(displayQuoteLabel(store.get("stock:TEST"), NOW), /reconnecting/);
-  failed = false; await store.poll(true);
-  assert.equal(displayQuoteIsLive(store.get("stock:TEST"), NOW), true);
+  failed = false; now += 5_000; await store.poll(true);
+  assert.equal(displayQuoteIsLive(store.get("stock:TEST"), now), true);
+});
+
+test("legacy chart consumers bootstrap once while closed and spend zero calls on later ticks", async () => {
+  let now = Date.parse("2026-09-12T15:00:00Z");
+  let requests = 0;
+  const store = new LiveMarketViews({
+    now: () => now,
+    chart: async () => { requests += 1; return frame(1.2, now); },
+    quotes: async () => ({}),
+  });
+  store.subscribe("stock:TEST", () => {}, true);
+  await store.poll();
+  assert.equal(requests, 1);
+  now += 60_000;
+  await store.poll();
+  await store.poll(true);
+  assert.equal(requests, 1);
+  now = Date.parse("2026-09-14T13:00:00Z");
+  await store.poll();
+  assert.equal(requests, 2);
+});
+
+test("quote-only stock consumers load retained evidence once while closed", async () => {
+  let now = Date.parse("2026-09-12T15:00:00Z");
+  let requests = 0;
+  const store = new LiveMarketViews({
+    now: () => now,
+    chart: async () => frame(),
+    quotes: async () => {
+      requests += 1;
+      return { TEST: frame(1.2, now).displayQuote! };
+    },
+  });
+  store.subscribe("stock:TEST", () => {}, false);
+  await store.poll();
+  assert.equal(requests, 1);
+  assert.equal(store.get("stock:TEST").quote?.price, 1.2);
+
+  now += 5_000;
+  await store.poll();
+  await store.poll(true);
+  now += 60_000;
+  await store.poll(true);
+  assert.equal(requests, 1);
+
+  now = Date.parse("2026-09-14T13:00:00Z");
+  await store.poll();
+  assert.equal(requests, 2);
+});
+
+test("legacy chart consumers recover a failed closed-session bootstrap once bounded retry expires", async () => {
+  let now = Date.parse("2026-09-12T15:00:00Z");
+  let requests = 0;
+  const store = new LiveMarketViews({
+    now: () => now,
+    random: () => 0.5,
+    chart: async () => {
+      requests += 1;
+      if (requests === 1) throw new Error("coordinator unavailable");
+      return frame(1.2, now);
+    },
+    quotes: async () => ({}),
+  });
+  store.subscribe("stock:TEST", () => {}, true);
+  await store.poll();
+  assert.equal(requests, 1);
+  now += 59_999;
+  await store.poll(true);
+  assert.equal(requests, 1);
+  now += 1;
+  await store.poll(true);
+  assert.equal(requests, 2);
+  now += 60_000;
+  await store.poll(true);
+  assert.equal(requests, 2);
+});
+
+test("legacy transport honors Retry-After and cannot be focus-forced through backoff", async () => {
+  let now = Date.parse("2026-09-08T15:00:00Z");
+  let requests = 0;
+  const store = new LiveMarketViews({
+    now: () => now,
+    random: () => 0.5,
+    chart: async () => {
+      requests += 1;
+      throw new MarketChartHttpError("rate limited", 429, 60_000);
+    },
+    quotes: async () => ({}),
+  });
+  store.subscribe("stock:TEST", () => {}, true);
+  await store.poll();
+  now += 59_000;
+  await store.poll(true);
+  assert.equal(requests, 1);
+  now += 1_000;
+  await store.poll(true);
+  assert.equal(requests, 2);
+});
+
+test("legacy stock chart consumers use incremental deltas after one bootstrap", async () => {
+  let now = NOW;
+  let bootstraps = 0;
+  let deltas = 0;
+  const store = new LiveMarketViews({
+    now: () => now,
+    chart: async () => { bootstraps += 1; return frame(1, now); },
+    chartDelta: async () => { deltas += 1; return frame(1.1, now); },
+    quotes: async () => ({}),
+  });
+  store.subscribe("stock:TEST", () => {}, true);
+  await store.poll();
+  now += 5_000;
+  await store.poll();
+  assert.equal(bootstraps, 1);
+  assert.equal(deltas, 1);
 });
 
 test("a chart mounting during a quote request prevents an older independent header update", async () => {

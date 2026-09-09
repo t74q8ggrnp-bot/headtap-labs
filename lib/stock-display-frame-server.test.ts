@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
-import { parseStockDisplayFrame, publishStockDisplayFrame, selectLocalStockDisplayFrame, StockDisplayFrameCoordinationError, stockDisplayFrameBucket } from "./stock-display-frame-server.ts";
+import { createStockDisplayFrameCoordinationGuard, parseStockDisplayFrame, preflightStockDisplayFrameCoordination, publishStockDisplayFrame, selectLocalStockDisplayFrame, StockDisplayFrameCoordinationError, stockDisplayFrameBucket, stockDisplayFrameRpcProbeConfirmsContract } from "./stock-display-frame-server.ts";
 
 const trade = (symbol: string, price: number, asOf: number, frameBucket: number) => ({
   symbol,
@@ -90,6 +90,71 @@ test("shared publication fails closed when database coordination is unavailable"
         priceKind: "trade",
         size: 10,
       }, now),
+      (error: unknown) =>
+        error instanceof StockDisplayFrameCoordinationError &&
+        error.issue === "not_configured",
+    );
+  } finally {
+    if (priorUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = priorUrl;
+    if (priorServiceRoleKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = priorServiceRoleKey;
+    if (priorServiceKey === undefined) delete process.env.SUPABASE_SERVICE_KEY;
+    else process.env.SUPABASE_SERVICE_KEY = priorServiceKey;
+  }
+});
+
+test("coordination is preflighted before callers are allowed to spend provider requests", async () => {
+  let clock = 1_000;
+  let probes = 0;
+  let providerLoads = 0;
+  const guard = createStockDisplayFrameCoordinationGuard({
+    now: () => clock,
+    readyTtlMs: 10_000,
+    failureTtlMs: 30_000,
+    probe: async () => {
+      probes += 1;
+      throw new StockDisplayFrameCoordinationError("rpc_error");
+    },
+  });
+  const guardedLoad = async () => {
+    await guard.preflight();
+    providerLoads += 1;
+  };
+
+  await assert.rejects(guardedLoad, StockDisplayFrameCoordinationError);
+  await assert.rejects(guardedLoad, StockDisplayFrameCoordinationError);
+  assert.equal(probes, 1);
+  assert.equal(providerLoads, 0);
+
+  clock += 30_001;
+  await assert.rejects(guardedLoad, StockDisplayFrameCoordinationError);
+  assert.equal(probes, 2);
+  assert.equal(providerLoads, 0);
+});
+
+test("0048 RPC preflight accepts only its exact non-mutating validation error", () => {
+  assert.equal(stockDisplayFrameRpcProbeConfirmsContract({
+    code: "P0001",
+    message: "Expected 1-250 stock display candidates",
+  }), true);
+  assert.equal(stockDisplayFrameRpcProbeConfirmsContract({
+    code: "PGRST202",
+    message: "Could not find the function",
+  }), false);
+  assert.equal(stockDisplayFrameRpcProbeConfirmsContract(null), false);
+});
+
+test("shared coordination preflight fails closed when service config is absent", async () => {
+  const priorUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const priorServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const priorServiceKey = process.env.SUPABASE_SERVICE_KEY;
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.SUPABASE_SERVICE_KEY;
+  try {
+    await assert.rejects(
+      preflightStockDisplayFrameCoordination(),
       (error: unknown) =>
         error instanceof StockDisplayFrameCoordinationError &&
         error.issue === "not_configured",

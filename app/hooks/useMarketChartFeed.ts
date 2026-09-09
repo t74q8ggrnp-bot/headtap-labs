@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   marketChartFeedFrameFromBootstrap,
+  marketChartFeedFrameForSymbol,
+  marketChartTransportNow,
   mergeMarketChartFeedDelta,
   validMarketChartBootstrapResponse,
   validMarketChartDeltaResponse,
@@ -15,6 +17,18 @@ import {
   displayQuoteLabel,
   type MarketView,
 } from "@/lib/live-market-view";
+import {
+  alignedMarketChartPollDelay,
+  createServerAnchoredClock,
+  createMarketChartPollAttemptGate,
+  marketChartBootstrapRetryDelay,
+  marketChartFailureBackoffMs,
+  marketChartPollingState,
+  marketChartRolloverBootstrapDelay,
+  marketChartSessionRolloverRequired,
+  MarketChartHttpError,
+  parseRetryAfterMs,
+} from "@/lib/market-chart-polling";
 
 type Fetcher = typeof fetch;
 
@@ -22,12 +36,22 @@ export function createPollingMarketChartTransport(options: {
   fetcher?: Fetcher;
   intervalMs?: number;
   now?: () => number;
+  monotonicNow?: () => number;
+  random?: () => number;
 } = {}): MarketChartTransport {
   const fetcher = options.fetcher ?? fetch;
   const intervalMs = Math.max(1_000, options.intervalMs ?? 5_000);
-  const now = options.now ?? (() => Date.now());
+  const deviceNow = options.now ?? (() => Date.now());
+  const serverClock = createServerAnchoredClock({
+    deviceNow,
+    monotonicNow: options.monotonicNow ?? (options.now ? deviceNow : undefined),
+  });
+  const now = serverClock.now;
+  const random = options.random ?? Math.random;
 
   return {
+    trustedNow: now,
+    acceptTrustedTime: serverClock.accept,
     async loadBootstrap(request, signal) {
       const params = new URLSearchParams({
         asset: request.asset,
@@ -38,32 +62,62 @@ export function createPollingMarketChartTransport(options: {
         cache: "no-store",
         signal,
       });
+      serverClock.accept(response.headers.get("Date"));
       if (!response.ok) {
-        throw new Error(`Chart bootstrap unavailable (${response.status}).`);
+        throw new MarketChartHttpError(
+          `Chart bootstrap unavailable (${response.status}).`,
+          response.status,
+          parseRetryAfterMs(response.headers.get("Retry-After"), now()),
+        );
       }
       const payload: unknown = await response.json();
       if (!validMarketChartBootstrapResponse(payload, request)) {
         throw new Error("Chart bootstrap contract mismatch.");
       }
+      serverClock.accept(payload.instrumentation.responseCompletedAt);
       return payload;
     },
     subscribe(request, listener, onError) {
       let stopped = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
       let controller: AbortController | null = null;
+      let consecutiveFailures = 0;
+      const attemptGate = createMarketChartPollAttemptGate(now);
 
-      const schedule = () => {
+      const schedule = (delayMs?: number) => {
         if (stopped) return;
-        const remainder = now() % intervalMs;
-        timer = setTimeout(run, Math.max(250, intervalMs - remainder));
+        if (timer) clearTimeout(timer);
+        const policy = marketChartPollingState(
+          new Date(now()),
+          request.sessionScope ?? "extended",
+        );
+        const requestedDelay = delayMs ?? (policy.active
+          ? alignedMarketChartPollDelay(now(), intervalMs)
+          : policy.retryAfterMs);
+        const delay = attemptGate.delay(requestedDelay);
+        timer = setTimeout(run, delay);
       };
       const run = async () => {
         if (stopped) return;
+        timer = null;
         if (
           typeof document !== "undefined" &&
           (document.visibilityState === "hidden" || !navigator.onLine)
         ) {
-          schedule();
+          schedule(Math.max(intervalMs, 15_000));
+          return;
+        }
+        const policy = marketChartPollingState(
+          new Date(now()),
+          request.sessionScope ?? "extended",
+        );
+        if (!policy.active) {
+          // Recheck the local market clock without contacting HT or Massive.
+          schedule(policy.retryAfterMs);
+          return;
+        }
+        if (!attemptGate.start()) {
+          schedule(intervalMs);
           return;
         }
         controller = new AbortController();
@@ -77,28 +131,74 @@ export function createPollingMarketChartTransport(options: {
             cache: "no-store",
             signal: controller.signal,
           });
+          serverClock.accept(response.headers.get("Date"));
           if (!response.ok) {
-            throw new Error(`Chart delta unavailable (${response.status}).`);
+            throw new MarketChartHttpError(
+              `Chart delta unavailable (${response.status}).`,
+              response.status,
+              parseRetryAfterMs(response.headers.get("Retry-After"), now()),
+            );
           }
           const payload: unknown = await response.json();
           if (!validMarketChartDeltaResponse(payload, request)) {
             throw new Error("Chart delta contract mismatch.");
           }
+          if (payload.instrumentation) {
+            serverClock.accept(payload.instrumentation.responseCompletedAt);
+          }
           listener(payload);
+          consecutiveFailures = 0;
+          // Focus/online events may recover a paused feed, but they cannot
+          // compress the successful provider cadence below the configured
+          // interval and multiply requests.
+          attemptGate.succeed(intervalMs);
+          schedule();
         } catch (error) {
           if (!stopped && !(error instanceof DOMException && error.name === "AbortError")) {
             onError?.(error);
+            consecutiveFailures += 1;
+            const retryDelay = marketChartFailureBackoffMs({
+              attempt: consecutiveFailures,
+              baseMs: intervalMs,
+              retryAfterMs: error instanceof MarketChartHttpError
+                ? error.retryAfterMs
+                : null,
+              random,
+            });
+            attemptGate.fail(retryDelay);
+            schedule(retryDelay);
+          } else {
+            attemptGate.succeed();
           }
         } finally {
           controller = null;
-          schedule();
         }
       };
+      const recheckNow = () => {
+        if (
+          stopped ||
+          attemptGate.running ||
+          (typeof document !== "undefined" &&
+            (document.visibilityState === "hidden" || !navigator.onLine))
+        ) return;
+        schedule(250);
+      };
+      if (typeof window !== "undefined") {
+        window.addEventListener("online", recheckNow);
+        window.addEventListener("focus", recheckNow);
+        document.addEventListener("visibilitychange", recheckNow);
+      }
       schedule();
       return () => {
         stopped = true;
+        attemptGate.stop();
         if (timer) clearTimeout(timer);
         controller?.abort();
+        if (typeof window !== "undefined") {
+          window.removeEventListener("online", recheckNow);
+          window.removeEventListener("focus", recheckNow);
+          document.removeEventListener("visibilitychange", recheckNow);
+        }
       };
     },
   };
@@ -126,7 +226,7 @@ export function useMarketChartFeed(
 
   useEffect(() => {
     const tick = () => {
-      setClock(Date.now());
+      setClock(marketChartTransportNow(transport));
       setOffline(!navigator.onLine);
     };
     const timer = window.setInterval(tick, 1_000);
@@ -143,7 +243,7 @@ export function useMarketChartFeed(
       window.removeEventListener("offline", tick);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, []);
+  }, [transport]);
 
   useEffect(() => {
     if (!normalizedSymbol || !enabled) {
@@ -160,6 +260,9 @@ export function useMarketChartFeed(
     let connecting = false;
     let retryTimer: number | null = null;
     let retryAttempt = 0;
+    let retryNotBefore = 0;
+    let lastRolloverBootstrapAt = 0;
+    const trustedNow = () => marketChartTransportNow(transport);
     queueMicrotask(() => {
       if (!active) return;
       setFrame(null);
@@ -167,14 +270,28 @@ export function useMarketChartFeed(
       setError(null);
     });
 
-    const scheduleRetry = () => {
+    const scheduleRetry = (reason?: unknown) => {
       if (!active || retryTimer) return;
-      const delay = Math.min(30_000, 5_000 * 2 ** retryAttempt);
       retryAttempt += 1;
-      retryTimer = window.setTimeout(() => {
+      const backoffMs = marketChartFailureBackoffMs({
+        attempt: retryAttempt,
+        retryAfterMs: reason instanceof MarketChartHttpError
+          ? reason.retryAfterMs
+          : null,
+      });
+      const delay = marketChartBootstrapRetryDelay({
+        now: new Date(trustedNow()),
+        sessionScope,
+        backoffMs,
+      });
+      retryNotBefore = trustedNow() + delay;
+      const retryWhenEligible = () => {
         retryTimer = null;
+        // Bootstrap may recover retained history once per bounded retry while
+        // closed. Only delta subscriptions are prohibited outside sessions.
         void connect(false);
-      }, delay);
+      };
+      retryTimer = window.setTimeout(retryWhenEligible, delay);
     };
     const connect = async (sessionRollover = false) => {
       if (!active || connecting) return;
@@ -187,10 +304,20 @@ export function useMarketChartFeed(
         );
         if (!active) return;
         unsubscribe?.();
-        setFrame(marketChartFeedFrameFromBootstrap(bootstrap));
+        setFrame(marketChartFeedFrameFromBootstrap(bootstrap, trustedNow()));
         setLoading(false);
         setError(null);
         retryAttempt = 0;
+        retryNotBefore = 0;
+        const bootstrapCompletedAt = trustedNow();
+        lastRolloverBootstrapAt = marketChartSessionRolloverRequired({
+          displayedSessionDate:
+            bootstrap.sessionAuthority.displayedSessionDate,
+          now: new Date(bootstrapCompletedAt),
+          sessionScope,
+        })
+          ? bootstrapCompletedAt
+          : 0;
         if (retryTimer) {
           window.clearTimeout(retryTimer);
           retryTimer = null;
@@ -217,12 +344,39 @@ export function useMarketChartFeed(
               return;
             }
             setFrame((current) =>
-              current ? mergeMarketChartFeedDelta(current, delta) : current,
+              current
+                ? mergeMarketChartFeedDelta(current, delta, trustedNow())
+                : current,
             );
             setError(null);
           },
-          () => {
-            if (active) setError("Live update reconnecting");
+          (reason) => {
+            if (!active) return;
+            if (reason instanceof MarketChartHttpError && reason.status === 409) {
+              // An illiquid ticker may legitimately retain yesterday's frame
+              // after a new extended session opens. One bootstrap per minute is
+              // enough to discover its first current-session print; retrying
+              // four bootstrap calls every five seconds is not.
+              if (marketChartRolloverBootstrapDelay(
+                lastRolloverBootstrapAt,
+                trustedNow(),
+              ) > 0) {
+                setError(null);
+                return;
+              }
+              lastRolloverBootstrapAt = trustedNow();
+              const previousSubscription = unsubscribe;
+              unsubscribe = null;
+              previousSubscription?.();
+              setError(null);
+              void connect(true);
+              return;
+            }
+            if (reason instanceof MarketChartHttpError && reason.status === 425) {
+              setError(null);
+              return;
+            }
+            setError("Live update reconnecting");
           },
         );
       } catch (reason: unknown) {
@@ -231,7 +385,7 @@ export function useMarketChartFeed(
         setError(
           reason instanceof Error ? reason.message : "Chart feed unavailable.",
         );
-        scheduleRetry();
+        scheduleRetry(reason);
       } finally {
         connecting = false;
       }
@@ -241,6 +395,21 @@ export function useMarketChartFeed(
       // create another bootstrap while an already-healthy subscription is
       // running. The polling transport itself resumes when the tab is visible.
       if (!active || !navigator.onLine || connecting || unsubscribe) return;
+      const session = marketChartPollingState(new Date(trustedNow()), sessionScope);
+      if (!session.active && retryAttempt > 0) {
+        if (!retryTimer) scheduleRetry();
+        return;
+      }
+      const retryDelay = retryNotBefore - trustedNow();
+      if (retryDelay > 0) {
+        if (!retryTimer) {
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            void connect(false);
+          }, retryDelay);
+        }
+        return;
+      }
       if (retryTimer) {
         window.clearTimeout(retryTimer);
         retryTimer = null;
@@ -262,23 +431,41 @@ export function useMarketChartFeed(
   }, [enabled, normalizedSymbol, sessionScope, transport]);
 
   return useMemo(() => {
+    // React effects clear state after a symbol prop changes. Fail closed during
+    // that render so an old symbol can never appear below a new ticker header.
+    const currentFrame = marketChartFeedFrameForSymbol(
+      frame,
+      normalizedSymbol,
+    );
+    const currentError = currentFrame || !frame ? error : null;
     const view: MarketView = {
-      quote: frame?.chart.displayQuote ?? null,
-      chart: frame?.chart ?? null,
-      receivedAt: frame?.receivedAt ?? 0,
-      error: Boolean(error),
+      quote: currentFrame?.chart.displayQuote ?? null,
+      chart: currentFrame?.chart ?? null,
+      receivedAt: currentFrame?.receivedAt ?? 0,
+      error: Boolean(currentError),
     };
     const live = !offline && clock > 0 && displayQuoteIsLive(view, clock, "stock");
     return {
-      frame,
-      loading,
-      error,
-      reconnecting: Boolean(error && frame),
+      frame: currentFrame,
+      loading: loading || Boolean(enabled && normalizedSymbol && !currentFrame),
+      error: currentError,
+      reconnecting: Boolean(currentError && currentFrame),
       live,
       offline,
+      nowMs: clock,
+      acceptTrustedTime: transport.acceptTrustedTime,
       label: offline
         ? "Offline · last received data"
         : displayQuoteLabel(view, clock, "stock"),
     };
-  }, [clock, error, frame, loading, offline]);
+  }, [
+    clock,
+    enabled,
+    error,
+    frame,
+    loading,
+    normalizedSymbol,
+    offline,
+    transport.acceptTrustedTime,
+  ]);
 }

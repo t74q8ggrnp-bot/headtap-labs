@@ -6,19 +6,27 @@ import {
   isActiveMarketTimestampUsable,
 } from "@/lib/market-data-time";
 import {
-  fetchMassiveLastQuote,
-  fetchMassiveLastTrade,
-  fetchMassiveStockSnapshot,
-  probeMassiveRealtimeEntitlement,
+  fetchMassiveLastQuoteResult,
+  fetchMassiveLastTradeResult,
+  fetchMassiveStockSnapshotResult,
 } from "@/lib/massive-stocks";
 import {
   resolveSnapshotChangePercent,
 } from "@/lib/polygon-snapshot";
 import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
-import { fetchHydratedSessionSnapshot } from "@/lib/intraday-snapshot-hydration";
 import { getStockMarketClock } from "@/lib/stock-market-session";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
-import { publishStockDisplayFrame } from "@/lib/stock-display-frame-server";
+import {
+  marketChartPollingState,
+  MarketChartHttpError,
+  parseRetryAfterMs,
+  providerResponseRequiresBackoff,
+} from "@/lib/market-chart-polling";
+import {
+  preflightStockDisplayFrameCoordination,
+  publishStockDisplayFrame,
+  StockDisplayFrameCoordinationError,
+} from "@/lib/stock-display-frame-server";
 
 export const dynamic = "force-dynamic";
 
@@ -55,29 +63,67 @@ export async function GET(request: Request) {
   }
 
   const requestStartedAt = new Date();
-  const clock = getStockMarketClock(requestStartedAt);
-  const massiveApiKey = process.env.POLYGON_API_KEY?.trim();
-  const sessionOhlcvPromise = massiveApiKey && clock.active
-    ? fetchHydratedSessionSnapshot(symbol, massiveApiKey, clock.session).catch(
-      (error: unknown) => {
-        console.error("[quote] Massive session OHLCV hydration failed", {
-          symbol,
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
-        return null;
-      },
-    )
-    : Promise.resolve(null);
+  let providerRequestsAttempted = 0;
+  const callProvider = <T>(requestProvider: () => Promise<T>) => {
+    providerRequestsAttempted += 1;
+    return requestProvider();
+  };
+  const providerHeaders = () => ({
+    ...responseHeaders,
+    "X-HT-Provider-Requests-Attempted": String(providerRequestsAttempted),
+  });
   try {
-    const [snapshot, liveTrade, liveQuote, entitlement, sessionOhlcv] =
-      await Promise.all([
-      fetchMassiveStockSnapshot(symbol),
-      fetchMassiveLastTrade(symbol),
-      fetchMassiveLastQuote(symbol),
-      probeMassiveRealtimeEntitlement(),
-      sessionOhlcvPromise,
+    // Fail before any provider function is invoked when the cross-instance
+    // display-frame coordinator cannot uphold the shared-price invariant.
+    await preflightStockDisplayFrameCoordination();
+
+    // The quote endpoint is a recurring price path, not a chart-history path.
+    // Reuse the snapshot's session OHLCV instead of downloading the same
+    // minute candles again on every quote refresh. Full candle history is
+    // owned by /api/market-chart bootstrap and its incremental delta route.
+    const [snapshotResult, tradeResult, quoteResult] = await Promise.all([
+      callProvider(() => fetchMassiveStockSnapshotResult(symbol)),
+      callProvider(() => fetchMassiveLastTradeResult(symbol)),
+      callProvider(() => fetchMassiveLastQuoteResult(symbol)),
     ]);
+    const throttled = [snapshotResult, tradeResult, quoteResult].find(
+      (result) => providerResponseRequiresBackoff(
+        result.status,
+        result.retryAfter,
+      ),
+    );
+    if (throttled) {
+      throw new MarketChartHttpError(
+        "Massive rate-limited the stock quote.",
+        throttled.status,
+        parseRetryAfterMs(throttled.retryAfter, Date.now()),
+      );
+    }
     const receivedAt = new Date();
+    const responseSession = marketChartPollingState(receivedAt, "extended");
+    const responseClock = getStockMarketClock(receivedAt);
+    const snapshot = snapshotResult.value;
+    const liveTrade = tradeResult.value;
+    const liveQuote = quoteResult.value;
+    const directRealtimeCoverage = Boolean(
+      liveTrade &&
+        liveQuote &&
+        isActiveMarketTimestampUsable(
+          liveTrade.timestamp,
+          receivedAt,
+          DISPLAY_LIVE_MAX_AGE_MS,
+        ) &&
+        isActiveMarketTimestampUsable(
+          liveQuote.timestamp,
+          receivedAt,
+          DISPLAY_LIVE_MAX_AGE_MS,
+        ),
+    );
+    const dataMode = snapshot && directRealtimeCoverage
+      ? "real_time" as const
+      : snapshot
+        ? "delayed" as const
+        : "unavailable" as const;
     if (!snapshot) {
       console.error("[quote] Massive snapshot unavailable", { symbol });
       return NextResponse.json(
@@ -89,7 +135,7 @@ export async function GET(request: Request) {
           provider: "massive_polygon",
           dataMode: "unavailable",
         },
-        { status: 502, headers: responseHeaders },
+        { status: 502, headers: providerHeaders() },
       );
     }
 
@@ -98,7 +144,7 @@ export async function GET(request: Request) {
       console.error("[quote] Massive returned no usable price", { symbol });
       return NextResponse.json(
         { error: "Verified price unavailable.", symbol, c: 0, dp: 0 },
-        { status: 502, headers: responseHeaders },
+        { status: 502, headers: providerHeaders() },
       );
     }
 
@@ -117,21 +163,18 @@ export async function GET(request: Request) {
       marketAsOf,
       new Date(timing.processedAt),
     );
-    const directRealtimeCoverage = Boolean(liveTrade && liveQuote);
-    const isLive = display.priceKind === "trade" && clock.active &&
-      entitlement.dataMode === "real_time" &&
+    const isLive = display.priceKind === "trade" && responseSession.active &&
+      dataMode === "real_time" &&
       directRealtimeCoverage &&
       activeTimestampUsable && isActiveMarketTimestampUsable(marketAsOf, new Date(), DISPLAY_LIVE_MAX_AGE_MS);
     const snapshotOpen = Number(snapshot.day?.o || 0);
     const snapshotHigh = Number(snapshot.day?.h || 0);
     const snapshotLow = Number(snapshot.day?.l || 0);
     const snapshotVolume = Number(snapshot.day?.v || 0);
-    const open = sessionOhlcv?.sessionOpenPrice ?? snapshotOpen;
-    const high = sessionOhlcv?.sessionHighPrice ?? snapshotHigh;
-    const low = sessionOhlcv?.sessionLowPrice ?? snapshotLow;
-    const volume = sessionOhlcv && sessionOhlcv.currentVolume > 0
-      ? sessionOhlcv.currentVolume
-      : snapshotVolume;
+    const open = snapshotOpen;
+    const high = snapshotHigh;
+    const low = snapshotLow;
+    const volume = snapshotVolume;
 
     return NextResponse.json({
       symbol,
@@ -156,15 +199,13 @@ export async function GET(request: Request) {
         ...(display.coordinationIssue ? { issue: display.coordinationIssue } : {}),
       } : null,
       provider: "massive_polygon",
-      dataMode: entitlement.dataMode,
-      marketSession: clock.session,
-      ohlcvAsOf: sessionOhlcv?.latestBarAt ?? marketAsOf,
-      ohlcvSource: sessionOhlcv
-        ? "massive_polygon_minute_aggregates"
-        : "massive_polygon_snapshot",
-      sessionOhlcvHydrated: Boolean(sessionOhlcv),
+      dataMode,
+      marketSession: responseSession.active ? responseClock.session : "closed",
+      ohlcvAsOf: marketAsOf,
+      ohlcvSource: "massive_polygon_snapshot",
+      sessionOhlcvHydrated: false,
       live: isLive,
-      freshness: clock.active
+      freshness: responseSession.active
         ? activeTimestampUsable ? "fresh" : "stale"
         : "retained_closed_session",
       degraded: !directRealtimeCoverage,
@@ -172,6 +213,7 @@ export async function GET(request: Request) {
         ? null
         : "Massive last-trade or NBBO coverage was unavailable; snapshot facts were retained explicitly.",
       activeMaxAgeMs: ACTIVE_MARKET_DATA_MAX_AGE_MS,
+      providerRequestsAttempted,
       timing: {
         ...timing,
         requestStartedAt: requestStartedAt.toISOString(),
@@ -180,8 +222,54 @@ export async function GET(request: Request) {
           receivedAt.getTime() - requestStartedAt.getTime(),
         ),
       },
-    }, { headers: responseHeaders });
+    }, { headers: providerHeaders() });
   } catch (error) {
+    if (error instanceof StockDisplayFrameCoordinationError) {
+      console.warn("[quote] Shared display-frame coordination unavailable", {
+        symbol,
+        issue: error.issue,
+      });
+      return NextResponse.json(
+        {
+          error: "Shared stock display-frame coordination is temporarily unavailable.",
+          symbol,
+          c: 0,
+          dp: 0,
+          provider: "massive_polygon",
+          dataMode: "unavailable",
+          coordinationIssue: error.issue,
+          providerRequestsAttempted,
+        },
+        {
+          status: 503,
+          headers: { ...providerHeaders(), "Retry-After": "30" },
+        },
+      );
+    }
+    if (error instanceof MarketChartHttpError) {
+      const retryAfterSeconds = Math.max(
+        1,
+        Math.ceil((error.retryAfterMs ?? 5_000) / 1_000),
+      );
+      return NextResponse.json(
+        {
+          error: "Massive quote capacity is temporarily unavailable.",
+          symbol,
+          c: 0,
+          dp: 0,
+          provider: "massive_polygon",
+          dataMode: "unavailable",
+          providerRequestsAttempted,
+        },
+        {
+          status: error.status || 503,
+          headers: {
+            ...providerHeaders(),
+            "Retry-After": String(retryAfterSeconds),
+          },
+        },
+      );
+    }
     console.error("[quote] Massive request failed", {
       symbol,
       message: error instanceof Error ? error.message : "Unknown error",
@@ -194,8 +282,9 @@ export async function GET(request: Request) {
         dp: 0,
         provider: "massive_polygon",
         dataMode: "unavailable",
+        providerRequestsAttempted,
       },
-      { status: 502, headers: responseHeaders },
+      { status: 502, headers: providerHeaders() },
     );
   }
 }

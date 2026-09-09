@@ -12,8 +12,8 @@ import {
 } from "@/lib/market-chart";
 import { checkApiRateLimit } from "@/lib/api-rate-limit";
 import {
-  fetchMassiveLastTrade,
-  fetchMassiveStockSnapshot,
+  fetchMassiveLastTradeResult,
+  fetchMassiveStockSnapshotResult,
 } from "@/lib/massive-stocks";
 import {
   resolveSnapshotChangePercent,
@@ -21,14 +21,25 @@ import {
 } from "@/lib/polygon-snapshot";
 import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
-import { getStockMarketClock, stockHistoryLabel } from "@/lib/stock-market-session";
+import { getStockMarketClock } from "@/lib/stock-market-session";
 import { fetchMassiveCryptoChart } from "@/lib/massive-crypto";
 import {
   areCryptoCapabilitiesEnabled,
   cryptoUnavailableResponse,
 } from "@/lib/crypto/product-capabilities";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
-import { publishStockDisplayFrame } from "@/lib/stock-display-frame-server";
+import {
+  preflightStockDisplayFrameCoordination,
+  publishStockDisplayFrame,
+  StockDisplayFrameCoordinationError,
+} from "@/lib/stock-display-frame-server";
+import {
+  MarketChartHttpError,
+  marketChartHistoryLabel,
+  marketChartPollingState,
+  parseRetryAfterMs,
+  providerResponseRequiresBackoff,
+} from "@/lib/market-chart-polling";
 import {
   createProviderRequestInstrumentation,
   marketBarsAtOrBeforeProviderTimestamp,
@@ -99,7 +110,7 @@ function evidenceTimestampIsCacheable(
   return providerTimestampCanEnterShortCache({
     providerTimestamp: timestamp,
     completedAt,
-    activeSession: getStockMarketClock(new Date(completedAt)).active,
+    activeSession: marketChartPollingState(new Date(completedAt), "extended").active,
     maxAgeMs: DISPLAY_LIVE_MAX_AGE_MS,
   });
 }
@@ -115,7 +126,10 @@ function aggregateEvidenceIsCacheable(
   return providerTimestampCanEnterShortCache({
     providerTimestamp: new Date(latest.time * 1_000).toISOString(),
     completedAt,
-    activeSession: getStockMarketClock(new Date(completedAt)).active,
+    activeSession: marketChartPollingState(
+      new Date(completedAt),
+      "extended",
+    ).active,
     maxAgeMs: maxAge,
   });
 }
@@ -192,6 +206,16 @@ async function fetchStockBars(
             cache: "no-store",
             signal: AbortSignal.timeout(15_000),
           });
+          if (providerResponseRequiresBackoff(
+            response.status,
+            response.headers.get("Retry-After"),
+          )) {
+            throw new MarketChartHttpError(
+              "Massive rate-limited chart history.",
+              response.status,
+              parseRetryAfterMs(response.headers.get("Retry-After"), Date.now()),
+            );
+          }
           if (!response.ok) {
             throw new Error(`Stock chart provider returned ${response.status}.`);
           }
@@ -227,6 +251,16 @@ async function fetchStockBars(
               signal: AbortSignal.timeout(15_000),
             },
           );
+          if (providerResponseRequiresBackoff(
+            response.status,
+            response.headers.get("Retry-After"),
+          )) {
+            throw new MarketChartHttpError(
+              "Massive rate-limited second aggregates.",
+              response.status,
+              parseRetryAfterMs(response.headers.get("Retry-After"), Date.now()),
+            );
+          }
           if (!response.ok) return { bars: [], succeeded: false };
           const payload = (await response.json()) as PolygonPayload;
           const results = Array.isArray(payload.results)
@@ -253,9 +287,20 @@ async function fetchStockBars(
           symbol,
           timestampMs: bucketTimestamp,
         }),
-        load: () => {
+        load: async () => {
           onProviderAttempt();
-          return fetchMassiveStockSnapshot(symbol);
+          const result = await fetchMassiveStockSnapshotResult(symbol);
+          if (providerResponseRequiresBackoff(
+            result.status,
+            result.retryAfter,
+          )) {
+            throw new MarketChartHttpError(
+              "Massive rate-limited the stock snapshot.",
+              result.status,
+              parseRetryAfterMs(result.retryAfter, Date.now()),
+            );
+          }
+          return result.value;
         },
         cacheIf: (snapshot, completedAt) => {
           if (!snapshot) return false;
@@ -272,9 +317,20 @@ async function fetchStockBars(
           symbol,
           timestampMs: bucketTimestamp,
         }),
-        load: () => {
+        load: async () => {
           onProviderAttempt();
-          return fetchMassiveLastTrade(symbol);
+          const result = await fetchMassiveLastTradeResult(symbol);
+          if (providerResponseRequiresBackoff(
+            result.status,
+            result.retryAfter,
+          )) {
+            throw new MarketChartHttpError(
+              "Massive rate-limited the latest trade.",
+              result.status,
+              parseRetryAfterMs(result.retryAfter, Date.now()),
+            );
+          }
+          return result.value;
         },
         cacheIf: (trade, completedAt) =>
           Boolean(trade && evidenceTimestampIsCacheable(
@@ -346,7 +402,7 @@ async function fetchStockBars(
         }
       : null,
   );
-  const clock = getStockMarketClock();
+  const presentationSession = marketChartPollingState(new Date(), sessionScope);
   const displayQuote = {
     price: Number(displayPrice.toFixed(6)),
     changePercent: snapshot
@@ -355,7 +411,7 @@ async function fetchStockBars(
     asOf: displayAsOf,
     live:
       display.priceKind === "trade" &&
-      clock.active &&
+      presentationSession.active &&
       secondEvidence.value.succeeded &&
       isActiveMarketTimestampUsable(
         displayAsOf,
@@ -480,6 +536,7 @@ export async function GET(request: Request) {
     > | null = null;
 
     if (asset === "stock") {
+      await preflightStockDisplayFrameCoordination();
       const stockFeed = await fetchStockBars(
         symbol,
         requestStartedAt,
@@ -500,7 +557,11 @@ export async function GET(request: Request) {
         ? "Massive minute + second aggregates"
         : "Massive minute aggregates";
       const latest = bars.at(-1);
-      windowLabel = stockHistoryLabel(latest ? new Date(latest.time * 1_000).toISOString() : null);
+      windowLabel = marketChartHistoryLabel(
+        latest ? new Date(latest.time * 1_000).toISOString() : null,
+        requestStartedAt,
+        sessionScope,
+      );
     } else {
       productId = searchParams.get("productId")?.trim().toUpperCase() ?? "";
       if (!CRYPTO_PRODUCT_PATTERN.test(productId)) {
@@ -592,11 +653,30 @@ export async function GET(request: Request) {
         ? { requestId, providerRequestsAttempted }
         : {}),
     });
+    const coordinationFailure = error instanceof StockDisplayFrameCoordinationError;
+    const providerBackoff = error instanceof MarketChartHttpError &&
+      providerResponseRequiresBackoff(error.status, error.retryAfterMs === null
+        ? null
+        : String(error.retryAfterMs / 1_000));
+    const retryAfterMs = providerBackoff
+      ? error.retryAfterMs
+      : coordinationFailure ? 30_000 : null;
     return errorResponse(
-      "Verified price history is temporarily unavailable.",
-      502,
+      coordinationFailure
+        ? "Shared chart coordination is temporarily unavailable."
+        : providerBackoff
+          ? "Chart provider rate limit reached. Retrying with backoff."
+          : "Verified price history is temporarily unavailable.",
+      coordinationFailure
+        ? 503
+        : providerBackoff && error instanceof MarketChartHttpError
+          ? error.status
+          : 502,
       {
         ...rateLimit.headers,
+        ...(retryAfterMs !== null
+          ? { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1_000))) }
+          : {}),
         ...(asset === "stock"
           ? {
               "X-HT-Market-Feed-Request": requestId,

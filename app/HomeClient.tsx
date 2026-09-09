@@ -33,6 +33,7 @@ import {
   type OpportunityPayload,
 } from "./hooks/useOpportunityFeed";
 import { useWatchlist } from "./hooks/useWatchlist";
+import { useRecentlyViewed } from "./hooks/useRecentlyViewed";
 import {
   getOpportunityPresentation,
   normalizeOpportunity,
@@ -238,6 +239,7 @@ export default function HomeClient({
     syncState: watchlistSyncState,
     error: watchlistSyncError,
   } = useWatchlist({ userId: session?.user?.id ?? null });
+  const { record: recordRecentlyViewed } = useRecentlyViewed();
   const [mounted, setMounted] = useState(false);
   const [mobileCardIndex, setMobileCardIndex] = useState(0);
 
@@ -344,7 +346,6 @@ export default function HomeClient({
         : "";
   const signalMemoryInsight: { tracked: number; successRate: number | null } | null = null;
   const [savedSetups, setSavedSetups] = useState<string[]>([]);
-  const [, setViewedTickers] = useState<string[]>([]);
   const [marketScanStats, setMarketScanStats] = useState<MarketScanStats>({
     scanned: marketUniverse.length,
     gainers: 0,
@@ -892,12 +893,6 @@ export default function HomeClient({
       setSavedSetups(JSON.parse(savedAiSetups));
     }
 
-    const savedViewed = localStorage.getItem("htlabs-viewed-tickers");
-
-    if (savedViewed) {
-      setViewedTickers(JSON.parse(savedViewed));
-    }
-
   }, []);
 
   // Market context — real-time Massive snapshots, refreshed once per minute.
@@ -1122,11 +1117,7 @@ export default function HomeClient({
       });
 
       setSelectedStock(searchedStock);
-      setViewedTickers((prev) => {
-        const updated = [...new Set([searchedStock.symbol, ...prev])].slice(0, 12);
-        localStorage.setItem("htlabs-viewed-tickers", JSON.stringify(updated));
-        return updated;
-      });
+      recordRecentlyViewed(searchedStock.symbol);
 
       setSearchStatus(`${cleanTicker} loaded into HT. Add it to watchlist if it deserves tracking.`);
       setTicker("");
@@ -1183,12 +1174,7 @@ export default function HomeClient({
 
   const openAiModal = async (stock: Stock) => {
     setSelectedStock(stock);
-
-    setViewedTickers((prev) => {
-      const updated = [...new Set([stock.symbol, ...prev])].slice(0, 12);
-      localStorage.setItem("htlabs-viewed-tickers", JSON.stringify(updated));
-      return updated;
-    });
+    recordRecentlyViewed(stock.symbol);
     setAiLoading(true);
     setAiError("");
     setAiAnalysis("");

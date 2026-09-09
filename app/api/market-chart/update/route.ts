@@ -3,25 +3,37 @@ import {
   createProviderRequestInstrumentation,
   marketBarsAtOrBeforeProviderTimestamp,
   marketChartBarsInDisplayedSession,
+  marketChartFrameHasSharedPriceInvariant,
   marketChartSecondAggregateWindowStart,
   resolveMarketChartSessionAuthority,
   type MarketChartDeltaResponse,
   type MarketChartSessionScope,
 } from "@/lib/market-chart-feed";
 import {
+  mergeVerifiedTradeIntoBars,
   normalizeMarketBars,
   rollupMarketBars,
-  type MarketChartBar,
 } from "@/lib/market-chart";
 import {
-  fetchMassiveLastTrade,
+  fetchMassiveLastTradeResult,
   massiveStocksUrl,
 } from "@/lib/massive-stocks";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
 import { getStockMarketClock } from "@/lib/stock-market-session";
 import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
-import { publishStockDisplayFrame } from "@/lib/stock-display-frame-server";
+import {
+  preflightStockDisplayFrameCoordination,
+  publishStockDisplayFrame,
+  StockDisplayFrameCoordinationError,
+} from "@/lib/stock-display-frame-server";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
+import {
+  marketChartPollingState,
+  marketChartSessionRolloverRequired,
+  MarketChartHttpError,
+  parseRetryAfterMs,
+  providerResponseRequiresBackoff,
+} from "@/lib/market-chart-polling";
 import {
   marketProviderCoalescingKey,
   marketProviderCostGuard,
@@ -70,7 +82,26 @@ async function fetchSecondDelta(symbol: string, now: Date) {
     ),
     { cache: "no-store", signal: AbortSignal.timeout(10_000) },
   );
-  if (!response.ok) return { bars: [] as MarketChartBar[], succeeded: false };
+  if (providerResponseRequiresBackoff(
+    response.status,
+    response.headers.get("Retry-After"),
+  )) {
+    throw new MarketChartHttpError(
+      "Massive rate-limited the chart delta.",
+      response.status,
+      parseRetryAfterMs(response.headers.get("Retry-After"), now.getTime()),
+    );
+  }
+  if (!response.ok) {
+    // A persistent aggregate failure must reach the transport as a failure so
+    // its exponential backoff can engage. Returning a partial HTTP 200 would
+    // otherwise keep spending two provider calls every five seconds.
+    throw new MarketChartHttpError(
+      "Massive chart delta is unavailable.",
+      response.status,
+      parseRetryAfterMs(response.headers.get("Retry-After"), now.getTime()),
+    );
+  }
   const payload = (await response.json()) as { results?: unknown };
   const rows = Array.isArray(payload.results)
     ? (payload.results as PolygonAggregate[])
@@ -114,7 +145,10 @@ function secondDeltaIsCacheable(
         ? new Date(latest.time * 1_000).toISOString()
         : null,
       completedAt,
-      activeSession: getStockMarketClock(new Date(completedAt)).active,
+      activeSession: marketChartPollingState(
+        new Date(completedAt),
+        "extended",
+      ).active,
       maxAgeMs: DISPLAY_LIVE_MAX_AGE_MS,
     });
 }
@@ -161,7 +195,39 @@ export async function GET(request: Request) {
   const requestStartedAt = new Date();
   const requestId = crypto.randomUUID();
   let providerRequestsAttempted = 0;
+  const polling = marketChartPollingState(requestStartedAt, sessionScope);
+  if (!polling.active) {
+    return errorResponse(
+      "Stock chart updates are paused outside the requested market session.",
+      425,
+      {
+        ...rateLimit.headers,
+        "Retry-After": String(Math.ceil(polling.retryAfterMs / 1_000)),
+        "X-HT-Market-Feed-Request": requestId,
+        "X-HT-Provider-Requests-Attempted": "0",
+        "X-HT-Market-Polling-State": polling.reason,
+      },
+    );
+  }
+  if (marketChartSessionRolloverRequired({
+    displayedSessionDate,
+    now: requestStartedAt,
+    sessionScope,
+  })) {
+    return errorResponse(
+      "The displayed stock session has rolled over; reload the verified frame.",
+      409,
+      {
+        ...rateLimit.headers,
+        "X-HT-Market-Feed-Request": requestId,
+        "X-HT-Provider-Requests-Attempted": "0",
+        "X-HT-Session-Rollover": getStockMarketClock(requestStartedAt).easternDate,
+        "Retry-After": "60",
+      },
+    );
+  }
   try {
+    await preflightStockDisplayFrameCoordination();
     const bucketTimestamp = requestStartedAt.getTime();
     const [secondEvidence, lastTradeEvidence] = await Promise.all([
       marketProviderCostGuard.run({
@@ -183,15 +249,29 @@ export async function GET(request: Request) {
           symbol,
           timestampMs: bucketTimestamp,
         }),
-        load: () => {
+        load: async () => {
           providerRequestsAttempted += 1;
-          return fetchMassiveLastTrade(symbol);
+          const result = await fetchMassiveLastTradeResult(symbol);
+          if (providerResponseRequiresBackoff(
+            result.status,
+            result.retryAfter,
+          )) {
+            throw new MarketChartHttpError(
+              "Massive rate-limited the latest trade.",
+              result.status,
+              parseRetryAfterMs(result.retryAfter, Date.now()),
+            );
+          }
+          return result.value;
         },
         cacheIf: (trade, completedAt) => Boolean(trade &&
           providerTimestampCanEnterShortCache({
             providerTimestamp: trade.timestamp,
             completedAt,
-            activeSession: getStockMarketClock(new Date(completedAt)).active,
+            activeSession: marketChartPollingState(
+              new Date(completedAt),
+              sessionScope,
+            ).active,
             maxAgeMs: DISPLAY_LIVE_MAX_AGE_MS,
           })),
       }),
@@ -224,7 +304,11 @@ export async function GET(request: Request) {
     if (!display) {
       throw new Error("Stock chart display-frame coordination is unavailable.");
     }
-    const clock = getStockMarketClock(requestStartedAt);
+    const responseCompletedAt = new Date();
+    const responseSession = marketChartPollingState(
+      responseCompletedAt,
+      sessionScope,
+    );
     const authority = resolveMarketChartSessionAuthority({
       providerTimestamp: display.asOf,
       displayedSessionDate,
@@ -241,12 +325,21 @@ export async function GET(request: Request) {
       displayedSessionDate,
       sessionScope,
     );
-    const latestDelta = alignedBars.at(-1);
+    const mergedBars = mergeVerifiedTradeIntoBars(
+      alignedBars,
+      authority.displayPriceAppliedToCandle
+        ? {
+            price: display.price,
+            size: display.size ?? null,
+            timestamp: display.asOf,
+          }
+        : null,
+    );
     const instrumentation = createProviderRequestInstrumentation({
       phase: "delta",
       requestId,
       requestStartedAt,
-      responseCompletedAt: new Date(),
+      responseCompletedAt,
       requests: [
         providerReceipt(
           "second_delta",
@@ -256,41 +349,50 @@ export async function GET(request: Request) {
         providerReceipt("last_trade", lastTradeEvidence, lastTrade !== null),
       ],
     });
+    const displayQuote: MarketChartDeltaResponse["displayQuote"] = {
+      price: Number(display.price.toFixed(6)),
+      changePercent: null,
+      asOf: display.asOf,
+      live:
+        display.priceKind === "trade" &&
+        responseSession.active &&
+        secondDelta.succeeded &&
+        isActiveMarketTimestampUsable(
+          display.asOf,
+          responseCompletedAt,
+          DISPLAY_LIVE_MAX_AGE_MS,
+        ),
+      changeBasis: "previous_close",
+      source: display.source,
+      priceKind: display.priceKind,
+      ...("frameId" in display
+        ? {
+            frameId: display.frameId,
+            frameVersion: display.frameVersion,
+            frameBucket: display.frameBucket,
+            frameCoordination: display.coordination,
+            ...(display.coordinationIssue
+              ? { frameCoordinationIssue: display.coordinationIssue }
+              : {}),
+          }
+        : {}),
+    };
+    if (!marketChartFrameHasSharedPriceInvariant({
+      bars: mergedBars,
+      displayQuote,
+      sessionAuthority: authority,
+    })) {
+      throw new Error("Stock chart delta failed shared-price alignment.");
+    }
+    const latestDelta = mergedBars.at(-1);
     const payload: MarketChartDeltaResponse = {
       success: true,
       asset: "stock",
       symbol,
       feedVersion: "market-chart-feed-v1",
       feedPhase: "delta",
-      bars: alignedBars,
-      displayQuote: {
-        price: Number(display.price.toFixed(6)),
-        changePercent: null,
-        asOf: display.asOf,
-        live:
-          display.priceKind === "trade" &&
-          clock.active &&
-          secondDelta.succeeded &&
-          isActiveMarketTimestampUsable(
-            display.asOf,
-            requestStartedAt,
-            DISPLAY_LIVE_MAX_AGE_MS,
-          ),
-        changeBasis: "previous_close",
-        source: display.source,
-        priceKind: display.priceKind,
-        ...("frameId" in display
-          ? {
-              frameId: display.frameId,
-              frameVersion: display.frameVersion,
-              frameBucket: display.frameBucket,
-              frameCoordination: display.coordination,
-              ...(display.coordinationIssue
-                ? { frameCoordinationIssue: display.coordinationIssue }
-                : {}),
-            }
-          : {}),
-      },
+      bars: mergedBars,
+      displayQuote,
       latestAt: latestDelta
         ? new Date(latestDelta.time * 1_000).toISOString()
         : authority.candleIntervalTimestamp ?? display.asOf,
@@ -335,11 +437,30 @@ export async function GET(request: Request) {
       requestId,
       providerRequestsAttempted,
     });
+    const coordinationFailure = error instanceof StockDisplayFrameCoordinationError;
+    const providerBackoff = error instanceof MarketChartHttpError &&
+      providerResponseRequiresBackoff(error.status, error.retryAfterMs === null
+        ? null
+        : String(error.retryAfterMs / 1_000));
+    const retryAfterMs = providerBackoff
+      ? error.retryAfterMs
+      : coordinationFailure ? 30_000 : null;
     return errorResponse(
-      "Verified chart update is temporarily unavailable.",
-      502,
+      coordinationFailure
+        ? "Shared chart coordination is temporarily unavailable."
+        : providerBackoff
+          ? "Chart provider rate limit reached. Retrying with backoff."
+          : "Verified chart update is temporarily unavailable.",
+      coordinationFailure
+        ? 503
+        : providerBackoff && error instanceof MarketChartHttpError
+          ? error.status
+          : 502,
       {
         ...rateLimit.headers,
+        ...(retryAfterMs !== null
+          ? { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1_000))) }
+          : {}),
         "X-HT-Market-Feed-Request": requestId,
         "X-HT-Provider-Requests-Attempted": String(
           providerRequestsAttempted,

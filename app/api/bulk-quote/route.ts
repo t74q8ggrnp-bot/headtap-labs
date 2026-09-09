@@ -1,15 +1,27 @@
 import { NextResponse } from "next/server";
 import { checkApiRateLimit } from "@/lib/api-rate-limit";
-import { buildMarketDataTimingReceipt } from "@/lib/market-data-time";
-import { massiveStocksUrl, probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
-import { getStockMarketClock } from "@/lib/stock-market-session";
+import {
+  buildMarketDataTimingReceipt,
+  isActiveMarketTimestampUsable,
+} from "@/lib/market-data-time";
+import { massiveStocksUrl } from "@/lib/massive-stocks";
 import { DISPLAY_LIVE_MAX_AGE_MS } from "@/lib/live-market-view";
+import {
+  marketChartPollingState,
+  MarketChartHttpError,
+  parseRetryAfterMs,
+  providerResponseRequiresBackoff,
+} from "@/lib/market-chart-polling";
 import {
   resolveSnapshotChangePercent,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
 import { resolveStockDisplayPrice } from "@/lib/stock-display-price";
-import { publishStockDisplayFrames } from "@/lib/stock-display-frame-server";
+import {
+  preflightStockDisplayFrameCoordination,
+  publishStockDisplayFrames,
+  StockDisplayFrameCoordinationError,
+} from "@/lib/stock-display-frame-server";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +58,10 @@ type BulkQuote = {
 
 async function fetchSnapshotBatch(
   symbols: string[],
-  dataMode: BulkQuote["dataMode"],
   requestStartedAt: Date,
+  onProviderAttempt: () => void,
 ): Promise<Record<string, BulkQuote>> {
+  onProviderAttempt();
   const response = await fetch(
     massiveStocksUrl(
       "/v2/snapshot/locale/us/markets/stocks/tickers",
@@ -56,6 +69,19 @@ async function fetchSnapshotBatch(
     ),
     { cache: "no-store", signal: AbortSignal.timeout(12_000) },
   );
+  if (providerResponseRequiresBackoff(
+    response.status,
+    response.headers.get("Retry-After"),
+  )) {
+    throw new MarketChartHttpError(
+      "Massive rate-limited a bulk snapshot batch.",
+      response.status,
+      parseRetryAfterMs(
+        response.headers.get("Retry-After"),
+        Date.now(),
+      ),
+    );
+  }
   if (!response.ok) {
     throw new Error(`Massive snapshot returned ${response.status}.`);
   }
@@ -82,6 +108,16 @@ async function fetchSnapshotBatch(
     const price = display.price;
     const marketAsOf = display.asOf;
     const timestampMs = Date.parse(marketAsOf);
+    const currentSession = marketChartPollingState(receivedAt, "extended");
+    const dataMode: BulkQuote["dataMode"] = display.priceKind === "trade" &&
+        currentSession.active &&
+        isActiveMarketTimestampUsable(
+          marketAsOf,
+          receivedAt,
+          DISPLAY_LIVE_MAX_AGE_MS,
+        )
+      ? "real_time"
+      : "delayed";
     const previousVolume = Number(row.prevDay?.v || 0);
     result[symbol] = {
       price,
@@ -94,7 +130,7 @@ async function fetchSnapshotBatch(
       avgVolume: previousVolume,
       volumeBaseline: "previous_session_proxy",
       asOf: marketAsOf,
-      live: display.priceKind === "trade" && dataMode === "real_time" && getStockMarketClock(receivedAt).active &&
+      live: display.priceKind === "trade" && dataMode === "real_time" && currentSession.active &&
         receivedAt.getTime() - timestampMs >= -2_000 && receivedAt.getTime() - timestampMs <= DISPLAY_LIVE_MAX_AGE_MS,
       dataMode,
       source: display.source,
@@ -114,6 +150,7 @@ async function fetchSnapshotBatch(
 
 export async function POST(request: Request) {
   const requestStartedAt = new Date();
+  let providerRequestsAttempted = 0;
   const rateLimit = checkApiRateLimit(request, {
     namespace: "public-bulk-quote",
     limit: 30,
@@ -142,21 +179,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const entitlement = await probeMassiveRealtimeEntitlement();
-    if (!entitlement.snapshot) {
-      console.error("[bulk-quote] Massive snapshot entitlement unavailable", {
-        errors: entitlement.errors,
-      });
-      return NextResponse.json(
-        {
-          error: "Verified Massive snapshot data is unavailable.",
-          quotes: {},
-          provider: "massive_polygon",
-          dataMode: entitlement.dataMode,
-        },
-        { status: 502, headers },
-      );
-    }
+    // Validate the shared presentation coordinator before a snapshot call can
+    // spend provider capacity.
+    await preflightStockDisplayFrameCoordination();
 
     const merged: Record<string, BulkQuote> = {};
     const errors: string[] = [];
@@ -165,9 +190,15 @@ export async function POST(request: Request) {
       try {
         Object.assign(
           merged,
-          await fetchSnapshotBatch(batch, entitlement.dataMode, requestStartedAt),
+          await fetchSnapshotBatch(batch, requestStartedAt, () => {
+            providerRequestsAttempted += 1;
+          }),
         );
       } catch (error) {
+        // A provider throttle is global capacity evidence, not a ticker-level
+        // miss. Stop immediately so later 100-symbol batches cannot multiply
+        // charged failures, and preserve Retry-After for every client.
+        if (error instanceof MarketChartHttpError) throw error;
         const message = error instanceof Error ? error.message : "Unknown error";
         errors.push(message);
         console.error("[bulk-quote] Massive batch failed", {
@@ -186,7 +217,7 @@ export async function POST(request: Request) {
           quotes: {},
           missingSymbols,
           provider: "massive_polygon",
-          dataMode: entitlement.dataMode,
+          dataMode: "unavailable",
           degraded: true,
           errors,
         },
@@ -194,25 +225,96 @@ export async function POST(request: Request) {
       );
     }
 
+    const quoteModes = Object.values(merged).map((quote) => quote.dataMode);
+    const dataMode: BulkQuote["dataMode"] = quoteModes.every(
+      (mode) => mode === "real_time",
+    ) ? "real_time" : "delayed";
     return NextResponse.json({
       quotes: merged,
       requestedCount: symbols.length,
       returnedCount: Object.keys(merged).length,
       missingSymbols,
       provider: "massive_polygon",
-      dataMode: entitlement.dataMode,
+      dataMode,
       degraded,
       errors,
-      entitlementCheckedAt: entitlement.checkedAt,
       processedAt: new Date().toISOString(),
-    }, { headers });
+      instrumentation: {
+        providerRequestCount: providerRequestsAttempted,
+        providerOperation: "bulk_snapshot",
+      },
+    }, {
+      headers: {
+        ...headers,
+        "X-HT-Provider-Requests": String(providerRequestsAttempted),
+      },
+    });
   } catch (error) {
+    if (error instanceof MarketChartHttpError) {
+      return NextResponse.json(
+        {
+          error: "Massive quote capacity is temporarily unavailable.",
+          quotes: {},
+          provider: "massive_polygon",
+          dataMode: "unavailable",
+          providerRequestsAttempted,
+        },
+        {
+          status: error.status || 503,
+          headers: {
+            ...headers,
+            "Retry-After": String(Math.max(
+              1,
+              Math.ceil((error.retryAfterMs ?? 5_000) / 1_000),
+            )),
+            "X-HT-Provider-Requests-Attempted": String(
+              providerRequestsAttempted,
+            ),
+          },
+        },
+      );
+    }
+    if (error instanceof StockDisplayFrameCoordinationError) {
+      console.warn("[bulk-quote] Shared display-frame coordination unavailable", {
+        issue: error.issue,
+      });
+      return NextResponse.json(
+        {
+          error: "Shared stock display-frame coordination is temporarily unavailable.",
+          quotes: {},
+          provider: "massive_polygon",
+          dataMode: "unavailable",
+          coordinationIssue: error.issue,
+          providerRequestsAttempted,
+        },
+        {
+          status: 503,
+          headers: {
+            ...headers,
+            "Retry-After": "30",
+            "X-HT-Provider-Requests-Attempted": String(
+              providerRequestsAttempted,
+            ),
+          },
+        },
+      );
+    }
     console.error("[bulk-quote] Request failed", {
       message: error instanceof Error ? error.message : "Unknown error",
     });
     return NextResponse.json(
-      { error: "Bulk quote request failed.", quotes: {} },
-      { status: 500, headers },
+      {
+        error: "Bulk quote request failed.",
+        quotes: {},
+        providerRequestsAttempted,
+      },
+      {
+        status: 500,
+        headers: {
+          ...headers,
+          "X-HT-Provider-Requests-Attempted": String(providerRequestsAttempted),
+        },
+      },
     );
   }
 }

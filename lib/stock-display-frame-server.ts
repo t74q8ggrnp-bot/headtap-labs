@@ -29,6 +29,27 @@ export class StockDisplayFrameCoordinationError extends Error {
 
 type Candidate = StockDisplayPrice & { symbol: string; frameBucket: number };
 
+type CoordinationGuardOptions = {
+  probe: () => Promise<void>;
+  now?: () => number;
+  readyTtlMs?: number;
+  failureTtlMs?: number;
+};
+
+export type StockDisplayFrameCoordinationGuard = {
+  preflight: () => Promise<void>;
+  markReady: () => void;
+  markFailed: (issue: StockDisplayFrameCoordinationIssue) => void;
+};
+
+export function stockDisplayFrameRpcProbeConfirmsContract(error: unknown) {
+  if (!error || typeof error !== "object" || Array.isArray(error)) return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  return candidate.code === "P0001" &&
+    typeof candidate.message === "string" &&
+    candidate.message.includes("Expected 1-250 stock display candidates");
+}
+
 const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
 const localFrames = new Map<string, StockDisplayFrame>();
 
@@ -141,6 +162,98 @@ function displayFrameClient() {
   });
 }
 
+export function createStockDisplayFrameCoordinationGuard(
+  options: CoordinationGuardOptions,
+): StockDisplayFrameCoordinationGuard {
+  const now = options.now ?? (() => Date.now());
+  const readyTtlMs = Math.max(1_000, options.readyTtlMs ?? 30_000);
+  const failureTtlMs = Math.max(1_000, options.failureTtlMs ?? 30_000);
+  let readyUntil = 0;
+  let blockedUntil = 0;
+  let blockedIssue: StockDisplayFrameCoordinationIssue = "transport_error";
+  let inFlight: Promise<void> | null = null;
+
+  const markReady = () => {
+    readyUntil = now() + readyTtlMs;
+    blockedUntil = 0;
+  };
+  const markFailed = (issue: StockDisplayFrameCoordinationIssue) => {
+    readyUntil = 0;
+    blockedIssue = issue;
+    blockedUntil = now() + failureTtlMs;
+  };
+  const preflight = async () => {
+    const at = now();
+    if (at < readyUntil) return;
+    if (at < blockedUntil) {
+      throw new StockDisplayFrameCoordinationError(blockedIssue);
+    }
+    if (inFlight) return inFlight;
+    inFlight = options.probe()
+      .then(() => {
+        markReady();
+      })
+      .catch((error: unknown) => {
+        const issue = error instanceof StockDisplayFrameCoordinationError
+          ? error.issue
+          : "transport_error";
+        markFailed(issue);
+        throw new StockDisplayFrameCoordinationError(issue);
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  };
+  return { preflight, markReady, markFailed };
+}
+
+const coordinationGuard = createStockDisplayFrameCoordinationGuard({
+  probe: async () => {
+    const db = displayFrameClient();
+    if (!db) throw new StockDisplayFrameCoordinationError("not_configured");
+    try {
+      // This service-role read is deliberately performed before any Massive
+      // request. It validates config, network, PostgREST, the 0048 table and
+      // service-role access without mutating a presentation frame.
+      const [tableProbe, rpcProbe] = await Promise.all([
+        db
+          .from("ht_stock_display_frames")
+          .select("symbol")
+          .limit(1),
+        // An empty candidate list intentionally trips the function's first
+        // validation branch before any table write. Receiving that exact
+        // error proves the 0048 RPC exists, is in PostgREST's schema cache,
+        // and remains executable by the configured service role.
+        db.rpc("ht_publish_stock_display_frames", { p_candidates: [] }),
+      ]);
+      if (tableProbe.error) {
+        console.warn("[stock-display-frame] coordination preflight failed", {
+          code: tableProbe.error.code ?? "unknown",
+        });
+        throw new StockDisplayFrameCoordinationError("rpc_error");
+      }
+      if (!stockDisplayFrameRpcProbeConfirmsContract(rpcProbe.error)) {
+        console.warn("[stock-display-frame] coordination RPC preflight failed", {
+          code: rpcProbe.error?.code ?? "missing_expected_validation_error",
+        });
+        throw new StockDisplayFrameCoordinationError("rpc_error");
+      }
+    } catch (error) {
+      if (error instanceof StockDisplayFrameCoordinationError) throw error;
+      throw new StockDisplayFrameCoordinationError("transport_error");
+    }
+  },
+});
+
+/**
+ * Fail-closed provider-cost preflight. Call this before any Massive request so
+ * a missing or unavailable shared-frame coordinator cannot multiply spend.
+ */
+export async function preflightStockDisplayFrameCoordination() {
+  return coordinationGuard.preflight();
+}
+
 /** Presentation transport only. Never use the returned frame for scoring,
  * eligibility, Agent risk, paper fills, or order validation. */
 export async function publishStockDisplayFrames(
@@ -157,6 +270,7 @@ export async function publishStockDisplayFrames(
 
   const db = displayFrameClient();
   if (!db) {
+    coordinationGuard.markFailed("not_configured");
     throw new StockDisplayFrameCoordinationError("not_configured");
   }
   try {
@@ -173,10 +287,12 @@ export async function publishStockDisplayFrames(
     });
     if (error) {
       console.warn("[stock-display-frame] coordination RPC failed", { code: error.code ?? "unknown" });
+      coordinationGuard.markFailed("rpc_error");
       throw new StockDisplayFrameCoordinationError("rpc_error");
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       console.warn("[stock-display-frame] coordination RPC returned an invalid response");
+      coordinationGuard.markFailed("invalid_rpc_response");
       throw new StockDisplayFrameCoordinationError("invalid_rpc_response");
     }
     const parsed = Object.fromEntries(Object.entries(data).flatMap(([symbol, value]) => {
@@ -202,14 +318,17 @@ export async function publishStockDisplayFrames(
       [...expectedSymbols].some((symbol) => !parsed[symbol])
     ) {
       console.warn("[stock-display-frame] coordination RPC omitted a requested symbol");
+      coordinationGuard.markFailed("invalid_rpc_response");
       throw new StockDisplayFrameCoordinationError("invalid_rpc_response");
     }
+    coordinationGuard.markReady();
     return parsed;
   } catch (error) {
     if (error instanceof StockDisplayFrameCoordinationError) throw error;
     console.warn("[stock-display-frame] coordination transport failed", {
       name: error instanceof Error ? error.name : "unknown",
     });
+    coordinationGuard.markFailed("transport_error");
     throw new StockDisplayFrameCoordinationError("transport_error");
   }
 }

@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { WorkspaceInstrument } from "@/lib/instrument-search";
+import { writeWorkspaceInstrumentSeed } from "@/lib/workspace-instrument-seed";
 
 type SearchPayload = {
   ok?: boolean;
@@ -33,6 +34,12 @@ export default function TickerSearchCombobox({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [resultsQuery, setResultsQuery] = useState("");
+  const directCandidate = directSymbol(query);
+  const directOptionVisible = Boolean(
+    open && query.trim() && !error && !loading &&
+    results.length === 0 && directCandidate,
+  );
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -60,15 +67,20 @@ export default function TickerSearchCombobox({
           { cache: "no-store", signal: controller.signal },
         );
         const payload = (await response.json()) as SearchPayload;
+        if (controller.signal.aborted) return;
         if (!response.ok || payload.ok !== true) {
           throw new Error(payload.error || "Search is temporarily unavailable.");
         }
         setResults(payload.results ?? []);
-        setActiveIndex((payload.results?.length ?? 0) > 0 ? 0 : -1);
+        setResultsQuery(trimmed);
+        setActiveIndex(
+          (payload.results?.length ?? 0) > 0 || directSymbol(trimmed) ? 0 : -1,
+        );
         setOpen(true);
       } catch (reason: unknown) {
         if (controller.signal.aborted) return;
         setResults([]);
+        setResultsQuery("");
         setActiveIndex(-1);
         setError(reason instanceof Error ? reason.message : "Search is temporarily unavailable.");
         setOpen(true);
@@ -83,12 +95,16 @@ export default function TickerSearchCombobox({
     };
   }, [query]);
 
-  const selectSymbol = (symbol: string) => {
+  const selectSymbol = (symbol: string, instrument?: WorkspaceInstrument) => {
     const normalized = directSymbol(symbol);
     if (!normalized) return;
+    if (instrument?.symbol === normalized) {
+      writeWorkspaceInstrumentSeed(window.sessionStorage, instrument);
+    }
     setOpen(false);
     setQuery("");
     setResults([]);
+    setResultsQuery("");
     setLoading(false);
     setError(null);
     setActiveIndex(-1);
@@ -97,13 +113,15 @@ export default function TickerSearchCombobox({
   };
 
   const submit = () => {
-    const selected = activeIndex >= 0 ? results[activeIndex]?.symbol : null;
-    selectSymbol(selected || directSymbol(query) || "");
+    const selected = resultsQuery === query.trim() && activeIndex >= 0
+      ? results[activeIndex]
+      : null;
+    selectSymbol(selected?.symbol || directSymbol(query) || "", selected ?? undefined);
   };
 
   return (
     <div className="relative min-w-0 flex-1" data-testid="workspace-ticker-search">
-      <div className={`flex items-center gap-2 rounded-xl border border-white/[0.09] bg-black/35 transition focus-within:border-orange-400/45 focus-within:bg-black/55 ${compact ? "px-3 py-2" : "px-3.5 py-2.5"}`}>
+      <div className={`flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-black/35 transition focus-within:border-orange-400/45 focus-within:bg-black/55 ${compact ? "px-3 py-1.5" : "px-3.5 py-2.5"}`}>
         <svg
           aria-hidden="true"
           className="h-4 w-4 shrink-0 text-zinc-600"
@@ -118,19 +136,30 @@ export default function TickerSearchCombobox({
         <input
           ref={inputRef}
           role="combobox"
+          aria-label="Search stocks and ETFs"
           aria-autocomplete="list"
           aria-expanded={open}
-          aria-controls={listboxId}
-          aria-activedescendant={activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined}
+          aria-controls={open ? listboxId : undefined}
+          aria-activedescendant={open && activeIndex >= 0
+            ? results.length > 0 && activeIndex < results.length
+              ? `${listboxId}-${activeIndex}`
+              : directOptionVisible
+                ? `${listboxId}-direct`
+                : undefined
+            : undefined}
           value={query}
           onChange={(event) => {
             const value = event.target.value;
             setQuery(value);
+            // Results belong to the exact query that produced them. Clearing
+            // them synchronously prevents Enter during the debounce window
+            // from navigating to a stale selection from the previous query.
+            setResults([]);
+            setResultsQuery("");
+            setActiveIndex(directSymbol(value) ? 0 : -1);
+            setError(null);
             if (value.trim().length < 1) {
-              setResults([]);
               setLoading(false);
-              setError(null);
-              setActiveIndex(-1);
             }
             setOpen(Boolean(value.trim()));
           }}
@@ -140,10 +169,14 @@ export default function TickerSearchCombobox({
             if (event.key === "ArrowDown") {
               event.preventDefault();
               setOpen(true);
-              setActiveIndex((index) => Math.min(results.length - 1, index + 1));
+              setActiveIndex((index) => results.length > 0
+                ? Math.min(results.length - 1, index + 1)
+                : directSymbol(query) ? 0 : -1);
             } else if (event.key === "ArrowUp") {
               event.preventDefault();
-              setActiveIndex((index) => Math.max(0, index - 1));
+              setActiveIndex((index) => results.length > 0
+                ? Math.max(0, index - 1)
+                : directSymbol(query) ? 0 : -1);
             } else if (event.key === "Enter") {
               event.preventDefault();
               submit();
@@ -161,7 +194,7 @@ export default function TickerSearchCombobox({
             type="button"
             onMouseDown={(event) => event.preventDefault()}
             onClick={submit}
-            className="rounded-md bg-orange-500/15 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-orange-300 transition hover:bg-orange-500/25"
+            className="min-h-9 rounded-md bg-orange-500/15 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-orange-300 transition hover:bg-orange-500/25"
           >
             Open
           </button>
@@ -174,35 +207,44 @@ export default function TickerSearchCombobox({
         <div
           id={listboxId}
           role="listbox"
+          aria-label="Ticker search results"
+          aria-busy={loading}
           className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-2xl border border-white/[0.11] bg-[#0a0d0f]/[0.98] p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.72)] backdrop-blur-2xl"
         >
           {error ? (
-            <p className="px-3 py-3 text-[11px] font-semibold text-zinc-500">{error}</p>
-          ) : !loading && results.length === 0 ? (
-            <button
-              type="button"
+            <p role="option" aria-selected="false" aria-disabled="true" className="px-3 py-3 text-[11px] font-semibold text-zinc-500">{error}</p>
+          ) : loading && results.length === 0 ? (
+            <p role="option" aria-selected="false" aria-disabled="true" className="px-3 py-3 text-[11px] font-semibold text-zinc-500">Searching verified instruments…</p>
+          ) : results.length === 0 && directCandidate ? (
+            <div
+              id={`${listboxId}-direct`}
+              role="option"
+              aria-selected={activeIndex === 0}
+              tabIndex={-1}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => submit()}
-              className="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left transition hover:bg-white/[0.05]"
+              className={`flex min-h-11 w-full cursor-pointer items-center justify-between rounded-xl px-3 py-3 text-left transition ${activeIndex === 0 ? "bg-white/[0.07]" : "hover:bg-white/[0.05]"}`}
             >
               <span>
-                <span className="block text-xs font-black text-zinc-200">Open {directSymbol(query) ?? query.toUpperCase()}</span>
+                <span className="block text-xs font-black text-zinc-200">Open {directCandidate}</span>
                 <span className="mt-1 block text-[9px] font-semibold text-zinc-600">Verify directly with Massive</span>
               </span>
               <span className="text-[9px] font-black uppercase tracking-[0.12em] text-orange-400">Go</span>
-            </button>
+            </div>
+          ) : results.length === 0 ? (
+            <p role="option" aria-selected="false" aria-disabled="true" className="px-3 py-3 text-[11px] font-semibold text-zinc-500">No supported stock or ETF matches this search.</p>
           ) : (
             results.map((instrument, index) => (
-              <button
+              <div
                 id={`${listboxId}-${index}`}
                 key={instrument.symbol}
-                type="button"
                 role="option"
                 aria-selected={index === activeIndex}
+                tabIndex={-1}
                 onMouseDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => selectSymbol(instrument.symbol)}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${index === activeIndex ? "bg-white/[0.07]" : "hover:bg-white/[0.045]"}`}
+                onClick={() => selectSymbol(instrument.symbol, instrument)}
+                className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${index === activeIndex ? "bg-white/[0.07]" : "hover:bg-white/[0.045]"}`}
               >
                 <span className="flex h-8 w-10 shrink-0 items-center justify-center rounded-lg border border-white/[0.07] bg-black/50 font-mono text-[11px] font-black text-white">
                   {instrument.symbol.slice(0, 5)}
@@ -217,7 +259,7 @@ export default function TickerSearchCombobox({
                 <svg aria-hidden="true" className="h-4 w-4 shrink-0 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                   <path d="M5 12h14M13 6l6 6-6 6" />
                 </svg>
-              </button>
+              </div>
             ))
           )}
         </div>

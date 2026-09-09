@@ -251,7 +251,7 @@ export function MarketChartCanvas({
   const resolvedIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0
     ? intervalSeconds
     : 60;
-  const resolvedViewportKey = `${viewportKey}:${compact ? "compact" : "full"}:${height}`;
+  const resolvedViewportKey = `${viewportKey}:${compact ? "compact" : "full"}`;
   const showVwap = Boolean(indicators?.vwap);
   const showEma9 = Boolean(indicators?.ema9);
   const showEma20 = Boolean(indicators?.ema20);
@@ -277,7 +277,7 @@ export function MarketChartCanvas({
     });
     const chart = createChart(container, {
       width: container.clientWidth,
-      height,
+      height: Math.max(1, container.clientHeight),
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#71717a",
@@ -424,7 +424,10 @@ export function MarketChartCanvas({
     chart.timeScale().subscribeVisibleLogicalRangeChange(rememberViewport);
 
     const resizeChart = () => {
-      chart.applyOptions({ width: container.clientWidth });
+      chart.applyOptions({
+        width: container.clientWidth,
+        height: Math.max(1, container.clientHeight),
+      });
     };
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? null
@@ -447,7 +450,11 @@ export function MarketChartCanvas({
       previousFrameRef.current = null;
       chart.remove();
     };
-  }, [height, mode, palette.line, priceResolution.minMove, resolvedTimeZone, resolvedViewportKey, showEma20, showEma9, showVwap]);
+  }, [mode, palette.line, priceResolution.minMove, resolvedTimeZone, resolvedViewportKey, showEma20, showEma9, showVwap]);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({ height });
+  }, [height]);
 
   useEffect(() => {
     const chart = chartRef.current;

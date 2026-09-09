@@ -49,7 +49,6 @@ import {
   getProxOutcomeTerminalCutoff,
 } from "@/lib/prox/shadow-outcome-resolution";
 import { isActiveMarketTimestampUsable } from "@/lib/market-data-time";
-import { probeMassiveRealtimeEntitlement } from "@/lib/massive-stocks";
 import { describeProxMicrostructureCoverage } from "@/lib/prox/microstructure-coverage";
 import {
   PROX_MICROSTRUCTURE_AUTHORITY,
@@ -71,6 +70,12 @@ import {
   isCryptoProductIntentionallyShelved,
   type CryptoShelvingOperationalEvidence,
 } from "@/lib/crypto/product-capabilities";
+import {
+  preflightStockDisplayFrameCoordination,
+  StockDisplayFrameCoordinationError,
+} from "@/lib/stock-display-frame-server";
+import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { marketChartPollingState } from "@/lib/market-chart-polling";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -111,30 +116,6 @@ function hoursSince(value: unknown) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return Infinity;
   return (Date.now() - timestamp) / (1000 * 60 * 60);
-}
-
-function isActiveMarketSession(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? NaN);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? NaN);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute) || weekday === "Sat" || weekday === "Sun") return false;
-  const minutes = hour * 60 + minute;
-  return minutes >= 240 && minutes < 1200;
-}
-
-function isWeekend(now = new Date()) {
-  const weekday = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-  }).format(now);
-  return weekday === "Sat" || weekday === "Sun";
 }
 
 function easternDateString(date = new Date()) {
@@ -278,20 +259,46 @@ async function loadProxRoutedObservationHealthRows(
   return rows;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const rateLimit = checkApiRateLimit(request, {
+    namespace: "system-health-deep-audit",
+    limit: 12,
+    windowMs: 60_000,
+  });
+  const responseHeaders = {
+    "Cache-Control": "private, no-store, max-age=0",
+    ...rateLimit.headers,
+  };
+  if (!rateLimit.allowed) {
+    return NextResponse.json({
+      ok: false,
+      status: "rate_limited",
+      message: "The deep system audit is rate limited. Retry after the indicated delay.",
+      auditComplete: false,
+      checks: [],
+      warnings: [],
+      timestamp: new Date().toISOString(),
+    }, { status: 429, headers: responseHeaders });
+  }
+
   const checks: HealthCheck[] = [];
-  const activeMarketSession = isActiveMarketSession();
-  const closedWeekend = isWeekend();
-  const maxSignalAgeHours = closedWeekend
+  const pollingSession = marketChartPollingState(new Date(), "extended");
+  const activeMarketSession = pollingSession.active;
+  const longMarketClosure = pollingSession.reason === "weekend" ||
+    pollingSession.reason === "market_holiday";
+  const maxSignalAgeHours = longMarketClosure
     ? Infinity
     : activeMarketSession
       ? ACTIVE_MAX_SIGNAL_AGE_HOURS
       : CLOSED_MAX_SIGNAL_AGE_HOURS;
 
   const hasSupabaseUrl = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
-  const hasSupabaseKey = Boolean(
+  const hasSupabaseServerKey = Boolean(
     process.env.SUPABASE_SERVICE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
+  const hasSupabaseKey = Boolean(
+    hasSupabaseServerKey ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   );
   const hasPolygonKey = Boolean(process.env.POLYGON_API_KEY);
@@ -304,7 +311,7 @@ export async function GET() {
       : "Missing Supabase env vars.",
     detail: {
       hasUrl: hasSupabaseUrl,
-      hasServerKey: Boolean(process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY),
+      hasServerKey: hasSupabaseServerKey,
       hasAnonKey: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
     },
   });
@@ -364,7 +371,7 @@ export async function GET() {
       message: "System health failed before database check.",
       checks,
       timestamp: new Date().toISOString(),
-    }, { status: 500 });
+    }, { status: 500, headers: responseHeaders });
   }
 
   // One small, bounded read before the exhaustive audit. An unavailable
@@ -404,32 +411,105 @@ export async function GET() {
       checks,
       warnings: [],
       timestamp: new Date().toISOString(),
-    }, { status: 503, headers: { "Cache-Control": "private, no-store", "Retry-After": "30" } });
+    }, {
+      status: 503,
+      headers: { ...responseHeaders, "Retry-After": "30" },
+    });
   }
+
+  // Only after the bounded liveness check succeeds do we inspect the Phase 1
+  // coordination contracts. A database outage therefore cannot fan out into
+  // several slow PostgREST reads, and none of these probes spends provider
+  // capacity.
+  let sharedDisplayFrameIssue: string | null = null;
+  if (hasSupabaseUrl && hasSupabaseServerKey) {
+    try {
+      await preflightStockDisplayFrameCoordination();
+    } catch (error) {
+      sharedDisplayFrameIssue = error instanceof StockDisplayFrameCoordinationError
+        ? error.issue
+        : "transport_error";
+    }
+  } else {
+    sharedDisplayFrameIssue = "not_configured";
+  }
+  checks.push({
+    name: "shared_stock_display_frame_coordination",
+    ok: sharedDisplayFrameIssue === null,
+    message: sharedDisplayFrameIssue === null
+      ? "Shared stock display-frame service coordination is available."
+      : "Shared stock display-frame service coordination is unavailable.",
+    detail: {
+      requiredMigration: "0048_shared_stock_display_frames.sql",
+      hasServerKey: hasSupabaseServerKey,
+      issue: sharedDisplayFrameIssue,
+      providerRequestsUsedByProbe: 0,
+    },
+  });
+
+  type Phase1InfrastructureVerification = {
+    contractVersion?: unknown;
+    migration0048?: { verified?: unknown };
+    migration0049?: { verified?: unknown };
+    errorCode?: unknown;
+  };
+  let infrastructureVerification: Phase1InfrastructureVerification | null = null;
+  let infrastructureVerificationIssue: string | null = null;
+  try {
+    const result = await supabase.rpc(
+      "ht_phase1_workspace_infrastructure_health",
+    );
+    if (result.error) {
+      infrastructureVerificationIssue = result.error.code ?? "rpc_error";
+    } else if (
+      !result.data ||
+      typeof result.data !== "object" ||
+      Array.isArray(result.data)
+    ) {
+      infrastructureVerificationIssue = "invalid_rpc_response";
+    } else {
+      infrastructureVerification = result.data as Phase1InfrastructureVerification;
+      if (typeof infrastructureVerification.errorCode === "string") {
+        infrastructureVerificationIssue = infrastructureVerification.errorCode;
+      }
+    }
+  } catch (error) {
+    infrastructureVerificationIssue = error instanceof Error
+      ? error.name
+      : "transport_error";
+  }
+  const migration0048Verified =
+    infrastructureVerification?.migration0048?.verified === true;
+  const migration0049Verified =
+    infrastructureVerification?.migration0049?.verified === true;
+  const infrastructureContractVerified =
+    infrastructureVerification?.contractVersion ===
+      "phase1-workspace-infrastructure-v1";
+  checks.push({
+    name: "phase1_workspace_infrastructure_catalog",
+    ok: infrastructureContractVerified && migration0048Verified && migration0049Verified,
+    message: infrastructureContractVerified && migration0048Verified && migration0049Verified
+      ? "Production catalog proves the exact Phase 1 display-frame and watchlist contracts."
+      : "Production has not proved both required Phase 1 workspace migrations through the service-only catalog verifier.",
+    detail: {
+      requiredMigrations: [
+        "0048_shared_stock_display_frames.sql",
+        "0049_secure_ht_labs_watchlist.sql",
+        "0050_phase1_workspace_infrastructure_verification.sql",
+      ],
+      migration0048Verified,
+      migration0049Verified,
+      contractVerified: infrastructureContractVerified,
+      contractVersion: infrastructureVerification?.contractVersion ?? null,
+      issue: infrastructureVerificationIssue,
+      providerRequestsUsedByProbe: 0,
+    },
+  });
 
   if (cryptoIntentionallyShelved) {
     updateShelvedCryptoOperationalEvidence(
       await readShelvedCryptoOperationalEvidence(supabase),
     );
-  }
-
-  if (hasPolygonKey) {
-    const entitlement = await probeMassiveRealtimeEntitlement({ force: true });
-    checks.push({
-      name: "massive_realtime_entitlement",
-      ok: entitlement.dataMode === "real_time",
-      message: entitlement.dataMode === "real_time"
-        ? "Massive real-time snapshots, last trades, and NBBO quotes are active."
-        : "The configured Massive key is not proving real-time stock entitlement.",
-      detail: {
-        dataMode: entitlement.dataMode,
-        snapshot: entitlement.snapshot,
-        lastTrade: entitlement.lastTrade,
-        lastQuote: entitlement.lastQuote,
-        checkedAt: entitlement.checkedAt,
-        errors: entitlement.errors,
-      },
-    });
   }
 
   // Home and Scanner read the latest promoted run-scoped dataset.
@@ -452,8 +532,8 @@ export async function GET() {
       message: !promotedRun
         ? "No promoted authoritative scan run exists."
         : runAge <= maxSignalAgeHours
-          ? closedWeekend
-            ? "Latest authoritative scan run is retained for the closed weekend."
+          ? longMarketClosure
+            ? "Latest authoritative scan run is retained for the scheduled market closure."
             : "Latest authoritative scan run is fresh."
           : "Latest authoritative scan run is stale.",
       detail: promotedRun ? {
@@ -678,7 +758,7 @@ export async function GET() {
         ? proxFeature.market_as_of
         : null,
     );
-    const proxMaxAge = closedWeekend
+    const proxMaxAge = longMarketClosure
       ? Infinity
       : activeMarketSession
         ? ACTIVE_MAX_PROX_AGE_HOURS
@@ -689,7 +769,7 @@ export async function GET() {
         Boolean(proxFeature) &&
         marketTimestampSchemaReady &&
         proxProcessingAge <= proxMaxAge &&
-        (closedWeekend ||
+        (longMarketClosure ||
           !activeMarketSession ||
           isActiveMarketTimestampUsable(
             proxFeature && "market_as_of" in proxFeature
@@ -701,15 +781,15 @@ export async function GET() {
           ? "ProX market source timestamps are unavailable; run migration 0026."
         : proxFeature &&
             proxProcessingAge <= proxMaxAge &&
-            (closedWeekend ||
+            (longMarketClosure ||
               !activeMarketSession ||
               isActiveMarketTimestampUsable(
                 "market_as_of" in proxFeature
                   ? proxFeature.market_as_of
                   : null,
               ))
-          ? closedWeekend
-            ? "Latest ProX market pulse is retained for the closed weekend."
+          ? longMarketClosure
+            ? "Latest ProX market pulse is retained for the scheduled market closure."
             : "ProX market pulse is fresh."
           : "ProX market pulse is missing or stale.",
       detail: proxFeature
@@ -754,6 +834,13 @@ export async function GET() {
     });
   }
 
+  let persistedMassiveRealtimeEvidence: {
+    dataMode: string | null;
+    completedAt: string | null;
+    latestMarketAsOf: string | null;
+    providerErrorCount: number;
+  } | null = null;
+
   // Massive Advanced NBBO and consolidated prints are captured in a
   // separate append-only ProX evidence lane. This proves direct provider
   // coverage and timestamps without turning the evidence into a score.
@@ -786,6 +873,19 @@ export async function GET() {
         },
       });
     } else {
+      persistedMassiveRealtimeEvidence = {
+        dataMode: typeof microstructureRun.source_data_mode === "string"
+          ? microstructureRun.source_data_mode
+          : null,
+        completedAt: typeof microstructureRun.completed_at === "string"
+          ? microstructureRun.completed_at
+          : null,
+        latestMarketAsOf:
+          typeof microstructureRun.latest_market_as_of === "string"
+            ? microstructureRun.latest_market_as_of
+            : null,
+        providerErrorCount: Number(microstructureRun.provider_error_count),
+      };
       const { data: microstructureObservations, error: observationReadError } =
         await supabase
           .from("prox_realtime_microstructure_observations")
@@ -911,6 +1011,26 @@ export async function GET() {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+
+  const massiveRealtimeProved = Boolean(
+    hasPolygonKey &&
+    persistedMassiveRealtimeEvidence?.dataMode === "real_time" &&
+    persistedMassiveRealtimeEvidence.providerErrorCount === 0 &&
+    persistedMassiveRealtimeEvidence.latestMarketAsOf,
+  );
+  checks.push({
+    name: "massive_realtime_entitlement",
+    ok: massiveRealtimeProved,
+    message: massiveRealtimeProved
+      ? "The latest persisted ProX provider receipt proves Massive real-time stock data without spending on a diagnostic request."
+      : "No successful persisted real-time Massive stock receipt is available to prove the configured entitlement.",
+    detail: {
+      hasPolygonKey,
+      verificationSource: "prox_realtime_microstructure_run",
+      providerRequestsUsedByProbe: 0,
+      ...persistedMassiveRealtimeEvidence,
+    },
+  });
 
   // Pro X now has an independent full-market Polygon observer. It remains
   // shadow/research-only, but its receipt must prove both freshness and exact
@@ -2198,8 +2318,8 @@ export async function GET() {
       name: "signal_freshness",
       ok: age <= maxSignalAgeHours,
       message: age <= maxSignalAgeHours
-        ? closedWeekend
-          ? "Latest verified signal is retained for the closed weekend."
+        ? longMarketClosure
+          ? "Latest verified signal is retained for the scheduled market closure."
           : "Latest verified signal is within acceptable freshness window."
         : "Latest signal is too stale for homepage confidence.",
       detail: {
@@ -3183,7 +3303,7 @@ export async function GET() {
     const activeProfiles = profiles.filter((profile) => profile.status === "active" && profile.kill_switch === false);
     const cycleRequired = activeProfiles.length > 0;
     const runs = runsResult.data ?? [];
-    const maxCycleAgeHours = isActiveMarketSession() ? 10 / 60 : 24;
+    const maxCycleAgeHours = activeMarketSession ? 10 / 60 : 24;
     const runHealth = assessHtAgentRunHealth(activeProfiles, runs, {
       maximumSuccessAgeMs: maxCycleAgeHours * 60 * 60_000,
     });
@@ -3311,5 +3431,5 @@ export async function GET() {
       }),
     ],
     timestamp: new Date().toISOString(),
-  }, { status: ok ? 200 : 500 });
+  }, { status: ok ? 200 : 500, headers: responseHeaders });
 }

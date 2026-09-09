@@ -329,6 +329,34 @@ function validCached<T>(cache: Map<string, CacheEntry<T>>, key: string, now: num
   return cached;
 }
 
+function seedExactInstrumentDetail(
+  query: string,
+  entry: CacheEntry<WorkspaceInstrument[]>,
+  now: number,
+) {
+  const exactSymbol = normalizeInstrumentSymbol(query);
+  if (!exactSymbol || validCached(detailCache, exactSymbol, now)) return;
+  const exact = entry.value.find(
+    (instrument) =>
+      instrument.symbol === exactSymbol &&
+      instrument.workspaceSupported &&
+      instrument.active &&
+      instrument.provider === MASSIVE_STOCKS_PROVIDER,
+  );
+  if (!exact) return;
+  putBounded(
+    detailCache,
+    exactSymbol,
+    {
+      expiresAt: entry.expiresAt,
+      loadedAt: entry.loadedAt,
+      value: exact,
+    },
+    DETAIL_CACHE_LIMIT,
+    now,
+  );
+}
+
 export async function searchMassiveInstruments(
   rawQuery: string,
   options: SearchOptions = {},
@@ -345,6 +373,7 @@ export async function searchMassiveInstruments(
   );
   const cached = validCached(searchCache, cacheKey, now);
   if (cached) {
+    seedExactInstrumentDetail(query, cached, now);
     return {
       query,
       results: cached.value.slice(0, limit),
@@ -401,6 +430,7 @@ export async function searchMassiveInstruments(
   if (!existing) searchInflight.set(cacheKey, promise);
   try {
     const entry = await promise;
+    seedExactInstrumentDetail(query, entry, now);
     return {
       query,
       results: entry.value.slice(0, limit),
