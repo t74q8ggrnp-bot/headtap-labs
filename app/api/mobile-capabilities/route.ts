@@ -53,6 +53,16 @@ export async function GET() {
         serverDerivesSideAndFullQuantity: true,
       },
     },
+    agentXVisualPlans: {
+      contractVersion: "agent-x-visual-plan-api-v1",
+      authority: "paper_plan_visualization_only",
+      endpoint: "/api/ht-agent/plans?symbol={ticker}",
+      lifecycleEvidence: "completed_massive_provider_minutes",
+      displayTimeframes: ["1m", "5m", "15m"],
+      executionAuthority: "none",
+      manualPaperReviewOnly: true,
+      liveBrokerConnection: false,
+    },
     crypto: {
       status: cryptoShelved ? "shelved" : "active_or_partial",
       policyVersion: CRYPTO_PRODUCT_CAPABILITY_POLICY_VERSION,

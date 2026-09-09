@@ -56,7 +56,7 @@ import {
 } from "@/lib/prox/microstructure";
 import { PAPER_TRADING_CONTRACT_VERSION } from "@/lib/paper-trading/engine";
 import { HT_AGENT_OUTCOME_HEALTH_GRACE_MS } from "@/lib/ht-agent/outcome-policy";
-import { HT_AGENT_COHORT_VERSION, HT_AGENT_DECISION_VERSION, HT_AGENT_FRAME_VERSION, HT_AGENT_POLICY_VERSION, HT_TRADE_PLAN_VERSION } from "@/lib/ht-agent/contracts";
+import { HT_AGENT_COHORT_VERSION, HT_AGENT_DECISION_VERSION, HT_AGENT_FRAME_VERSION, HT_AGENT_POLICY_VERSION, HT_AGENT_VISUAL_PLAN_POLICY_VERSION, HT_AGENT_VISUAL_PLAN_VERSION, HT_TRADE_PLAN_VERSION } from "@/lib/ht-agent/contracts";
 import { isHtAgentRiskAuditComplete } from "@/lib/ht-agent/risk-audit";
 import { assessHtAgentRunHealth } from "@/lib/ht-agent/run-health";
 import { assessProxOutcomeMemoryRunHealth } from "@/lib/prox/outcome-memory-run-health";
@@ -3398,6 +3398,68 @@ export async function GET(request: Request) {
       name: "ht_agent_phase1",
       ok: false,
       message: "HT Agent schema is unavailable; confirm migrations 0030, 0031 and 0034 before deploying.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    if (!supabase) throw new Error("Supabase unavailable");
+    const [infrastructureResult, workerResult] = await Promise.all([
+      supabase.rpc("ht_agent_phase2_visual_plan_infrastructure_health"),
+      supabase.from("ht_agent_visual_plan_worker_runs")
+        .select("completed_at,status,claimed_plan_count,unique_symbol_count,provider_request_count,accepted_evidence_count,transition_counts")
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (infrastructureResult.error) throw infrastructureResult.error;
+    const infrastructure = infrastructureResult.data && typeof infrastructureResult.data === "object"
+      ? infrastructureResult.data as Record<string, unknown>
+      : null;
+    const rollout = infrastructure?.rollout && typeof infrastructure.rollout === "object"
+      ? infrastructure.rollout as Record<string, unknown>
+      : {};
+    const mode = String(rollout.mode ?? "off");
+    const lifecycleRequired = mode === "shadow" || mode === "visible";
+    const lifecycleEnabled = rollout.lifecycleEnabled === true;
+    const latestWorker = workerResult.error ? null : workerResult.data;
+    const workerAgeMinutes = latestWorker
+      ? hoursSince(latestWorker.completed_at) * 60
+      : Infinity;
+    const workerHealthy = !lifecycleRequired || (
+      lifecycleEnabled &&
+      latestWorker?.status === "success" &&
+      (!activeMarketSession || workerAgeMinutes <= 3)
+    );
+    const verified = infrastructure?.verified === true;
+    checks.push({
+      name: "agent_x_visual_plan_infrastructure",
+      ok: verified && workerHealthy,
+      message: !verified
+        ? "Agent X visual-plan infrastructure is incomplete; apply migrations 0052 and 0053 without enabling rollout."
+        : !workerHealthy
+          ? "Agent X visual-plan lifecycle is enabled but its provider-minute worker is not current."
+          : mode === "off"
+            ? "Agent X visual plans are verified and safely gated off pending rollout approval."
+            : `Agent X visual plans are verified in ${mode} mode with paper-only authority.`,
+      detail: {
+        schemaVersion: HT_AGENT_VISUAL_PLAN_VERSION,
+        policyVersion: HT_AGENT_VISUAL_PLAN_POLICY_VERSION,
+        infrastructure,
+        latestWorker,
+        workerAgeMinutes: Number.isFinite(workerAgeMinutes) ? Number(workerAgeMinutes.toFixed(2)) : null,
+        lifecycleRequired,
+        workerHealthy,
+        executionAuthority: "none",
+        paperOnly: true,
+        liveBrokerage: false,
+      },
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "agent_x_visual_plan_infrastructure",
+      ok: false,
+      message: "Agent X visual-plan verification is unavailable; apply forward-only migrations 0052 and 0053 before enabling Phase 2.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }

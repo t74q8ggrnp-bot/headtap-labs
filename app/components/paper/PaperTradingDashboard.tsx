@@ -24,6 +24,7 @@ import {
 } from "@/lib/paper-trading/engine";
 import { supabase } from "@/lib/supabaseClient";
 import { HT_REFRESH_RATES_MS } from "@/lib/runtime-capabilities";
+import type { AgentXVisualPlanRead } from "@/lib/ht-agent/visual-plan-api";
 
 const money = (value: number | null) => value === null ? "—" : new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -43,7 +44,7 @@ const sideLabels: Record<PaperOrderSide, string> = {
   sell_short: "Short",
   buy_to_cover: "Cover",
 };
-const sourceValues = new Set(["manual", "spot_momentum", "before_crowd", "scanner", "ticker_detail"]);
+const sourceValues = new Set(["manual", "spot_momentum", "before_crowd", "scanner", "ticker_detail", "ht_agent"]);
 
 type Ticket = {
   symbol: string;
@@ -207,6 +208,7 @@ export default function PaperTradingDashboard() {
   const initialSymbol = (searchParams.get("symbol") ?? "").toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 10);
   const requestedSource = searchParams.get("source") ?? "manual";
   const strategySource = sourceValues.has(requestedSource) ? requestedSource : "manual";
+  const requestedAgentPlanVersion = (searchParams.get("agentPlanVersion") ?? "").trim();
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -229,6 +231,7 @@ export default function PaperTradingDashboard() {
   const instrumentRequest = useRef(0);
   const instrumentBusy = useRef(false);
   const wantedSymbol = useRef("");
+  const agentPlanPrefilled = useRef("");
 
   const api = useCallback(async (path: string, init?: RequestInit) => {
     const auth = await supabase.auth.getSession();
@@ -374,6 +377,43 @@ export default function PaperTradingDashboard() {
     return () => window.clearTimeout(timer);
   }, [dashboard, initialSymbol, lookupInstrument, session]);
 
+  useEffect(() => {
+    if (
+      !session ||
+      strategySource !== "ht_agent" ||
+      !/^[0-9a-f-]{36}$/i.test(requestedAgentPlanVersion) ||
+      agentPlanPrefilled.current === requestedAgentPlanVersion
+    ) return;
+    agentPlanPrefilled.current = requestedAgentPlanVersion;
+    void api(`/api/ht-agent/plans?symbol=${encodeURIComponent(initialSymbol)}`)
+      .then((body) => {
+        const read = body as unknown as AgentXVisualPlanRead;
+        if (!read.plan || read.plan.planVersionId !== requestedAgentPlanVersion || !read.plan.paperHandoffEligible) {
+          throw new Error("This Agent X plan is no longer eligible for paper review.");
+        }
+        const plan = read.plan.definition;
+        const triggered = read.plan.lifecycleState === "triggered";
+        setSizingMode("shares");
+        setDollarAmount("");
+        setTicket({
+          ...emptyTicket(plan.symbol),
+          side: "buy",
+          orderType: triggered ? "market" : "stop",
+          quantity: String(plan.positionRisk.quantity),
+          stopPrice: triggered ? "" : String(plan.triggerPrice),
+          allowExtendedHours: plan.chartObjects[0]?.timing.session !== "regular",
+          bracket: true,
+          takeProfitPrice: String(plan.targetOne),
+          stopLossPrice: String(plan.stopPrice),
+        });
+        setReviewing(true);
+        setMessage("Reviewing an immutable Agent X paper plan. No order has been submitted.");
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : "Agent X paper plan unavailable.");
+      });
+  }, [api, initialSymbol, requestedAgentPlanVersion, session, strategySource]);
+
   const ticketReady = instrument?.symbol === ticket.symbol && Number(ticket.quantity) > 0
     && (!(ticket.orderType === "limit" || ticket.orderType === "stop_limit") || Number(ticket.limitPrice) > 0)
     && (!(ticket.orderType === "stop" || ticket.orderType === "stop_limit") || Number(ticket.stopPrice) > 0)
@@ -431,7 +471,8 @@ export default function PaperTradingDashboard() {
     stopLossPrice: ticket.bracket ? ticket.stopLossPrice || null : null,
     closePosition: ticket.closePosition,
     strategySource,
-  }), [strategySource, ticket]);
+    agentPlanVersion: strategySource === "ht_agent" ? requestedAgentPlanVersion : null,
+  }), [requestedAgentPlanVersion, strategySource, ticket]);
 
   const submit = async () => {
     setSubmitting(true);

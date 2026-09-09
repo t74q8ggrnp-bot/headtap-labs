@@ -30,12 +30,13 @@ import {
   normalizeWorkspaceCanonicalDecisionFrame,
   type WorkspaceCanonicalDecisionFrame,
 } from "@/lib/workspace-intelligence-display";
-import TradeWorkspaceChart, {
-  type WorkspaceIndicatorVisibility,
-} from "@/app/components/trade/TradeWorkspaceChart";
+import TradeWorkspaceChart from "@/app/components/trade/TradeWorkspaceChart";
 import TradeWorkspaceHeader from "@/app/components/trade/TradeWorkspaceHeader";
 import TradeWorkspaceIntelligence from "@/app/components/trade/TradeWorkspaceIntelligence";
 import TradeWorkspaceLists from "@/app/components/trade/TradeWorkspaceLists";
+import TradeWorkspaceAgentPlan from "@/app/components/trade/TradeWorkspaceAgentPlan";
+import { useChartLayerPreferences } from "@/app/hooks/useChartLayerPreferences";
+import { useAgentVisualPlan } from "@/app/hooks/useAgentVisualPlan";
 
 type InstrumentPayload = {
   ok?: boolean;
@@ -109,11 +110,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
   });
   const [timeframe, setTimeframe] = useState<MarketChartTimeframe>("1m");
   const [chartMode, setChartMode] = useState<MarketChartMode>("candles");
-  const [indicatorsVisible, setIndicatorsVisible] = useState<WorkspaceIndicatorVisibility>({
-    vwap: true,
-    ema9: false,
-    ema20: false,
-  });
+  const chartLayers = useChartLayerPreferences();
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("chart");
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [intelligenceRefreshing, setIntelligenceRefreshing] = useState(false);
@@ -140,6 +137,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
     enabled: instrumentSupported,
     sessionScope: "extended",
   });
+  const agentPlan = useAgentVisualPlan(symbol, instrumentSupported);
   const acceptTrustedTime = marketFeed.acceptTrustedTime;
   const marketSessionActive = marketFeed.nowMs > 0 && marketChartPollingState(
     new Date(marketFeed.nowMs),
@@ -404,7 +402,8 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
     />
   );
   const chart = (
-    <TradeWorkspaceChart
+    <>
+      <TradeWorkspaceChart
       symbol={symbol}
       bars={displayedBars}
       timeframe={timeframe}
@@ -412,16 +411,15 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
       mode={chartMode}
       onModeChange={setChartMode}
       indicators={indicators}
-      indicatorVisibility={indicatorsVisible}
-      onToggleIndicator={(indicator) => {
-        setIndicatorsVisible((current) => ({
-          ...current,
-          [indicator]: !current[indicator],
-        }));
-      }}
+      layerVisibility={chartLayers.preferences}
+      onToggleLayer={chartLayers.toggle}
+      chartObjects={agentPlan.read?.chartObjects ?? []}
+      intelligenceLayersEnabled={agentPlan.read?.visible === true}
       loading={instrumentLoading || marketFeed.loading}
       error={instrumentUnavailable ? instrumentMessage : marketFeed.error}
-    />
+      />
+      <TradeWorkspaceAgentPlan read={agentPlan.read} />
+    </>
   );
   const intelligence = (
     <TradeWorkspaceIntelligence

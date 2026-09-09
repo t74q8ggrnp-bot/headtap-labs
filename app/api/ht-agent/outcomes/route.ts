@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { getPaperServiceClient } from "@/lib/paper-trading/server";
 import {
   fetchMassiveHistoricalQuoteAtOrAfter,
@@ -15,12 +16,17 @@ import {
   type HtAgentDueOutcome,
   type HtAgentOutcomeUpdate,
 } from "@/lib/ht-agent/outcome-batch";
+import {
+  evaluateAgentPlanMinute,
+  type AgentPlanLifecycleSnapshot,
+} from "@/lib/ht-agent/plan-lifecycle";
+import type { AgentPlanLifecycleState, AgentXVisualPlanDefinition } from "@/lib/ht-agent/visual-plan";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 type AggregatePayload = {
-  results?: Array<{ t?: unknown; o?: unknown; h?: unknown; l?: unknown; c?: unknown }>;
+  results?: Array<{ t?: unknown; o?: unknown; h?: unknown; l?: unknown; c?: unknown; v?: unknown }>;
 };
 
 type ClaimPayload = {
@@ -29,6 +35,15 @@ type ClaimPayload = {
   rows?: unknown;
   claimed?: unknown;
   retiredAgentRuns?: unknown;
+};
+
+type VisualPlanClaim = {
+  planVersionId: string;
+  symbol: string;
+  definition: AgentXVisualPlanDefinition;
+  state: AgentPlanLifecycleState;
+  stateVersion: number;
+  lastEvaluatedCandleAt: string | null;
 };
 
 function authorized(request: Request) {
@@ -56,12 +71,46 @@ async function fetchHistoricalBars(symbol: string, fromMs: number, toMs: number)
         high: finite(bar.h),
         low: finite(bar.l),
         close: finite(bar.c),
+        volume: finite(bar.v),
       }))),
       failed: false,
     };
   } catch {
     return { bars: [] as ProxOutcomeBar[], failed: true };
   }
+}
+
+function parseVisualPlanClaims(value: unknown): VisualPlanClaim[] {
+  if (!value || typeof value !== "object") return [];
+  const rows = (value as { plans?: unknown }).plans;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((raw): VisualPlanClaim[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const row = raw as Record<string, unknown>;
+    const definition = row.definition as AgentXVisualPlanDefinition;
+    const state = String(row.state) as AgentPlanLifecycleState;
+    if (
+      typeof row.planVersionId !== "string" ||
+      typeof row.symbol !== "string" ||
+      definition?.schemaVersion !== "agent-x-visual-paper-plan-v1" ||
+      !["watching", "triggered"].includes(state) ||
+      !Number.isInteger(Number(row.stateVersion))
+    ) return [];
+    return [{
+      planVersionId: row.planVersionId,
+      symbol: row.symbol,
+      definition,
+      state,
+      stateVersion: Number(row.stateVersion),
+      lastEvaluatedCandleAt: typeof row.lastEvaluatedCandleAt === "string"
+        ? row.lastEvaluatedCandleAt
+        : null,
+    }];
+  });
+}
+
+function evidenceHash(value: Record<string, unknown>) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 async function mapWithConcurrency<T>(
@@ -124,6 +173,8 @@ export async function GET(request: Request) {
     proposedEntry: row.proposedEntry === null ? null : finite(row.proposedEntry),
     conservativeSlippageBps: finite(row.conservativeSlippageBps),
   }));
+  const visualClaimResult = await service.rpc("ht_agent_claim_visual_plan_batch", { p_limit: 50 });
+  const visualClaims = visualClaimResult.error ? [] : parseVisualPlanClaims(visualClaimResult.data);
   const ranges = new Map<string, { fromMs: number; toMs: number }>();
   for (const row of rows) {
     const targetMs = Date.parse(row.targetAt);
@@ -133,6 +184,18 @@ export async function GET(request: Request) {
     ranges.set(symbol, {
       fromMs: Math.min(existing?.fromMs ?? Infinity, targetMs - PROX_OUTCOME_BAR_TOLERANCE_MS),
       toMs: Math.max(existing?.toMs ?? 0, targetMs + PROX_OUTCOME_BAR_TOLERANCE_MS),
+    });
+  }
+  const outcomeRangeSymbols = new Set(ranges.keys());
+  const visualSymbols = new Set(visualClaims.map((plan) => plan.symbol));
+  const visualProviderRequestCount = [...visualSymbols].filter((symbol) => !outcomeRangeSymbols.has(symbol)).length;
+  for (const plan of visualClaims) {
+    const fromMs = Date.parse(plan.lastEvaluatedCandleAt ?? plan.definition.validFrom);
+    if (!Number.isFinite(fromMs)) continue;
+    const existing = ranges.get(plan.symbol);
+    ranges.set(plan.symbol, {
+      fromMs: Math.min(existing?.fromMs ?? Infinity, fromMs),
+      toMs: Math.max(existing?.toMs ?? 0, observedAt.getTime()),
     });
   }
   const barsBySymbol = new Map<string, ProxOutcomeBar[]>();
@@ -163,6 +226,76 @@ export async function GET(request: Request) {
     const measured = updates.filter((update) => update.resolutionState === "measured").length;
     const unavailable = updates.length - measured;
     const pending = rows.length - updates.length;
+    let visualEvidenceAccepted = 0;
+    let visualTransitions = 0;
+    const transitionCounts: Record<string, number> = {};
+    for (const claimed of visualClaims) {
+      let snapshot: AgentPlanLifecycleSnapshot & { symbol: string } = {
+        symbol: claimed.symbol,
+        state: claimed.state,
+        stateVersion: claimed.stateVersion,
+        validFrom: claimed.definition.validFrom,
+        expiresAt: claimed.definition.expiresAt,
+        lastEvaluatedCandleAt: claimed.lastEvaluatedCandleAt,
+        entryCondition: claimed.definition.entryCondition,
+        triggerPrice: claimed.definition.triggerPrice,
+        stopPrice: claimed.definition.stopPrice,
+        targetOne: claimed.definition.targetOne,
+        targetTwo: claimed.definition.targetTwo,
+      };
+      const bars = barsBySymbol.get(claimed.symbol) ?? [];
+      for (const bar of bars) {
+        const closedAtMs = bar.timeMs + 60_000;
+        if (closedAtMs > observedAt.getTime()) continue;
+        const evidenceBase = {
+          symbol: claimed.symbol,
+          openedAt: new Date(bar.timeMs).toISOString(),
+          closedAt: new Date(closedAtMs).toISOString(),
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume ?? 0,
+          source: "massive_polygon_minute_aggregate" as const,
+        };
+        const evaluation = evaluateAgentPlanMinute(snapshot, evidenceBase);
+        if (evaluation.kind === "ignored" || evaluation.kind === "rejected") continue;
+        const evidence = { ...evidenceBase, evidenceHash: evidenceHash(evidenceBase) };
+        const applied = await service.rpc("ht_agent_apply_visual_plan_lifecycle", {
+          p_plan_version_id: claimed.planVersionId,
+          p_expected_state_version: snapshot.stateVersion,
+          p_evidence: evidence,
+          p_result: evaluation,
+        });
+        if (applied.error) throw applied.error;
+        visualEvidenceAccepted += 1;
+        snapshot = {
+          ...snapshot,
+          state: evaluation.kind === "transition" ? evaluation.to : snapshot.state,
+          stateVersion: snapshot.stateVersion + 1,
+          lastEvaluatedCandleAt: evidence.closedAt,
+        };
+        if (evaluation.kind === "transition") {
+          visualTransitions += 1;
+          transitionCounts[evaluation.to] = (transitionCounts[evaluation.to] ?? 0) + 1;
+          if (!["watching", "triggered"].includes(evaluation.to)) break;
+        }
+      }
+    }
+    if (!visualClaimResult.error) {
+      const visualRun = await service.from("ht_agent_visual_plan_worker_runs").insert({
+        worker_id: workerId,
+        started_at: new Date(startedAt).toISOString(),
+        completed_at: new Date().toISOString(),
+        status: "success",
+        claimed_plan_count: visualClaims.length,
+        unique_symbol_count: new Set(visualClaims.map((plan) => plan.symbol)).size,
+        provider_request_count: visualProviderRequestCount,
+        accepted_evidence_count: visualEvidenceAccepted,
+        transition_counts: transitionCounts,
+      });
+      if (visualRun.error) throw visualRun.error;
+    }
     const finish = await service.rpc("ht_agent_finish_outcome_batch", {
       p_worker_id: workerId,
       p_updates: updates.map((update) => ({
@@ -187,6 +320,10 @@ export async function GET(request: Request) {
         providerQuoteRequests: evidenceGroups.size,
         evidenceRowsReused: Math.max(0, measuredPlans.length - evidenceGroups.size),
         elapsedMs: Date.now() - startedAt,
+        visualPlanClaims: visualClaims.length,
+        visualPlanEvidenceAccepted: visualEvidenceAccepted,
+        visualPlanTransitions: visualTransitions,
+        visualPlanProviderRequests: visualProviderRequestCount,
       },
     });
     if (finish.error) throw finish.error;
@@ -202,6 +339,10 @@ export async function GET(request: Request) {
       evidenceRowsReused: Math.max(0, measuredPlans.length - evidenceGroups.size),
       retiredAgentRuns: finite(payload.retiredAgentRuns),
       elapsedMs: Date.now() - startedAt,
+      visualPlanClaims: visualClaims.length,
+      visualPlanEvidenceAccepted: visualEvidenceAccepted,
+      visualPlanTransitions: visualTransitions,
+      visualPlanProviderRequests: visualProviderRequestCount,
     }));
     return NextResponse.json({
       ok: pending === 0 && failedSymbols.size === 0,
@@ -216,6 +357,10 @@ export async function GET(request: Request) {
       providerBarFailures: failedSymbols.size,
       providerQuoteRequests: evidenceGroups.size,
       evidenceRowsReused: Math.max(0, measuredPlans.length - evidenceGroups.size),
+      visualPlanClaims: visualClaims.length,
+      visualPlanEvidenceAccepted: visualEvidenceAccepted,
+      visualPlanTransitions: visualTransitions,
+      visualPlanProviderRequests: visualProviderRequestCount,
       timestamp: observedAt.toISOString(),
     }, { status: pending === 0 && failedSymbols.size === 0 ? 200 : 202 });
   } catch (error) {

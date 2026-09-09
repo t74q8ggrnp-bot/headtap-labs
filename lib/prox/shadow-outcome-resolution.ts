@@ -39,6 +39,7 @@ export type ProxOutcomeBar = {
   high: number;
   low: number;
   close: number;
+  volume?: number;
 };
 
 export type ProxResolvedHorizon = {

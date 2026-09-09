@@ -14,6 +14,8 @@ import {
 } from "@/lib/market-chart-timeframes";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import { resolveTradeWorkspaceChartHeight } from "@/lib/trade-workspace-layout";
+import type { HtChartObject } from "@/lib/chart-objects";
+import type { ChartLayerPreferences } from "@/app/hooks/useChartLayerPreferences";
 
 export type WorkspaceIndicatorVisibility = {
   vwap: boolean;
@@ -35,8 +37,10 @@ export default function TradeWorkspaceChart({
   mode,
   onModeChange,
   indicators,
-  indicatorVisibility,
-  onToggleIndicator,
+  layerVisibility,
+  onToggleLayer,
+  chartObjects,
+  intelligenceLayersEnabled,
   loading,
   error,
 }: {
@@ -47,8 +51,10 @@ export default function TradeWorkspaceChart({
   mode: MarketChartMode;
   onModeChange: (mode: MarketChartMode) => void;
   indicators: MarketChartIndicatorOverlays;
-  indicatorVisibility: WorkspaceIndicatorVisibility;
-  onToggleIndicator: (indicator: keyof WorkspaceIndicatorVisibility) => void;
+  layerVisibility: ChartLayerPreferences;
+  onToggleLayer: (layer: keyof ChartLayerPreferences) => void;
+  chartObjects: readonly HtChartObject[];
+  intelligenceLayersEnabled: boolean;
   loading: boolean;
   error: string | null;
 }) {
@@ -85,10 +91,14 @@ export default function TradeWorkspaceChart({
   const intervalSeconds = getMarketChartTimeframeMetadata(timeframe).intervalSeconds;
   const summary = useMemo(() => summarizeMarketBars([...bars]), [bars]);
   const chartIndicators = useMemo<MarketChartIndicatorOverlays>(() => ({
-    ...(indicatorVisibility.vwap ? { vwap: indicators.vwap } : {}),
-    ...(indicatorVisibility.ema9 ? { ema9: indicators.ema9 } : {}),
-    ...(indicatorVisibility.ema20 ? { ema20: indicators.ema20 } : {}),
-  }), [indicatorVisibility, indicators]);
+    ...(layerVisibility.vwap ? { vwap: indicators.vwap } : {}),
+    ...(layerVisibility.ema9 ? { ema9: indicators.ema9 } : {}),
+    ...(layerVisibility.ema20 ? { ema20: indicators.ema20 } : {}),
+  }), [layerVisibility, indicators]);
+  const visibleChartObjects = useMemo(() => chartObjects.filter((object) =>
+    (object.authority === "agent" && layerVisibility.agent) ||
+    (object.authority === "prox" && layerVisibility.prox),
+  ), [chartObjects, layerVisibility.agent, layerVisibility.prox]);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-white/[0.075] bg-[#06090b]" aria-label={`${symbol} market chart`}>
@@ -130,17 +140,20 @@ export default function TradeWorkspaceChart({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 items-center gap-1.5 border-b border-white/[0.055] px-3 py-1 sm:flex sm:flex-wrap sm:py-2 md:px-4" role="group" aria-label="Chart indicators">
-        <span className="mr-1 hidden text-[7px] font-black uppercase tracking-[0.15em] text-zinc-600 sm:inline">Indicators</span>
-        {(["vwap", "ema9", "ema20"] as const).map((indicator) => (
+      <div className="grid grid-cols-3 items-center gap-1.5 border-b border-white/[0.055] px-3 py-1 sm:flex sm:flex-wrap sm:py-2 md:px-4" role="group" aria-label="Chart layers">
+        <span className="mr-1 hidden text-[7px] font-black uppercase tracking-[0.15em] text-zinc-600 sm:inline">Layers</span>
+        {([
+          ...(intelligenceLayersEnabled ? ["agent", "prox"] as const : []),
+          "vwap", "ema9", "ema20", "volume",
+        ] as const).map((indicator) => (
           <button
             key={indicator}
             type="button"
-            aria-pressed={indicatorVisibility[indicator]}
-            onClick={() => onToggleIndicator(indicator)}
-            className={`min-h-11 rounded-full border px-1.5 py-1 font-mono text-[8px] font-black uppercase transition sm:min-h-0 sm:px-2.5 ${indicatorVisibility[indicator] ? indicatorStyles[indicator] : "border-white/[0.07] bg-white/[0.025] text-zinc-600 hover:text-zinc-400"}`}
+            aria-pressed={layerVisibility[indicator]}
+            onClick={() => onToggleLayer(indicator)}
+            className={`min-h-11 rounded-full border px-1.5 py-1 font-mono text-[8px] font-black uppercase transition sm:min-h-0 sm:px-2.5 ${layerVisibility[indicator] ? (indicator in indicatorStyles ? indicatorStyles[indicator as keyof typeof indicatorStyles] : indicator === "agent" ? "border-orange-400/25 bg-orange-500/10 text-orange-300" : "border-violet-400/25 bg-violet-500/10 text-violet-300") : "border-white/[0.07] bg-white/[0.025] text-zinc-600 hover:text-zinc-400"}`}
           >
-            {indicator === "ema9" ? "EMA 9" : indicator === "ema20" ? "EMA 20" : "VWAP"}
+            {indicator === "ema9" ? "EMA 9" : indicator === "ema20" ? "EMA 20" : indicator === "agent" ? "Agent X" : indicator === "prox" ? "ProX" : indicator === "volume" ? "Volume" : "VWAP"}
           </button>
         ))}
         <span className="ml-auto hidden text-[7px] font-semibold text-zinc-700 sm:inline">Toggle locally · zero provider requests</span>
@@ -171,6 +184,8 @@ export default function TradeWorkspaceChart({
               timeZone="America/New_York"
               viewportKey={`workspace:${symbol}:${timeframe}`}
               indicators={chartIndicators}
+              chartObjects={visibleChartObjects}
+              showVolume={layerVisibility.volume}
               layerHost={{}}
             />
           </div>

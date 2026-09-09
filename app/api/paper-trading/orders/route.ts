@@ -24,6 +24,8 @@ import {
   loadPaperDashboard,
   positionState,
 } from "@/lib/paper-trading/server";
+import { validateVisualPlanHandoffIntent } from "@/lib/ht-agent/visual-plan-handoff";
+import type { AgentPlanLifecycleState, AgentXVisualPlanDefinition } from "@/lib/ht-agent/visual-plan";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -61,11 +63,43 @@ export async function POST(request: Request) {
     const symbol = normalizedIntent?.symbol ?? paperOrderRequestSymbol(requestBody);
     if (!symbol) return response({ ok: false, error: "Invalid paper order." }, 400);
 
+    const requestedPlanVersion = requestBody && typeof requestBody === "object"
+      ? String((requestBody as Record<string, unknown>).agentPlanVersion ?? "")
+      : "";
+    let visualPlanHandoff: null | {
+      planVersionId: string;
+      definition: AgentXVisualPlanDefinition;
+      lifecycleState: AgentPlanLifecycleState;
+    } = null;
+    if (normalizedIntent?.strategySource === "ht_agent") {
+      if (!/^[0-9a-f-]{36}$/i.test(requestedPlanVersion)) {
+        return response({ ok: false, error: "A valid Agent X paper-plan version is required." }, 400);
+      }
+      const validated = await context.service.rpc("ht_agent_validate_visual_plan_handoff", {
+        p_plan_version_id: requestedPlanVersion,
+        p_user_id: context.user.id,
+      });
+      if (validated.error) throw validated.error;
+      const plan = validated.data as Record<string, unknown> | null;
+      if (plan?.eligible !== true) {
+        return response({ ok: false, error: `Agent X paper review is unavailable: ${String(plan?.reason ?? "plan_not_found")}.` }, 409);
+      }
+      visualPlanHandoff = {
+        planVersionId: requestedPlanVersion,
+        definition: plan.definition as AgentXVisualPlanDefinition,
+        lifecycleState: String(plan.lifecycleState) as AgentPlanLifecycleState,
+      };
+      const contract = validateVisualPlanHandoffIntent({
+        intent: normalizedIntent,
+        definition: visualPlanHandoff.definition,
+        lifecycleState: visualPlanHandoff.lifecycleState,
+      });
+      if (!contract.ok) return response({ ok: false, error: contract.reason }, 409);
+    }
+
     const account = await getOrCreatePaperAccount(context);
-    const [position, quote] = await Promise.all([
-      findPaperPosition(context.service, account.id, symbol),
-      getPaperTradingQuote(symbol),
-    ]);
+    const position = await findPaperPosition(context.service, account.id, symbol);
+    const quote = await getPaperTradingQuote(symbol);
     const currentPosition = positionState(position);
     const intent = requestedClose
       ? normalizePaperCloseIntent(requestBody, currentPosition)
@@ -123,6 +157,7 @@ export async function POST(request: Request) {
         bracket_take_profit_price: intent.takeProfitPrice,
         bracket_stop_loss_price: intent.stopLossPrice,
         strategy_source: intent.strategySource,
+        ht_agent_visual_plan_version_id: visualPlanHandoff?.planVersionId ?? null,
         quote_price_at_submit: quote.price,
         quote_source_at_submit: quote.source,
         quote_timestamp_at_submit: quote.timestamp,
@@ -136,6 +171,11 @@ export async function POST(request: Request) {
             ? simulatedBorrowTerms(quote)
             : null,
           execution_authority: "manual_simulation_only",
+          agent_x_visual_plan: visualPlanHandoff ? {
+            plan_version_id: visualPlanHandoff.planVersionId,
+            lifecycle_state_at_review: visualPlanHandoff.lifecycleState,
+            execution_authority: "none",
+          } : null,
         },
       })
       .select("*")

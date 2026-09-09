@@ -41,6 +41,7 @@ import { buildHtTradePlan } from "./trade-plan";
 import { buildHtAgentCohortMetrics, htAgentMetricWindowEnd, HT_AGENT_METRIC_DECISION_LIMIT, HT_AGENT_METRIC_HORIZON } from "./cohort-metrics";
 import { findHtAgentProposalCandidate, htAgentProposalLane, HT_AGENT_STOCK_UNIVERSE_VERSION, loadHtAgentStockUniverse, type HtAgentStockCandidate } from "./stock-universe";
 import { completeHtAgentRun, failHtAgentRun } from "./run-lifecycle";
+import { persistAgentXVisualPlan } from "./visual-plan-server";
 
 type AgentProfileRow = {
   id: string;
@@ -506,6 +507,15 @@ async function persistDecision(
   }).select("id").single();
   if (decisionInsert.error) throw decisionInsert.error;
   const decisionId = String(decisionInsert.data.id);
+  const visualPlan = await persistAgentXVisualPlan({
+    context,
+    profileId: profile.id,
+    decisionId,
+    frameHash,
+    frame,
+    decision,
+    mode: profile.mode,
+  });
   const cohorts = buildHtAgentCohorts(frame, decision);
   const cohortInsert = await context.service.from("ht_agent_cohort_observations").insert(
     cohorts.map((cohort) => ({
@@ -534,6 +544,7 @@ async function persistDecision(
       frame_hash: frameHash,
       trade_plan_version: tradePlan.version,
       trade_plan_status: tradePlan.status,
+      visual_plan: visualPlan,
     },
   });
   if (event.error) throw event.error;

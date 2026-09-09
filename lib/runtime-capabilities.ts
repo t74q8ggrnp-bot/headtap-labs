@@ -1,4 +1,4 @@
-export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v5-phase1-verifier";
+export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v6-agent-x-visual-plans";
 
 export const HT_REQUIRED_MIGRATIONS = Object.freeze([
   "0024_manual_paper_trading.sql",
@@ -9,6 +9,8 @@ export const HT_REQUIRED_MIGRATIONS = Object.freeze([
   "0048_shared_stock_display_frames.sql",
   "0049_secure_ht_labs_watchlist.sql",
   "0050_phase1_workspace_infrastructure_verification.sql",
+  "0052_agent_x_visual_paper_plans.sql",
+  "0053_agent_x_visual_plan_verification.sql",
 ]);
 
 export const HT_REFRESH_RATES_MS = Object.freeze({

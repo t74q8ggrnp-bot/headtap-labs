@@ -11,7 +11,7 @@ import { HT_AGENT_FRAME_VERSION } from "./contracts.ts";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
 import { buildHtTradePlan } from "./trade-plan.ts";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
-import { getEasternDayStart, getHtAgentSessionCloseTarget } from "./time.ts";
+import { getEasternDayStart, getHtAgentSessionCloseTarget, getHtAgentVisualPlanSessionBoundary } from "./time.ts";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
 import { nullableAgentNumber } from "./evidence.ts";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
@@ -480,4 +480,12 @@ test("Eastern day boundaries and session-close horizons remain DST and weekend a
   assert.equal(getEasternDayStart("2026-12-01T15:00:00.000Z"), "2026-12-01T05:00:00.000Z");
   assert.equal(getHtAgentSessionCloseTarget("2026-09-01T13:10:00.000Z"), "2026-09-01T20:00:00.000Z");
   assert.equal(getHtAgentSessionCloseTarget("2026-08-28T21:00:00.000Z"), "2026-08-31T20:00:00.000Z");
+});
+
+test("visual plans use the active provider-time session boundary", () => {
+  assert.equal(getHtAgentVisualPlanSessionBoundary("2026-09-09T12:15:00.000Z", "premarket"), "2026-09-09T13:30:00.000Z");
+  assert.equal(getHtAgentVisualPlanSessionBoundary("2026-09-09T15:15:00.000Z", "regular"), "2026-09-09T20:00:00.000Z");
+  assert.equal(getHtAgentVisualPlanSessionBoundary("2026-09-09T21:15:00.000Z", "after_hours"), "2026-09-10T00:00:00.000Z");
+  assert.equal(getHtAgentVisualPlanSessionBoundary("bad", "regular"), null);
+  assert.equal(getHtAgentVisualPlanSessionBoundary("2026-09-09T15:15:00.000Z", "closed"), null);
 });

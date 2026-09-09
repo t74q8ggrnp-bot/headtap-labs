@@ -53,3 +53,28 @@ export function getHtAgentSessionCloseTarget(capturedAt: string | Date) {
     16,
   ).toISOString();
 }
+
+export function getHtAgentVisualPlanSessionBoundary(
+  providerTimestamp: string | Date,
+  session: "regular" | "premarket" | "after_hours" | "closed",
+) {
+  if (session === "closed") return null;
+  const observed = providerTimestamp instanceof Date
+    ? providerTimestamp
+    : new Date(providerTimestamp);
+  if (!Number.isFinite(observed.getTime())) return null;
+  const eastern = easternClockParts(observed);
+  const boundary = session === "premarket"
+    ? { hour: 9, minute: 30 }
+    : session === "regular"
+      ? { hour: 16, minute: 0 }
+      : { hour: 20, minute: 0 };
+  const value = easternLocalTimestamp(
+    eastern.year,
+    eastern.month,
+    eastern.day,
+    boundary.hour,
+    boundary.minute,
+  );
+  return value.getTime() > observed.getTime() ? value.toISOString() : null;
+}

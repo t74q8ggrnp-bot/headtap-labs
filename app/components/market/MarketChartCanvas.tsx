@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   AreaSeries,
@@ -14,12 +15,19 @@ import {
   LineSeries,
   TickMarkType,
   createChart,
+  createSeriesMarkers,
+  LineStyle,
   type AreaData,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
+  type IPriceLine,
+  type ISeriesApi,
+  type ISeriesMarkersPluginApi,
   type LineData,
   type Time,
+  type SeriesMarker,
+  type SeriesType,
   type UTCTimestamp,
   type WhitespaceData,
 } from "lightweight-charts";
@@ -37,6 +45,12 @@ import {
   type MarketChartRenderFrame,
 } from "@/lib/market-chart-rendering";
 import { formatMarketPrice } from "@/lib/market-price-format";
+import {
+  isHtChartObject,
+  projectProviderTimestampToDisplayBucket,
+  type HtChartObject,
+  type HtChartPriceZone,
+} from "@/lib/chart-objects";
 
 export type { MarketChartIndicatorOverlays } from "@/lib/market-chart-rendering";
 
@@ -56,6 +70,8 @@ export type MarketChartCanvasProps = {
   timeZone?: string;
   viewportKey?: string;
   indicators?: MarketChartIndicatorOverlays;
+  chartObjects?: readonly HtChartObject[];
+  showVolume?: boolean;
   layerHost?: ChartLayerSlots;
   /** @deprecated Prefer layerHost. Kept as a compatibility alias. */
   layerSlots?: ChartLayerSlots;
@@ -92,12 +108,23 @@ export const CHART_LAYER_AUTHORITIES = [
  * Phase 1 intentionally mounts no drawings, but callers can already provide
  * independently owned React overlays without changing the chart canvas.
  */
-export function ChartLayerHost({ slots }: { slots?: ChartLayerSlots }) {
+export function ChartLayerHost({
+  slots,
+  nativeLayerRef,
+}: {
+  slots?: ChartLayerSlots;
+  nativeLayerRef?: RefObject<HTMLDivElement | null>;
+}) {
   return (
     <div
       className="pointer-events-none absolute inset-0 overflow-hidden"
       data-chart-layer-host="true"
     >
+      <div
+        ref={nativeLayerRef}
+        className="pointer-events-none absolute inset-0 z-[2] overflow-hidden"
+        data-chart-native-object-layer="true"
+      />
       {CHART_LAYER_AUTHORITIES.map((authority) => (
         <div
           key={authority}
@@ -125,6 +152,137 @@ type IndicatorWriter = {
   setData: (slots: readonly MarketChartIndicatorSlot[]) => void;
   update: (slot: MarketChartIndicatorSlot) => void;
 };
+
+type ChartObjectWriter = {
+  setObjects: (objects: readonly HtChartObject[]) => void;
+  refresh: () => void;
+  destroy: () => void;
+};
+
+const chartObjectTone = {
+  entry_trigger: "#fb923c",
+  stop_invalidation: "#fb7185",
+  target_1: "#4ade80",
+  target_2: "#22c55e",
+  support: "#22d3ee",
+  resistance: "#a78bfa",
+} as const;
+
+function createChartObjectWriter<T extends SeriesType>(input: {
+  chart: IChartApi;
+  series: ISeriesApi<T>;
+  overlay: HTMLDivElement;
+  intervalSeconds: number;
+  compact: boolean;
+}): ChartObjectWriter {
+  let priceLines: IPriceLine[] = [];
+  let zoneElements: Array<{ object: HtChartPriceZone; element: HTMLDivElement }> = [];
+  const markers: ISeriesMarkersPluginApi<Time> = createSeriesMarkers(input.series, []);
+  const interval = ([60, 300, 900] as const).find((value) => value === input.intervalSeconds) ?? 60;
+
+  const refresh = () => {
+    const plotRight = Math.max(0, input.overlay.clientWidth - 70);
+    for (const { object, element } of zoneElements) {
+      const topCoordinate = input.series.priceToCoordinate(object.high);
+      const bottomCoordinate = input.series.priceToCoordinate(object.low);
+      if (topCoordinate === null || bottomCoordinate === null) {
+        element.style.display = "none";
+        continue;
+      }
+      const from = projectProviderTimestampToDisplayBucket(object.validFrom, interval);
+      const until = projectProviderTimestampToDisplayBucket(object.validUntil, interval);
+      const left = from === null ? 0 : input.chart.timeScale().timeToCoordinate(from as UTCTimestamp) ?? 0;
+      const rightCoordinate = until === null
+        ? null
+        : input.chart.timeScale().timeToCoordinate(until as UTCTimestamp);
+      const right = Math.max(left + 2, Math.min(plotRight, rightCoordinate ?? plotRight));
+      element.style.display = "block";
+      element.style.left = `${Math.max(0, left)}px`;
+      element.style.width = `${Math.max(2, right - Math.max(0, left))}px`;
+      element.style.top = `${Math.min(topCoordinate, bottomCoordinate)}px`;
+      element.style.height = `${Math.max(2, Math.abs(bottomCoordinate - topCoordinate))}px`;
+    }
+  };
+
+  const setObjects = (rawObjects: readonly HtChartObject[]) => {
+    for (const line of priceLines) input.series.removePriceLine(line);
+    priceLines = [];
+    zoneElements = [];
+    input.overlay.replaceChildren();
+    const objects = rawObjects.filter(isHtChartObject);
+    for (const object of objects) {
+      if (object.type === "price_line") {
+        const active = object.status === "active" && object.timing.freshness !== "stale";
+        const baseColor = chartObjectTone[object.role];
+        const inactiveReason = object.timing.freshness === "stale"
+          ? "stale"
+          : object.status.replaceAll("_", " ");
+        priceLines.push(input.series.createPriceLine({
+          price: object.price,
+          color: active ? baseColor : `${baseColor}66`,
+          lineWidth: object.role === "entry_trigger" ? 2 : 1,
+          lineStyle: !active
+            ? LineStyle.Dotted
+            : object.role === "stop_invalidation"
+              ? LineStyle.Dashed
+              : LineStyle.Solid,
+          axisLabelVisible: active,
+          title: active
+            ? object.label
+            : `${object.label} · ${inactiveReason}`,
+        }));
+      } else if (object.type === "price_zone") {
+        const element = document.createElement("div");
+        const active = object.status === "active" && object.timing.freshness !== "stale";
+        element.className = `absolute overflow-hidden border-y border-orange-300/40 bg-orange-400/10 ${active ? "" : "opacity-40"}`;
+        element.setAttribute("data-chart-object-zone", object.role);
+        if (!input.compact) {
+          const label = document.createElement("span");
+          label.className = "absolute left-1 top-0.5 rounded bg-black/75 px-1 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-orange-200";
+          label.textContent = object.label;
+          element.append(label);
+        }
+        input.overlay.append(element);
+        zoneElements.push({ object, element });
+      }
+    }
+    const eventMarkers = objects.flatMap((object): SeriesMarker<UTCTimestamp>[] => {
+      if (object.type !== "event_marker") return [];
+      const time = projectProviderTimestampToDisplayBucket(
+        object.providerTimestamp,
+        interval,
+        "interval_close",
+      );
+      if (time === null) return [];
+      const negative = object.role === "invalidated" || object.role === "expired" || object.role === "needs_review";
+      return [{
+        time: time as UTCTimestamp,
+        position: negative ? "aboveBar" : "belowBar",
+        color: negative ? "#fb7185" : "#4ade80",
+        shape: negative ? "arrowDown" : "arrowUp",
+        text: input.compact ? "" : object.label,
+      }];
+    }).sort((left, right) => Number(left.time) - Number(right.time));
+    markers.setMarkers(eventMarkers);
+    refresh();
+  };
+
+  input.chart.timeScale().subscribeVisibleTimeRangeChange(refresh);
+  input.overlay.addEventListener("wheel", refresh, { passive: true });
+  input.overlay.parentElement?.addEventListener("pointermove", refresh, { passive: true });
+  return {
+    setObjects,
+    refresh,
+    destroy: () => {
+      input.chart.timeScale().unsubscribeVisibleTimeRangeChange(refresh);
+      input.overlay.removeEventListener("wheel", refresh);
+      input.overlay.parentElement?.removeEventListener("pointermove", refresh);
+      markers.detach();
+      for (const line of priceLines) input.series.removePriceLine(line);
+      input.overlay.replaceChildren();
+    },
+  };
+}
 
 type SavedViewport = {
   key: string;
@@ -232,17 +390,21 @@ export function MarketChartCanvas({
   timeZone,
   viewportKey = "market-chart",
   indicators,
+  chartObjects = [],
+  showVolume = true,
   layerHost,
   layerSlots,
   className = "",
 }: MarketChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const nativeLayerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const priceWriterRef = useRef<PriceWriter | null>(null);
   const volumeWriterRef = useRef<VolumeWriter | null>(null);
   const indicatorWritersRef = useRef(
     new Map<MarketChartIndicatorKey, IndicatorWriter>(),
   );
+  const chartObjectWriterRef = useRef<ChartObjectWriter | null>(null);
   const previousFrameRef = useRef<MarketChartRenderFrame | null>(null);
   const savedViewportRef = useRef<SavedViewport | null>(null);
   const slotCountRef = useRef(0);
@@ -330,6 +492,7 @@ export function MarketChartCanvas({
     });
 
     let priceWriter: PriceWriter;
+    let chartObjectWriter: ChartObjectWriter;
     const priceFormat = {
       type: "custom" as const,
       formatter: (price: number) => formatMarketPrice(price),
@@ -354,6 +517,9 @@ export function MarketChartCanvas({
         setData: (slots) => priceSeries.setData(slots.map(candlestickDatum)),
         update: (slot) => priceSeries.update(candlestickDatum(slot)),
       };
+      const overlay = nativeLayerRef.current;
+      if (!overlay) throw new Error("ChartLayerHost is unavailable.");
+      chartObjectWriter = createChartObjectWriter({ chart, series: priceSeries, overlay, intervalSeconds: resolvedIntervalSeconds, compact });
     } else {
       const priceSeries = chart.addSeries(AreaSeries, {
         lineColor: palette.line,
@@ -369,6 +535,9 @@ export function MarketChartCanvas({
         setData: (slots) => priceSeries.setData(slots.map(areaDatum)),
         update: (slot) => priceSeries.update(areaDatum(slot)),
       };
+      const overlay = nativeLayerRef.current;
+      if (!overlay) throw new Error("ChartLayerHost is unavailable.");
+      chartObjectWriter = createChartObjectWriter({ chart, series: priceSeries, overlay, intervalSeconds: resolvedIntervalSeconds, compact });
     }
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -376,6 +545,7 @@ export function MarketChartCanvas({
       priceScaleId: "volume",
       lastValueVisible: false,
       priceLineVisible: false,
+      visible: showVolume,
     });
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.78, bottom: 0 },
@@ -411,6 +581,7 @@ export function MarketChartCanvas({
     priceWriterRef.current = priceWriter;
     volumeWriterRef.current = volumeWriter;
     indicatorWritersRef.current = indicatorWriters;
+    chartObjectWriterRef.current = chartObjectWriter;
     previousFrameRef.current = null;
 
     const rememberViewport = (range: { from: number; to: number } | null) => {
@@ -428,6 +599,7 @@ export function MarketChartCanvas({
         width: container.clientWidth,
         height: Math.max(1, container.clientHeight),
       });
+      chartObjectWriterRef.current?.refresh();
     };
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? null
@@ -448,9 +620,15 @@ export function MarketChartCanvas({
       volumeWriterRef.current = null;
       indicatorWritersRef.current = new Map();
       previousFrameRef.current = null;
+      chartObjectWriterRef.current?.destroy();
+      chartObjectWriterRef.current = null;
       chart.remove();
     };
-  }, [mode, palette.line, priceResolution.minMove, resolvedTimeZone, resolvedViewportKey, showEma20, showEma9, showVwap]);
+  }, [compact, mode, palette.line, priceResolution.minMove, resolvedIntervalSeconds, resolvedTimeZone, resolvedViewportKey, showEma20, showEma9, showVolume, showVwap]);
+
+  useEffect(() => {
+    chartObjectWriterRef.current?.setObjects(chartObjects);
+  }, [chartObjects, mode, resolvedIntervalSeconds]);
 
   useEffect(() => {
     chartRef.current?.applyOptions({ height });
@@ -534,6 +712,7 @@ export function MarketChartCanvas({
         range,
       };
     }
+    chartObjectWriterRef.current?.refresh();
   }, [compact, frame, mode, palette.line, resolvedIntervalSeconds, resolvedTimeZone, resolvedViewportKey, showEma20, showEma9, showVwap]);
 
   return (
@@ -545,7 +724,7 @@ export function MarketChartCanvas({
       style={{ height }}
     >
       <div ref={containerRef} className="h-full w-full" />
-      <ChartLayerHost slots={layerHost ?? layerSlots} />
+      <ChartLayerHost slots={layerHost ?? layerSlots} nativeLayerRef={nativeLayerRef} />
     </div>
   );
 }
