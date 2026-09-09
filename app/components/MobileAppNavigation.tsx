@@ -4,12 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMobileAppNavigation } from "./MobileAppNavigationContext";
 
-type AppTab = "home" | "convictions" | "scanner" | "watchlist" | "profile" | "crypto" | "paper";
+type AppTab = "home" | "convictions" | "scanner" | "workspace" | "watchlist" | "profile" | "crypto" | "paper";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "home", label: "Home", href: "/" },
   { tab: "convictions", label: "Top", href: "/?tab=convictions" },
   { tab: "scanner", label: "Scanner", href: "/?tab=scanner" },
+  { tab: "workspace", label: "Trade", href: "/trade" },
   { tab: "watchlist", label: "Saved", href: "/?tab=watchlist" },
   { tab: "profile", label: "Profile", href: "/?tab=profile" },
   { tab: "crypto", label: "Crypto", href: "/crypto" },
@@ -38,6 +39,9 @@ function TabIcon({ tab }: { tab: AppTab }) {
   if (tab === "scanner") return (
     <svg {...common}><path d="m13.2 2.5-8 11h6.6l-1 8 8-11h-6.6z"/></svg>
   );
+  if (tab === "workspace") return (
+    <svg {...common}><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 3-4 3 2 4-6"/><path d="M17 7h3v3"/></svg>
+  );
   if (tab === "watchlist") return (
     <svg {...common}><path d="m12 3.2 2.7 5.5 6 .9-4.4 4.2 1 6-5.3-2.8-5.3 2.8 1-6-4.4-4.2 6-.9z"/></svg>
   );
@@ -55,62 +59,64 @@ function TabIcon({ tab }: { tab: AppTab }) {
 export default function MobileAppNavigation() {
   const pathname = usePathname();
   const { homeTab, setHomeTab } = useMobileAppNavigation();
-  const isTradeWorkspace = pathname.startsWith("/trade/");
+  const isTradeWorkspace = pathname === "/trade" || pathname.startsWith("/trade/");
   const activeTab: AppTab =
     pathname === "/paper" ? "paper" :
     pathname === "/crypto" ? "crypto" :
     pathname === "/scanner" ? "scanner" :
-    isTradeWorkspace ? "home" :
+    isTradeWorkspace ? "workspace" :
     pathname === "/" ? homeTab : "home";
 
   const activateHomeTab = (tab: AppTab) => {
-    if (tab !== "crypto" && tab !== "paper") setHomeTab(tab);
+    if (tab !== "crypto" && tab !== "paper" && tab !== "workspace") setHomeTab(tab);
   };
 
   return (
     <nav className="ht-mobile-global-nav" aria-label="Primary app navigation">
-      <div className="grid w-full grid-cols-7 px-1 pt-1">
-        {items.map(({ tab, label, href }) => {
-          const active = activeTab === tab;
-          const className = `relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition active:scale-95 ${active ? "text-orange-400" : "text-zinc-600"}`;
-          const content = (
-            <>
-              {active && <span className="absolute top-0 h-0.5 w-5 rounded-full bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.75)]" />}
-              <TabIcon tab={tab} />
-              <span className={`text-[8px] font-black uppercase tracking-[0.04em] ${active ? "text-orange-300" : "text-zinc-600"}`}>
-                {label}
-              </span>
-            </>
-          );
+      <div className="w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="grid min-w-[352px] grid-cols-8 px-1 pt-1">
+          {items.map(({ tab, label, href }) => {
+            const active = activeTab === tab;
+            const className = `relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition active:scale-95 ${active ? "text-orange-400" : "text-zinc-600"}`;
+            const content = (
+              <>
+                {active && <span className="absolute top-0 h-0.5 w-5 rounded-full bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.75)]" />}
+                <TabIcon tab={tab} />
+                <span className={`text-[8px] font-black uppercase tracking-[0.04em] ${active ? "text-orange-300" : "text-zinc-600"}`}>
+                  {label}
+                </span>
+              </>
+            );
 
-          if (pathname === "/" && tab !== "crypto" && tab !== "paper") {
+            if (pathname === "/" && tab !== "crypto" && tab !== "paper" && tab !== "workspace") {
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => activateHomeTab(tab)}
+                  aria-label={label}
+                  aria-current={active ? "page" : undefined}
+                  className={className}
+                >
+                  {content}
+                </button>
+              );
+            }
+
             return (
-              <button
+              <Link
                 key={tab}
-                type="button"
-                onClick={() => activateHomeTab(tab)}
+                href={href}
+                scroll={false}
                 aria-label={label}
                 aria-current={active ? "page" : undefined}
                 className={className}
               >
                 {content}
-              </button>
+              </Link>
             );
-          }
-
-          return (
-            <Link
-              key={tab}
-              href={href}
-              scroll={false}
-              aria-label={label}
-              aria-current={active ? "page" : undefined}
-              className={className}
-            >
-              {content}
-            </Link>
-          );
-        })}
+          })}
+        </div>
       </div>
     </nav>
   );

@@ -591,6 +591,7 @@ export default function PaperTradingDashboard() {
             <nav className="hidden items-center gap-6 text-xs font-bold text-zinc-600 md:flex">
               <Link href="/" className="transition hover:text-white">Top Convictions</Link>
               <Link href="/scanner" className="transition hover:text-white">Scanner</Link>
+              <Link href="/trade" className="transition hover:text-white">Workspace</Link>
               <Link href="/crypto" className="transition hover:text-white">Crypto</Link>
               <span className="text-orange-300">Paper</span>
               <Link href="/agent" className="transition hover:text-white">HT Agent</Link>

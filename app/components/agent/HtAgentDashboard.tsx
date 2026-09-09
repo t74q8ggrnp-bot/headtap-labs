@@ -151,7 +151,7 @@ export default function HtAgentDashboard() {
           <div className="flex items-center gap-8">
             <Link href="/" aria-label="HT Labs home"><Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-10 w-auto" priority /></Link>
             <nav className="hidden gap-6 text-sm font-bold text-zinc-500 md:flex">
-              <Link href="/">Top Convictions</Link><Link href="/scanner">Scanner</Link><Link href="/crypto">Crypto</Link><Link href="/paper">Paper</Link>
+              <Link href="/">Top Convictions</Link><Link href="/scanner">Scanner</Link><Link href="/trade">Workspace</Link><Link href="/crypto">Crypto</Link><Link href="/paper">Paper</Link>
               <span className="text-orange-300">HT Agent</span>
             </nav>
           </div>
