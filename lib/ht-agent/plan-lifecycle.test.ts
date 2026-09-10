@@ -3,6 +3,15 @@ import test from "node:test";
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
 import { evaluateAgentPlanMinute, lifecycleTransitionAllowed } from "./plan-lifecycle.ts";
 
+const cancellation = {
+  policyVersion: "agent-x-cancellation-v1-provider-minute" as const,
+  conditions: [
+    { code: "stop_touched" as const, evidence: "completed_provider_minute" as const, field: "low" as const, operator: "lte" as const, value: 9.5, transition: "invalidated" as const },
+    { code: "plan_expiration_reached" as const, evidence: "completed_provider_minute" as const, field: "closedAt" as const, operator: "gte" as const, value: "2026-09-09T13:46:00.000Z", transition: "expired" as const },
+    { code: "intraminute_order_unprovable" as const, evidence: "completed_provider_minute" as const, field: "high_low_range" as const, operator: "contains_conflicting_thresholds" as const, value: null, transition: "needs_review_ambiguous" as const },
+  ],
+};
+
 const snapshot = {
   symbol: "TEST",
   state: "watching" as const,
@@ -15,6 +24,7 @@ const snapshot = {
   stopPrice: 9.5,
   targetOne: 11,
   targetTwo: 12,
+  cancellation,
 };
 
 function candle(values: Partial<{ openedAt: string; closedAt: string; open: number; high: number; low: number; close: number; volume: number }> = {}) {
@@ -39,6 +49,14 @@ test("transitions watching to triggered on unambiguous completed provider eviden
     assert.equal(result.from, "watching");
     assert.equal(result.to, "triggered");
     assert.equal(result.providerTimestamp, "2026-09-09T13:32:00.000Z");
+  }
+});
+
+test("records a completed provider minute without forcing a lifecycle transition", () => {
+  const result = evaluateAgentPlanMinute(snapshot, candle({ high: 9.9, close: 9.85 }));
+  assert.equal(result.kind, "no_change");
+  if (result.kind === "no_change") {
+    assert.equal(result.evaluatedAt, "2026-09-09T13:32:00.000Z");
   }
 });
 
@@ -103,4 +121,20 @@ test("allows only the locked monotonic transition graph", () => {
   assert.equal(lifecycleTransitionAllowed("watching", "triggered"), true);
   assert.equal(lifecycleTransitionAllowed("triggered", "watching"), false);
   assert.equal(lifecycleTransitionAllowed("target_reached", "invalidated"), false);
+});
+
+test("rejects lifecycle evidence when machine-readable cancellation conditions drift", () => {
+  const drifted = {
+    ...snapshot,
+    cancellation: {
+      ...snapshot.cancellation,
+      conditions: snapshot.cancellation.conditions.map((condition, index) => index === 0
+        ? { ...condition, value: 9.4 }
+        : condition),
+    },
+  };
+  assert.deepEqual(evaluateAgentPlanMinute(drifted as never, candle()), {
+    kind: "rejected",
+    reason: "invalid_evidence",
+  });
 });

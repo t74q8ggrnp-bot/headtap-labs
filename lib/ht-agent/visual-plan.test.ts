@@ -3,7 +3,7 @@ import test from "node:test";
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
 import { HT_AGENT_DECISION_VERSION, HT_AGENT_FRAME_VERSION } from "./contracts.ts";
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
-import { buildAgentXVisualPlan, resolveAgentXVisualPlanExpiration } from "./visual-plan.ts";
+import { buildAgentXVisualPlan, resolveAgentXVisualPlanExpiration, visualPlanReleaseContractMatches } from "./visual-plan.ts";
 
 function input() {
   return {
@@ -74,6 +74,18 @@ test("builds one honest long paper plan from the existing decision and risk evid
   assert.equal(result.plan.paperOnly, true);
   assert.equal(result.plan.direction, "long");
   assert.equal(result.plan.expiresAt, "2026-09-09T13:46:00.000Z");
+  assert.deepEqual(result.plan.riskReward, {
+    policyVersion: "agent-x-risk-reward-v1-least-favorable-entry",
+    entryBasis: "least_favorable_permitted_entry",
+    entryPrice: 10.1,
+    riskPerShare: 0.6,
+    targetOne: 1.5,
+    targetTwo: 3.166667,
+  });
+  assert.equal(result.plan.estimatedRiskReward, result.plan.riskReward.targetOne);
+  assert.deepEqual(result.plan.cancellation.conditions.map((condition) => condition.code), [
+    "stop_touched", "plan_expiration_reached", "intraminute_order_unprovable",
+  ]);
   assert.deepEqual(result.plan.chartObjects.filter((item) => item.authority === "agent").map((item) => item.type), [
     "price_zone", "price_line", "price_line", "price_line", "price_line",
   ]);
@@ -112,9 +124,30 @@ test("does not render a duplicate second target when legacy evidence adds no new
   assert.equal(result.available, true);
   if (!result.available) return;
   assert.equal(result.plan.targetTwo, null);
+  assert.equal(result.plan.riskReward.targetTwo, null);
   assert.equal(result.plan.chartObjects.some(
     (item) => item.type === "price_line" && item.role === "target_2",
   ), false);
+});
+
+test("uses the higher trigger as the least-favorable permitted entry", () => {
+  const result = buildAgentXVisualPlan(input() as never);
+  assert.equal(result.available, true);
+  if (!result.available) return;
+  assert.equal(result.plan.triggerPrice > result.plan.entryZone.high, true);
+  assert.equal(result.plan.riskReward.entryPrice, result.plan.triggerPrice);
+  assert.equal(result.plan.riskReward.targetOne, 1.5);
+  assert.equal(visualPlanReleaseContractMatches(result.plan), true);
+  assert.equal(visualPlanReleaseContractMatches({
+    ...result.plan,
+    riskReward: {
+      ...result.plan.riskReward,
+      entryPrice: result.plan.entryZone.high,
+      riskPerShare: result.plan.entryZone.high - result.plan.stopPrice,
+      targetOne: (result.plan.targetOne - result.plan.entryZone.high) /
+        (result.plan.entryZone.high - result.plan.stopPrice),
+    },
+  }), false);
 });
 
 test("bounds expiration by the applicable session boundary", () => {

@@ -10,6 +10,14 @@ const verifier = readFileSync(
   new URL("../../supabase/migrations/0053_agent_x_visual_plan_verification.sql", import.meta.url),
   "utf8",
 );
+const release = readFileSync(
+  new URL("../../supabase/migrations/0054_agent_x_visual_plan_release_contract.sql", import.meta.url),
+  "utf8",
+);
+const internalVisible = readFileSync(
+  new URL("../../supabase/migrations/0055_agent_x_visual_plan_internal_visible.sql", import.meta.url),
+  "utf8",
+);
 
 test("Phase 2 starts off and cannot authorize live execution", () => {
   assert.match(migration, /visual_plan_mode text not null default 'off'/);
@@ -50,4 +58,31 @@ test("verification checks rollout, immutable boundaries, access, and idempotency
   assert.match(verifier, /orphanStates/);
   assert.match(verifier, /paperHandoffSchemaReady/);
   assert.match(verifier, /rollout/);
+});
+
+test("forward-only release contract stores separate deterministic target R/R and cancellation policy", () => {
+  assert.match(release, /agent-x-visual-paper-plan-v2/);
+  assert.match(release, /agent-x-risk-reward-v1-least-favorable-entry/);
+  assert.match(release, /target_one_risk_reward/);
+  assert.match(release, /target_two_risk_reward/);
+  assert.match(release, /round\(\(v_target_one-greatest\(v_entry_high,v_trigger\)\)\/\(greatest\(v_entry_high,v_trigger\)-v_stop\),6\)/);
+  assert.match(release, /agent-x-cancellation-v1-provider-minute/);
+  assert.match(release, /intraminute_order_unprovable/);
+});
+
+test("0054 enables only shadow and 0055 promotes only after a fail-closed verifier", () => {
+  assert.match(release, /visual_plan_mode='shadow'/);
+  assert.match(release, /visual_plan_lifecycle_enabled=true/);
+  assert.match(release, /visual_plan_paper_handoff_enabled=false/);
+  assert.match(release, /ht_agent_phase2_visual_plan_release_health/);
+  assert.match(release, /phase2_shadow_verification_not_ready/);
+  assert.match(internalVisible, /ht_agent_promote_visual_plan_internal_visible/);
+  assert.doesNotMatch(internalVisible, /visual_plan_paper_handoff_enabled=true/);
+});
+
+test("closed-market lifecycle telemetry cannot claim evidence or provider requests", () => {
+  assert.match(release, /ht_agent_visual_plan_worker_runs_closed_request_check/);
+  assert.match(release, /closed_market_skipped/);
+  assert.match(release, /provider_request_count=0/);
+  assert.match(release, /closedMarketLifecycleRequests/);
 });

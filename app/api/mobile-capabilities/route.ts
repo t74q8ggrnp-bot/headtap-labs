@@ -15,6 +15,7 @@ import {
   cryptoProviderCallsAreProhibited,
   isCryptoProductIntentionallyShelved,
 } from "@/lib/crypto/product-capabilities";
+import { HT_AGENT_VISUAL_PLAN_API_VERSION } from "@/lib/ht-agent/contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export async function GET() {
       },
     },
     agentXVisualPlans: {
-      contractVersion: "agent-x-visual-plan-api-v1",
+      contractVersion: HT_AGENT_VISUAL_PLAN_API_VERSION,
       authority: "paper_plan_visualization_only",
       endpoint: "/api/ht-agent/plans?symbol={ticker}",
       lifecycleEvidence: "completed_massive_provider_minutes",

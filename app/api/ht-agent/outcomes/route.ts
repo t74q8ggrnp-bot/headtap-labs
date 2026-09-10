@@ -20,7 +20,13 @@ import {
   evaluateAgentPlanMinute,
   type AgentPlanLifecycleSnapshot,
 } from "@/lib/ht-agent/plan-lifecycle";
-import type { AgentPlanLifecycleState, AgentXVisualPlanDefinition } from "@/lib/ht-agent/visual-plan";
+import {
+  visualPlanReleaseContractMatches,
+  type AgentPlanLifecycleState,
+  type AgentXVisualPlanDefinition,
+} from "@/lib/ht-agent/visual-plan";
+import { HT_AGENT_VISUAL_PLAN_VERSION } from "@/lib/ht-agent/contracts";
+import { marketChartPollingState } from "@/lib/market-chart-polling";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -92,7 +98,8 @@ function parseVisualPlanClaims(value: unknown): VisualPlanClaim[] {
     if (
       typeof row.planVersionId !== "string" ||
       typeof row.symbol !== "string" ||
-      definition?.schemaVersion !== "agent-x-visual-paper-plan-v1" ||
+      definition?.schemaVersion !== HT_AGENT_VISUAL_PLAN_VERSION ||
+      !visualPlanReleaseContractMatches(definition) ||
       !["watching", "triggered"].includes(state) ||
       !Number.isInteger(Number(row.stateVersion))
     ) return [];
@@ -136,6 +143,7 @@ export async function GET(request: Request) {
   if (!authorized(request)) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const service = getPaperServiceClient();
   const observedAt = new Date();
+  const visualLifecyclePolling = marketChartPollingState(observedAt, "extended");
   const startedAt = Date.now();
   const workerId = crypto.randomUUID();
   const claim = await service.rpc("ht_agent_claim_outcome_batch", {
@@ -173,7 +181,11 @@ export async function GET(request: Request) {
     proposedEntry: row.proposedEntry === null ? null : finite(row.proposedEntry),
     conservativeSlippageBps: finite(row.conservativeSlippageBps),
   }));
-  const visualClaimResult = await service.rpc("ht_agent_claim_visual_plan_batch", { p_limit: 50 });
+  // Lifecycle evidence is provider-market evidence, so no visual-plan claim or
+  // provider request is allowed outside the known extended-hours calendar.
+  const visualClaimResult = visualLifecyclePolling.active
+    ? await service.rpc("ht_agent_claim_visual_plan_batch", { p_limit: 50 })
+    : { data: { allowed: false, reason: visualLifecyclePolling.reason, plans: [] }, error: null };
   const visualClaims = visualClaimResult.error ? [] : parseVisualPlanClaims(visualClaimResult.data);
   const ranges = new Map<string, { fromMs: number; toMs: number }>();
   for (const row of rows) {
@@ -242,6 +254,7 @@ export async function GET(request: Request) {
         stopPrice: claimed.definition.stopPrice,
         targetOne: claimed.definition.targetOne,
         targetTwo: claimed.definition.targetTwo,
+        cancellation: claimed.definition.cancellation,
       };
       const bars = barsBySymbol.get(claimed.symbol) ?? [];
       for (const bar of bars) {
@@ -283,7 +296,7 @@ export async function GET(request: Request) {
       }
     }
     if (!visualClaimResult.error) {
-      const visualRun = await service.from("ht_agent_visual_plan_worker_runs").insert({
+      const visualRunPayload = {
         worker_id: workerId,
         started_at: new Date(startedAt).toISOString(),
         completed_at: new Date().toISOString(),
@@ -293,7 +306,27 @@ export async function GET(request: Request) {
         provider_request_count: visualProviderRequestCount,
         accepted_evidence_count: visualEvidenceAccepted,
         transition_counts: transitionCounts,
-      });
+        lifecycle_session: visualLifecyclePolling.active ? "active" : "closed",
+        closed_market_skipped: !visualLifecyclePolling.active,
+        reused_provider_request_count: [...visualSymbols].filter((symbol) => outcomeRangeSymbols.has(symbol)).length,
+      };
+      let visualRun = await service.from("ht_agent_visual_plan_worker_runs").insert(visualRunPayload);
+      // Keep the already-deployed Phase 2 infrastructure operational during
+      // the short code-before-forward-migration release window.
+      if (["PGRST204", "42703"].includes(visualRun.error?.code ?? "")) {
+        const legacyPayload = {
+          worker_id: visualRunPayload.worker_id,
+          started_at: visualRunPayload.started_at,
+          completed_at: visualRunPayload.completed_at,
+          status: visualRunPayload.status,
+          claimed_plan_count: visualRunPayload.claimed_plan_count,
+          unique_symbol_count: visualRunPayload.unique_symbol_count,
+          provider_request_count: visualRunPayload.provider_request_count,
+          accepted_evidence_count: visualRunPayload.accepted_evidence_count,
+          transition_counts: visualRunPayload.transition_counts,
+        };
+        visualRun = await service.from("ht_agent_visual_plan_worker_runs").insert(legacyPayload);
+      }
       if (visualRun.error) throw visualRun.error;
     }
     const finish = await service.rpc("ht_agent_finish_outcome_batch", {
@@ -324,6 +357,8 @@ export async function GET(request: Request) {
         visualPlanEvidenceAccepted: visualEvidenceAccepted,
         visualPlanTransitions: visualTransitions,
         visualPlanProviderRequests: visualProviderRequestCount,
+        visualPlanLifecycleSession: visualLifecyclePolling.active ? "active" : "closed",
+        visualPlanClosedMarketSkipped: !visualLifecyclePolling.active,
       },
     });
     if (finish.error) throw finish.error;
@@ -343,11 +378,13 @@ export async function GET(request: Request) {
       visualPlanEvidenceAccepted: visualEvidenceAccepted,
       visualPlanTransitions: visualTransitions,
       visualPlanProviderRequests: visualProviderRequestCount,
+      visualPlanLifecycleSession: visualLifecyclePolling.active ? "active" : "closed",
+      visualPlanClosedMarketSkipped: !visualLifecyclePolling.active,
     }));
     return NextResponse.json({
       ok: pending === 0 && failedSymbols.size === 0,
       authority: "historical_massive_paper_research_only",
-      workerVersion: "ht-agent-outcome-worker-v2",
+      workerVersion: "ht-agent-outcome-worker-v3-phase2-release",
       due: rows.length,
       completed: updates.length,
       measured,
@@ -361,6 +398,8 @@ export async function GET(request: Request) {
       visualPlanEvidenceAccepted: visualEvidenceAccepted,
       visualPlanTransitions: visualTransitions,
       visualPlanProviderRequests: visualProviderRequestCount,
+      visualPlanLifecycleSession: visualLifecyclePolling.active ? "active" : "closed",
+      visualPlanClosedMarketSkipped: !visualLifecyclePolling.active,
       timestamp: observedAt.toISOString(),
     }, { status: pending === 0 && failedSymbols.size === 0 ? 200 : 202 });
   } catch (error) {

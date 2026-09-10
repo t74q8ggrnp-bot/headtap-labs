@@ -3404,10 +3404,11 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
-    const [infrastructureResult, workerResult] = await Promise.all([
+    const [infrastructureResult, releaseResult, workerResult] = await Promise.all([
       supabase.rpc("ht_agent_phase2_visual_plan_infrastructure_health"),
+      supabase.rpc("ht_agent_phase2_visual_plan_release_health"),
       supabase.from("ht_agent_visual_plan_worker_runs")
-        .select("completed_at,status,claimed_plan_count,unique_symbol_count,provider_request_count,accepted_evidence_count,transition_counts")
+        .select("completed_at,status,claimed_plan_count,unique_symbol_count,provider_request_count,reused_provider_request_count,accepted_evidence_count,transition_counts,lifecycle_session,closed_market_skipped")
         .order("completed_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -3419,6 +3420,9 @@ export async function GET(request: Request) {
     const rollout = infrastructure?.rollout && typeof infrastructure.rollout === "object"
       ? infrastructure.rollout as Record<string, unknown>
       : {};
+    const release = !releaseResult.error && releaseResult.data && typeof releaseResult.data === "object"
+      ? releaseResult.data as Record<string, unknown>
+      : null;
     const mode = String(rollout.mode ?? "off");
     const lifecycleRequired = mode === "shadow" || mode === "visible";
     const lifecycleEnabled = rollout.lifecycleEnabled === true;
@@ -3432,13 +3436,25 @@ export async function GET(request: Request) {
       (!activeMarketSession || workerAgeMinutes <= 3)
     );
     const verified = infrastructure?.verified === true;
+    const releaseContractReady = mode === "off" || release?.releaseContractReady === true;
+    const shadowReady = release?.shadowReady === true;
+    const releaseRollout = release?.rollout && typeof release.rollout === "object"
+      ? release.rollout as Record<string, unknown>
+      : {};
+    const priorShadowVerified = typeof releaseRollout.shadowVerifiedAt === "string";
+    const rolloutReady = mode === "off" ||
+      (mode === "shadow" ? shadowReady : mode === "visible" && priorShadowVerified);
     checks.push({
       name: "agent_x_visual_plan_infrastructure",
-      ok: verified && workerHealthy,
+      ok: verified && workerHealthy && releaseContractReady && rolloutReady,
       message: !verified
         ? "Agent X visual-plan infrastructure is incomplete; apply migrations 0052 and 0053 without enabling rollout."
+        : !releaseContractReady
+          ? "Agent X visual-plan release contract is incomplete; apply forward-only migration 0054."
         : !workerHealthy
           ? "Agent X visual-plan lifecycle is enabled but its provider-minute worker is not current."
+          : !rolloutReady
+            ? "Agent X visual plans are in shadow mode but the release evidence has not passed yet."
           : mode === "off"
             ? "Agent X visual plans are verified and safely gated off pending rollout approval."
             : `Agent X visual plans are verified in ${mode} mode with paper-only authority.`,
@@ -3446,10 +3462,13 @@ export async function GET(request: Request) {
         schemaVersion: HT_AGENT_VISUAL_PLAN_VERSION,
         policyVersion: HT_AGENT_VISUAL_PLAN_POLICY_VERSION,
         infrastructure,
+        release,
         latestWorker,
         workerAgeMinutes: Number.isFinite(workerAgeMinutes) ? Number(workerAgeMinutes.toFixed(2)) : null,
         lifecycleRequired,
         workerHealthy,
+        releaseContractReady,
+        rolloutReady,
         executionAuthority: "none",
         paperOnly: true,
         liveBrokerage: false,

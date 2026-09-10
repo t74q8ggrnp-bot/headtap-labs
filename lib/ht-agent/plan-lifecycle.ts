@@ -1,4 +1,5 @@
-import type { AgentPlanLifecycleState } from "./visual-plan";
+// @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
+import { visualPlanCancellationContractMatches, type AgentPlanLifecycleState, type AgentXVisualPlanDefinition } from "./visual-plan.ts";
 
 export const HT_AGENT_PLAN_LIFECYCLE_VERSION = "agent-x-plan-lifecycle-v1-provider-minute" as const;
 
@@ -25,6 +26,7 @@ export type AgentPlanLifecycleSnapshot = {
   stopPrice: number;
   targetOne: number;
   targetTwo: number | null;
+  cancellation: AgentXVisualPlanDefinition["cancellation"];
 };
 
 export type AgentPlanLifecycleEvaluation =
@@ -103,6 +105,11 @@ export function evaluateAgentPlanMinute(
   if (!Number.isFinite(validFrom) || !Number.isFinite(expiresAt)) {
     return { kind: "rejected", reason: "invalid_evidence" };
   }
+  if (!visualPlanCancellationContractMatches({
+    stopPrice: snapshot.stopPrice,
+    expiresAt: snapshot.expiresAt,
+    cancellation: snapshot.cancellation,
+  })) return { kind: "rejected", reason: "invalid_evidence" };
   if (candleClosedAt <= validFrom) return { kind: "ignored", reason: "pre_plan" };
   const lastEvaluated = snapshot.lastEvaluatedCandleAt
     ? Date.parse(snapshot.lastEvaluatedCandleAt)

@@ -1,5 +1,6 @@
 import type { PaperOrderIntent } from "@/lib/paper-trading/engine";
-import type { AgentPlanLifecycleState, AgentXVisualPlanDefinition } from "./visual-plan";
+// @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
+import { visualPlanReleaseContractMatches, type AgentPlanLifecycleState, type AgentXVisualPlanDefinition } from "./visual-plan.ts";
 
 function samePrice(left: number | null, right: number) {
   return left !== null && Math.abs(left - right) <= Math.max(0.000001, right * 0.000001);
@@ -15,6 +16,7 @@ export function validateVisualPlanHandoffIntent(input: {
     (object) => object.authority === "agent",
   )?.timing.session;
   if (
+    !visualPlanReleaseContractMatches(definition) ||
     definition.paperOnly !== true ||
     definition.executionAuthority !== "none" ||
     intent.strategySource !== "ht_agent" ||

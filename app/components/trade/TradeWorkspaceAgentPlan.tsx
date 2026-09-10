@@ -43,13 +43,14 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
   )?.timing.freshness ?? "stale";
   const detailBody = (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
         {[
           ["Entry", `${formatMarketPrice(definition.entryZone.low)}–${formatMarketPrice(definition.entryZone.high)}`],
           ["Stop", formatMarketPrice(definition.stopPrice)],
           ["Target 1", formatMarketPrice(definition.targetOne)],
           ["Target 2", formatMarketPrice(definition.targetTwo)],
-          ["Est. R/R", `${definition.estimatedRiskReward.toFixed(2)}R`],
+          ["Target 1 R/R", `${definition.riskReward.targetOne.toFixed(2)}R`],
+          ["Target 2 R/R", definition.riskReward.targetTwo === null ? "Unavailable" : `${definition.riskReward.targetTwo.toFixed(2)}R`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-xl border border-white/[0.07] bg-black/25 px-3 py-2.5">
             <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-600">{label}</p>
@@ -57,6 +58,7 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
           </div>
         ))}
       </div>
+      <p className="text-[8px] font-semibold text-zinc-700">R/R basis: least-favorable permitted entry at {formatMarketPrice(definition.riskReward.entryPrice)}.</p>
       <div className="grid grid-cols-3 gap-2">
         {[
           ["Max quantity", definition.positionRisk.quantity.toLocaleString()],
@@ -86,7 +88,7 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => setDetailsOpen(true)} className="min-h-11 rounded-xl border border-white/10 px-4 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 md:hidden">Plan details</button>
-          {read.plan.paperHandoffEligible ? (
+          {read.plan.paperReviewEligible ? (
             <Link href={visualPlanPaperUrl({ symbol: definition.symbol, planVersionId: read.plan.planVersionId })} className="inline-flex min-h-11 items-center rounded-xl bg-orange-500 px-4 text-[9px] font-black uppercase tracking-[0.1em] text-black">Review in Paper</Link>
           ) : (
             <span className="inline-flex min-h-11 items-center rounded-xl border border-white/[0.07] px-4 text-[8px] font-black uppercase tracking-[0.08em] text-zinc-600">Paper review locked</span>

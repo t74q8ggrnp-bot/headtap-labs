@@ -16,12 +16,17 @@ export type AgentXVisualPlanRead = {
     planVersionId: string;
     versionNumber: number;
     lifecycleState: AgentPlanLifecycleState;
+    stateVersion: number;
     stateProviderTimestamp: string;
     lastEvaluatedCandleAt: string | null;
     definition: AgentXVisualPlanDefinition;
     chartObjects: HtChartObject[];
+    paperReviewEligible: boolean;
+    paperReviewReason: string | null;
     paperHandoffEligible: boolean;
     paperHandoffReason: string | null;
+    syncContractVersion: "agent-x-plan-sync-v1-server-snapshot";
+    syncFingerprint: string;
   };
   servedAt: string;
 };

@@ -8,11 +8,15 @@ import {
 import type { HtChartObject, HtChartObjectStatus } from "@/lib/chart-objects";
 import { isHtChartObject } from "@/lib/chart-objects";
 import type { AgentPlanLifecycleState, AgentXVisualPlanDefinition } from "@/lib/ht-agent/visual-plan";
-import { buildProxChartContext } from "@/lib/ht-agent/visual-plan";
+import { buildProxChartContext, visualPlanReleaseContractMatches } from "@/lib/ht-agent/visual-plan";
 import type { HtAgentDecisionFrame } from "@/lib/ht-agent/contracts";
 import type { PaperServerContext } from "@/lib/paper-trading/server";
 import { visualPlanObjectFreshness } from "@/lib/ht-agent/visual-plan-api";
 import { visualPlanSymbolInScope } from "@/lib/ht-agent/visual-plan-rollout";
+import {
+  HT_AGENT_VISUAL_PLAN_SYNC_VERSION,
+  visualPlanSyncFingerprint,
+} from "@/lib/ht-agent/visual-plan-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -144,7 +148,7 @@ export async function GET(request: Request) {
         .eq("profile_id", profile.data.id)
         .single(),
       context.service.from("ht_agent_visual_plan_states")
-        .select("lifecycle_state,state_provider_timestamp,last_evaluated_candle_at")
+        .select("lifecycle_state,state_version,state_provider_timestamp,last_evaluated_candle_at")
         .eq("plan_version_id", root.data.active_version_id)
         .eq("profile_id", profile.data.id)
         .single(),
@@ -158,7 +162,10 @@ export async function GET(request: Request) {
     if (state.error) throw state.error;
     if (events.error) throw events.error;
     const definition = version.data.definition as AgentXVisualPlanDefinition;
-    if (definition?.schemaVersion !== HT_AGENT_VISUAL_PLAN_VERSION) {
+    if (
+      definition?.schemaVersion !== HT_AGENT_VISUAL_PLAN_VERSION ||
+      !visualPlanReleaseContractMatches(definition)
+    ) {
       throw new Error("Agent X visual plan schema is unsupported.");
     }
     const lifecycleState = String(state.data.lifecycle_state) as AgentPlanLifecycleState;
@@ -211,8 +218,20 @@ export async function GET(request: Request) {
     const handoffEnabled = control.data.visual_plan_paper_handoff_enabled === true;
     const killSwitch = control.data.kill_switch === true || profile.data.kill_switch === true || profile.data.status !== "active";
     const timeCurrent = Date.parse(String(version.data.expires_at)) > Date.now();
-    const paperHandoffEligible = active && handoffEnabled && !killSwitch && timeCurrent;
+    const paperReviewEligible = active && !killSwitch && timeCurrent;
+    const paperHandoffEligible = paperReviewEligible && handoffEnabled;
     const currentChartObjects = [...agentObjects, ...proxObjects, ...eventObjects];
+    const stateVersion = Number(state.data.state_version);
+    const syncFingerprint = visualPlanSyncFingerprint({
+      planId: String(root.data.id),
+      planVersionId: String(version.data.id),
+      versionNumber: Number(version.data.version_number),
+      lifecycleState,
+      stateVersion,
+      stateProviderTimestamp: String(state.data.state_provider_timestamp),
+      definition,
+      chartObjects: currentChartObjects,
+    });
     return response({
       ok: true,
       symbol,
@@ -225,17 +244,22 @@ export async function GET(request: Request) {
         planVersionId: String(version.data.id),
         versionNumber: Number(version.data.version_number),
         lifecycleState,
+        stateVersion,
         stateProviderTimestamp: String(state.data.state_provider_timestamp),
         lastEvaluatedCandleAt: state.data.last_evaluated_candle_at ? String(state.data.last_evaluated_candle_at) : null,
         definition,
         chartObjects: currentChartObjects,
+        paperReviewEligible,
+        paperReviewReason: paperReviewEligible ? null : killSwitch ? "agent_kill_switch" : !timeCurrent ? "plan_expired" : lifecycleState,
         paperHandoffEligible,
         paperHandoffReason: paperHandoffEligible ? null : !handoffEnabled ? "paper_handoff_disabled" : killSwitch ? "agent_kill_switch" : !timeCurrent ? "plan_expired" : lifecycleState,
+        syncContractVersion: HT_AGENT_VISUAL_PLAN_SYNC_VERSION,
+        syncFingerprint,
       },
       servedAt: new Date().toISOString(),
     });
   } catch (error) {
     console.error("[ht-agent-plans] read failed", error);
-    return response({ ok: false, error: "Agent X visual plans are not ready. Confirm migrations 0052 and 0053." }, 503);
+    return response({ ok: false, error: "Agent X visual plans are not ready. Confirm migrations 0052 through 0055." }, 503);
   }
 }

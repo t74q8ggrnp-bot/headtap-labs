@@ -6,25 +6,15 @@ import type { HtAgentDecision, HtAgentDecisionFrame, HtAgentMode } from "./contr
 import { getHtAgentVisualPlanSessionBoundary } from "./time";
 import { buildAgentXVisualPlan } from "./visual-plan";
 import { visualPlanSymbolInScope } from "./visual-plan-rollout";
+import {
+  HT_AGENT_VISUAL_PLAN_GENERATOR_VERSION,
+  visualPlanIdempotencyKey,
+} from "./visual-plan-idempotency";
 
-export const HT_AGENT_VISUAL_PLAN_GENERATOR_VERSION =
-  "agent-x-visual-plan-generator-v1" as const;
+export { HT_AGENT_VISUAL_PLAN_GENERATOR_VERSION, visualPlanIdempotencyKey };
 
 function definitionHash(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
-
-function idempotencyKey(input: {
-  profileId: string;
-  frameHash: string;
-  decisionId: string;
-}) {
-  return createHash("sha256").update([
-    input.profileId,
-    input.frameHash,
-    input.decisionId,
-    HT_AGENT_VISUAL_PLAN_GENERATOR_VERSION,
-  ].join("|")).digest("hex");
 }
 
 export async function persistAgentXVisualPlan(input: {
@@ -83,7 +73,7 @@ export async function persistAgentXVisualPlan(input: {
   const persisted = await context.service.rpc("ht_agent_create_visual_plan", {
     p_decision_id: input.decisionId,
     p_frame_id: frame.frameId,
-    p_idempotency_key: idempotencyKey({
+    p_idempotency_key: visualPlanIdempotencyKey({
       profileId: input.profileId,
       frameHash: input.frameHash,
       decisionId: input.decisionId,

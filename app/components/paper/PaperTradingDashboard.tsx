@@ -224,6 +224,7 @@ export default function PaperTradingDashboard() {
   const [dollarAmount, setDollarAmount] = useState("");
   const [activityTab, setActivityTab] = useState<ActivityTab>("positions");
   const [reviewing, setReviewing] = useState(false);
+  const [agentPaperHandoffAllowed, setAgentPaperHandoffAllowed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const initialInstrumentRequested = useRef(false);
@@ -388,7 +389,7 @@ export default function PaperTradingDashboard() {
     void api(`/api/ht-agent/plans?symbol=${encodeURIComponent(initialSymbol)}`)
       .then((body) => {
         const read = body as unknown as AgentXVisualPlanRead;
-        if (!read.plan || read.plan.planVersionId !== requestedAgentPlanVersion || !read.plan.paperHandoffEligible) {
+        if (!read.plan || read.plan.planVersionId !== requestedAgentPlanVersion || !read.plan.paperReviewEligible) {
           throw new Error("This Agent X plan is no longer eligible for paper review.");
         }
         const plan = read.plan.definition;
@@ -407,7 +408,10 @@ export default function PaperTradingDashboard() {
           stopLossPrice: String(plan.stopPrice),
         });
         setReviewing(true);
-        setMessage("Reviewing an immutable Agent X paper plan. No order has been submitted.");
+        setAgentPaperHandoffAllowed(read.plan.paperHandoffEligible);
+        setMessage(read.plan.paperHandoffEligible
+          ? "Reviewing an immutable Agent X paper plan. No order has been submitted."
+          : "Reviewing an immutable Agent X paper plan. Submission remains locked during internal verification.");
       })
       .catch((error: unknown) => {
         setMessage(error instanceof Error ? error.message : "Agent X paper plan unavailable.");
@@ -418,6 +422,9 @@ export default function PaperTradingDashboard() {
     && (!(ticket.orderType === "limit" || ticket.orderType === "stop_limit") || Number(ticket.limitPrice) > 0)
     && (!(ticket.orderType === "stop" || ticket.orderType === "stop_limit") || Number(ticket.stopPrice) > 0)
     && (!ticket.bracket || (Number(ticket.takeProfitPrice) > 0 && Number(ticket.stopLossPrice) > 0));
+  const paperSubmissionReady = ticketReady && (
+    strategySource !== "ht_agent" || agentPaperHandoffAllowed
+  );
 
   const orderImpact = useMemo(() => {
     const quantity = Number(ticket.quantity);
@@ -818,7 +825,8 @@ export default function PaperTradingDashboard() {
                         <p className="mt-2 text-lg font-black">{reviewActionLabel} {amount(Number(ticket.quantity))} shares of {ticket.symbol}</p>
                         <p className="mt-1 text-[10px] font-semibold capitalize text-zinc-500">{ticket.orderType.replace("_", "-")} order · {ticket.timeInForce.toUpperCase()} · simulation only</p>
                         {orderImpact && <div className="mt-3 grid grid-cols-2 gap-2 border-t border-orange-300/10 pt-3"><div><p className="text-[8px] font-semibold uppercase text-zinc-600">Estimated total</p><p className="mt-1 font-mono text-sm font-black text-white">{money(orderImpact.estimatedNotional)}</p></div><div><p className="text-[8px] font-semibold uppercase text-zinc-600">Buying power after</p><p className={`mt-1 font-mono text-sm font-black ${orderImpact.buyingPowerAfter >= 0 ? "text-green-300" : "text-red-300"}`}>{money(orderImpact.buyingPowerAfter)}</p></div></div>}
-                        <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => setReviewing(false)} disabled={submitting} className="rounded-xl border border-white/10 px-4 py-3 text-xs font-black">Go back</button><button onClick={() => void submit()} disabled={submitting} className="rounded-xl bg-orange-500 px-4 py-3 text-xs font-black text-black disabled:opacity-50">{submitting ? "Submitting…" : `Confirm ${reviewActionLabel}`}</button></div>
+                        {strategySource === "ht_agent" && !agentPaperHandoffAllowed && <p className="mt-3 text-[9px] font-bold text-violet-300">Review-only verification is active. Paper submission is still gated off.</p>}
+                        <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => setReviewing(false)} disabled={submitting} className="rounded-xl border border-white/10 px-4 py-3 text-xs font-black">Go back</button><button onClick={() => void submit()} disabled={submitting || !paperSubmissionReady} className="rounded-xl bg-orange-500 px-4 py-3 text-xs font-black text-black disabled:opacity-50">{submitting ? "Submitting…" : agentPaperHandoffAllowed || strategySource !== "ht_agent" ? `Confirm ${reviewActionLabel}` : "Submission locked"}</button></div>
                       </div>
                     ) : (
                       <button onClick={() => setReviewing(true)} disabled={!ticketReady} className="mt-5 w-full rounded-2xl bg-orange-500 px-5 py-4 text-sm font-black text-black shadow-[0_0_28px_rgba(251,146,60,0.14)] transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-35">{ticketReady ? `Review paper ${reviewActionLabel.toLowerCase()}` : "Enter an amount to continue"}</button>

@@ -1,7 +1,7 @@
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
 import { HT_CHART_OBJECT_VERSION, type HtChartObject } from "../chart-objects.ts";
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
-import { HT_AGENT_VISUAL_PLAN_POLICY_VERSION, HT_AGENT_VISUAL_PLAN_VERSION, type HtAgentDecision, type HtAgentDecisionFrame, type HtAgentMode } from "./contracts.ts";
+import { HT_AGENT_VISUAL_PLAN_CANCELLATION_VERSION, HT_AGENT_VISUAL_PLAN_POLICY_VERSION, HT_AGENT_VISUAL_PLAN_RISK_REWARD_VERSION, HT_AGENT_VISUAL_PLAN_VERSION, type HtAgentDecision, type HtAgentDecisionFrame, type HtAgentMode } from "./contracts.ts";
 // @ts-expect-error Node's strip-types test runner resolves the TypeScript source.
 import { buildHtTradePlan } from "./trade-plan.ts";
 
@@ -12,6 +12,32 @@ export type AgentPlanLifecycleState =
   | "invalidated"
   | "expired"
   | "needs_review_ambiguous";
+
+export type AgentPlanCancellationCondition =
+  | {
+      code: "stop_touched";
+      evidence: "completed_provider_minute";
+      field: "low";
+      operator: "lte";
+      value: number;
+      transition: "invalidated";
+    }
+  | {
+      code: "plan_expiration_reached";
+      evidence: "completed_provider_minute";
+      field: "closedAt";
+      operator: "gte";
+      value: string;
+      transition: "expired";
+    }
+  | {
+      code: "intraminute_order_unprovable";
+      evidence: "completed_provider_minute";
+      field: "high_low_range";
+      operator: "contains_conflicting_thresholds";
+      value: null;
+      transition: "needs_review_ambiguous";
+    };
 
 export type AgentXVisualPlanDefinition = {
   schemaVersion: typeof HT_AGENT_VISUAL_PLAN_VERSION;
@@ -27,7 +53,20 @@ export type AgentXVisualPlanDefinition = {
   stopPrice: number;
   targetOne: number;
   targetTwo: number | null;
+  riskReward: {
+    policyVersion: typeof HT_AGENT_VISUAL_PLAN_RISK_REWARD_VERSION;
+    entryBasis: "least_favorable_permitted_entry";
+    entryPrice: number;
+    riskPerShare: number;
+    targetOne: number;
+    targetTwo: number | null;
+  };
+  /** Backward-compatible alias for Target 1 R/R. */
   estimatedRiskReward: number;
+  cancellation: {
+    policyVersion: typeof HT_AGENT_VISUAL_PLAN_CANCELLATION_VERSION;
+    conditions: AgentPlanCancellationCondition[];
+  };
   positionRisk: {
     quantity: number;
     estimatedNotional: number;
@@ -78,6 +117,88 @@ function finitePositive(value: unknown): value is number {
 
 function rounded(value: number) {
   return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function riskRewardAtTarget(target: number, leastFavorableEntry: number, stop: number) {
+  return (target - leastFavorableEntry) / (leastFavorableEntry - stop);
+}
+
+export function visualPlanCancellationContractMatches(
+  definition: Pick<AgentXVisualPlanDefinition, "stopPrice" | "expiresAt" | "cancellation">,
+) {
+  const conditions = definition.cancellation?.conditions;
+  if (
+    definition.cancellation?.policyVersion !== HT_AGENT_VISUAL_PLAN_CANCELLATION_VERSION ||
+    !Array.isArray(conditions) ||
+    conditions.length !== 3
+  ) return false;
+  const [stop, expiration, ambiguous] = conditions;
+  return stop?.code === "stop_touched" &&
+    stop.evidence === "completed_provider_minute" &&
+    stop.field === "low" &&
+    stop.operator === "lte" &&
+    stop.transition === "invalidated" &&
+    stop.value === definition.stopPrice &&
+    expiration?.code === "plan_expiration_reached" &&
+    expiration.evidence === "completed_provider_minute" &&
+    expiration.field === "closedAt" &&
+    expiration.operator === "gte" &&
+    expiration.transition === "expired" &&
+    expiration.value === definition.expiresAt &&
+    ambiguous?.code === "intraminute_order_unprovable" &&
+    ambiguous.evidence === "completed_provider_minute" &&
+    ambiguous.field === "high_low_range" &&
+    ambiguous.operator === "contains_conflicting_thresholds" &&
+    ambiguous.transition === "needs_review_ambiguous" &&
+    ambiguous.value === null;
+}
+
+function sameRoundedNumber(left: unknown, right: number) {
+  return typeof left === "number" && Number.isFinite(left) &&
+    Math.abs(left - rounded(right)) <= 0.000001;
+}
+
+export function visualPlanReleaseContractMatches(
+  definition: AgentXVisualPlanDefinition,
+) {
+  if (
+    definition?.schemaVersion !== HT_AGENT_VISUAL_PLAN_VERSION ||
+    definition.policyVersion !== HT_AGENT_VISUAL_PLAN_POLICY_VERSION ||
+    definition.riskReward?.policyVersion !== HT_AGENT_VISUAL_PLAN_RISK_REWARD_VERSION ||
+    definition.riskReward.entryBasis !== "least_favorable_permitted_entry" ||
+    !finitePositive(definition.entryZone?.low) ||
+    !finitePositive(definition.entryZone?.high) ||
+    !finitePositive(definition.triggerPrice) ||
+    !finitePositive(definition.stopPrice) ||
+    !finitePositive(definition.targetOne) ||
+    definition.entryZone.high < definition.entryZone.low ||
+    definition.stopPrice >= definition.entryZone.low ||
+    definition.triggerPrice < definition.entryZone.low ||
+    definition.targetOne <= Math.max(definition.entryZone.high, definition.triggerPrice) ||
+    !visualPlanCancellationContractMatches(definition)
+  ) return false;
+  const leastFavorableEntry = Math.max(
+    definition.entryZone.high,
+    definition.triggerPrice,
+  );
+  const riskPerShare = leastFavorableEntry - definition.stopPrice;
+  const targetOneRiskReward = riskRewardAtTarget(
+    definition.targetOne,
+    leastFavorableEntry,
+    definition.stopPrice,
+  );
+  if (
+    !sameRoundedNumber(definition.riskReward.entryPrice, leastFavorableEntry) ||
+    !sameRoundedNumber(definition.riskReward.riskPerShare, riskPerShare) ||
+    !sameRoundedNumber(definition.riskReward.targetOne, targetOneRiskReward) ||
+    !sameRoundedNumber(definition.estimatedRiskReward, targetOneRiskReward)
+  ) return false;
+  if (definition.targetTwo === null) return definition.riskReward.targetTwo === null;
+  return definition.targetTwo > definition.targetOne &&
+    sameRoundedNumber(
+      definition.riskReward.targetTwo,
+      riskRewardAtTarget(definition.targetTwo, leastFavorableEntry, definition.stopPrice),
+    );
 }
 
 function nextMinute(timestampMs: number) {
@@ -246,10 +367,6 @@ export function buildAgentXVisualPlan(input: {
   if (Date.parse(expiresAt) <= Date.parse(validFrom)) {
     return { available: false, code: "session_boundary_unavailable", reason: "No complete provider minute remains before the applicable session boundary." };
   }
-  const riskReward = (targetOne - entryZone.high) / (entryZone.high - stop);
-  if (!Number.isFinite(riskReward) || riskReward <= 0) {
-    return { available: false, code: "levels_unavailable", reason: "The measurable levels do not form positive reward relative to risk." };
-  }
   const objectCommon = {
     authority: "agent" as const,
     symbol: frame.market.symbol,
@@ -263,9 +380,56 @@ export function buildAgentXVisualPlan(input: {
   };
   // A second target must add information. Equal or lower legacy targets stay
   // explicitly unavailable instead of rendering duplicate chart levels.
-  const targetTwo = rawTargetTwo !== null && rawTargetTwo > targetOne
-    ? rawTargetTwo
+  const roundedEntryHigh = rounded(entryZone.high);
+  const roundedTrigger = rounded(trigger);
+  const roundedStop = rounded(stop);
+  const roundedTargetOne = rounded(targetOne);
+  const candidateTargetTwo = rawTargetTwo === null ? null : rounded(rawTargetTwo);
+  const roundedTargetTwo = candidateTargetTwo !== null && candidateTargetTwo > roundedTargetOne
+    ? candidateTargetTwo
     : null;
+  const leastFavorableEntry = Math.max(roundedEntryHigh, roundedTrigger);
+  const riskPerShare = leastFavorableEntry - roundedStop;
+  const targetOneRiskReward = riskRewardAtTarget(roundedTargetOne, leastFavorableEntry, roundedStop);
+  const targetTwoRiskReward = roundedTargetTwo === null
+    ? null
+    : riskRewardAtTarget(roundedTargetTwo, leastFavorableEntry, roundedStop);
+  if (
+    !Number.isFinite(riskPerShare) || riskPerShare <= 0 ||
+    !Number.isFinite(targetOneRiskReward) || targetOneRiskReward <= 0 ||
+    (targetTwoRiskReward !== null && (!Number.isFinite(targetTwoRiskReward) || targetTwoRiskReward <= targetOneRiskReward))
+  ) {
+    return { available: false, code: "levels_unavailable", reason: "The measurable levels do not form positive reward relative to risk." };
+  }
+  const cancellation: AgentXVisualPlanDefinition["cancellation"] = {
+    policyVersion: HT_AGENT_VISUAL_PLAN_CANCELLATION_VERSION,
+    conditions: [
+      {
+        code: "stop_touched",
+        evidence: "completed_provider_minute",
+        field: "low",
+        operator: "lte",
+        value: roundedStop,
+        transition: "invalidated",
+      },
+      {
+        code: "plan_expiration_reached",
+        evidence: "completed_provider_minute",
+        field: "closedAt",
+        operator: "gte",
+        value: expiresAt,
+        transition: "expired",
+      },
+      {
+        code: "intraminute_order_unprovable",
+        evidence: "completed_provider_minute",
+        field: "high_low_range",
+        operator: "contains_conflicting_thresholds",
+        value: null,
+        transition: "needs_review_ambiguous",
+      },
+    ],
+  };
   const chartObjects: HtChartObject[] = [
     {
       ...baseObject({ ...objectCommon, id: `${decisionId}-entry-zone`, label: "Entry zone" }),
@@ -294,11 +458,11 @@ export function buildAgentXVisualPlan(input: {
       role: "target_1",
       price: rounded(targetOne),
     },
-    ...(targetTwo === null ? [] : [{
+    ...(roundedTargetTwo === null ? [] : [{
       ...baseObject({ ...objectCommon, id: `${decisionId}-target-two`, label: "Target 2" }),
       type: "price_line" as const,
       role: "target_2" as const,
-      price: rounded(targetTwo),
+      price: roundedTargetTwo,
     }]),
     ...buildProxChartContext(frame, decisionId),
   ];
@@ -314,12 +478,21 @@ export function buildAgentXVisualPlan(input: {
       direction: "long",
       lifecycleState: "watching",
       entryCondition: "crosses_above_trigger",
-      entryZone: { low: rounded(entryZone.low), high: rounded(entryZone.high) },
-      triggerPrice: rounded(trigger),
-      stopPrice: rounded(stop),
-      targetOne: rounded(targetOne),
-      targetTwo: targetTwo === null ? null : rounded(targetTwo),
-      estimatedRiskReward: rounded(riskReward),
+      entryZone: { low: rounded(entryZone.low), high: roundedEntryHigh },
+      triggerPrice: roundedTrigger,
+      stopPrice: roundedStop,
+      targetOne: roundedTargetOne,
+      targetTwo: roundedTargetTwo,
+      riskReward: {
+        policyVersion: HT_AGENT_VISUAL_PLAN_RISK_REWARD_VERSION,
+        entryBasis: "least_favorable_permitted_entry",
+        entryPrice: rounded(leastFavorableEntry),
+        riskPerShare: rounded(riskPerShare),
+        targetOne: rounded(targetOneRiskReward),
+        targetTwo: targetTwoRiskReward === null ? null : rounded(targetTwoRiskReward),
+      },
+      estimatedRiskReward: rounded(targetOneRiskReward),
+      cancellation,
       positionRisk: {
         quantity: decision.risk.quantity,
         estimatedNotional: decision.risk.estimatedNotional,

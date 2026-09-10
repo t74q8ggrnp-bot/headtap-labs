@@ -4,9 +4,11 @@ export const HT_AGENT_DECISION_VERSION = "ht-agent-decision-v4-provider-clocks" 
 export const HT_AGENT_COHORT_VERSION = "ht-agent-cohorts-v3-provider-clocks" as const;
 export const HT_AGENT_MARKET_TIMING_VERSION = "ht-agent-market-timing-v1" as const;
 export const HT_TRADE_PLAN_VERSION = "ht-trade-plan-v1" as const;
-export const HT_AGENT_VISUAL_PLAN_VERSION = "agent-x-visual-paper-plan-v1" as const;
+export const HT_AGENT_VISUAL_PLAN_VERSION = "agent-x-visual-paper-plan-v2" as const;
 export const HT_AGENT_VISUAL_PLAN_POLICY_VERSION = "agent-x-visual-plan-expiry-v1-15-provider-minutes" as const;
-export const HT_AGENT_VISUAL_PLAN_API_VERSION = "agent-x-visual-plan-api-v1" as const;
+export const HT_AGENT_VISUAL_PLAN_RISK_REWARD_VERSION = "agent-x-risk-reward-v1-least-favorable-entry" as const;
+export const HT_AGENT_VISUAL_PLAN_CANCELLATION_VERSION = "agent-x-cancellation-v1-provider-minute" as const;
+export const HT_AGENT_VISUAL_PLAN_API_VERSION = "agent-x-visual-plan-api-v2" as const;
 
 export type HtAgentMode = "observe" | "approval_paper" | "paper_autopilot";
 export type HtAgentAction =
