@@ -1,5 +1,5 @@
 // @ts-expect-error Node's strip-types runner requires source extensions.
-import { getMarketDataAgeMs, isActiveMarketTimestampUsable } from "../market-data-time.ts";
+import { ACTIVE_MARKET_DATA_MAX_AGE_SECONDS, getMarketDataAgeMs, isActiveMarketTimestampUsable } from "../market-data-time.ts";
 
 type SourceRow = {
   ticker: string;
@@ -29,12 +29,13 @@ export function describeProxMicrostructureCoverage(rows: SourceRow[], now = Date
   const incomplete = sources.filter(source => !source.quote.usable || !source.trade.usable);
   return {
     version: "prox-microstructure-coverage-v1",
+    sourceWindowSeconds: ACTIVE_MARKET_DATA_MAX_AGE_SECONDS,
     coverageState: sources.length === 0 ? "unavailable" : incomplete.length ? "partial" : "complete",
     freshQuoteCount: sources.filter(source => source.quote.usable).length,
     freshTradeCount: sources.filter(source => source.trade.usable).length,
     freshQuoteAndTradeCount: sources.filter(source => source.quote.usable && source.trade.usable).length,
     sourceIssues: incomplete,
-    interpretation: "Collector health permits partial coverage. A fresh combined clock does not refresh the other source. Missing tape is not proof of a provider outage or a halt.",
+    interpretation: "Collector health permits partial coverage. A fresh combined clock does not refresh the other source. Missing tape means no qualifying consolidated trade was returned inside the same five-minute evidence window; it is not proof of a provider outage or a halt.",
     providerRequests: 0,
   };
 }

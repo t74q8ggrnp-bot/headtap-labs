@@ -46,3 +46,9 @@ test("Massive entitlement is proven from persisted provider receipts at zero pro
   assert.match(handler, /providerRequestsUsedByProbe:\s*0/);
   assert.match(handler, /verificationSource:\s*"prox_realtime_microstructure_run"/);
 });
+
+test("partial ProX source coverage is classified as market evidence, not a collector outage", () => {
+  assert.match(handler, /classification:\s*"partial_market_evidence"/);
+  assert.match(handler, /collectorFault:\s*false/);
+  assert.match(handler, /original provider times are preserved/);
+});

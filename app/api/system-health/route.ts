@@ -3487,7 +3487,9 @@ export async function GET(request: Request) {
         const detail = check.detail as { activeMarketSession?: boolean; sourceCoverage?: ReturnType<typeof describeProxMicrostructureCoverage> } | undefined;
         if (!detail?.sourceCoverage || detail.activeMarketSession !== true || detail.sourceCoverage.coverageState === "complete") return [];
         return [{ name: "prox_microstructure_partial_source_coverage",
-          message: "ProX collection health is not complete per-ticker freshness. Some quote or trade evidence is stale/unavailable; original provider times are preserved.",
+          message: "The ProX collector completed, but some thin or quiet tickers did not emit both a fresh NBBO and consolidated trade inside the five-minute evidence window. This is an honest market-activity gap, not proof of a collector outage; original provider times are preserved.",
+          classification: "partial_market_evidence",
+          collectorFault: false,
           sources: detail.sourceCoverage.sourceIssues,
           providerRequests: 0 }];
       }),

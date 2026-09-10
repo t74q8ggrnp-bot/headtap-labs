@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 // @ts-expect-error Node's built-in TypeScript runner requires source extensions.
-import { summarizeProxMicrostructure } from "./microstructure.ts";
+import { PROX_MICROSTRUCTURE_VERSION, summarizeProxMicrostructure } from "./microstructure.ts";
+
+test("microstructure tape queries the complete provider-freshness window", () => {
+  const route = readFileSync(
+    new URL("../../app/api/prox-market-microstructure/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(route, /ACTIVE_MARKET_DATA_MAX_AGE_SECONDS/);
+  assert.doesNotMatch(route, /TAPE_WINDOW_SECONDS\s*=\s*120/);
+  assert.equal(
+    PROX_MICROSTRUCTURE_VERSION,
+    "prox-microstructure-observation-v2-source-window-aligned",
+  );
+});
 
 test("microstructure summary preserves quote and trade facts without scoring", () => {
   const summary = summarizeProxMicrostructure({

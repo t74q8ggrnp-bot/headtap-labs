@@ -4,7 +4,7 @@ import type {
 } from "@/lib/massive-stocks";
 
 export const PROX_MICROSTRUCTURE_VERSION =
-  "prox-microstructure-observation-v1";
+  "prox-microstructure-observation-v2-source-window-aligned";
 export const PROX_MICROSTRUCTURE_AUTHORITY = "shadow_observation_only";
 
 export type ProxMicrostructureSummary = {

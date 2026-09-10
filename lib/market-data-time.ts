@@ -2,6 +2,8 @@
 // Canonical and bounded ProX authority therefore fail closed when an actively
 // trading mover has not produced provider-time evidence within five minutes.
 export const ACTIVE_MARKET_DATA_MAX_AGE_MS = 5 * 60 * 1000;
+export const ACTIVE_MARKET_DATA_MAX_AGE_SECONDS =
+  ACTIVE_MARKET_DATA_MAX_AGE_MS / 1_000;
 export const CANONICAL_PROX_MARKET_SKEW_MAX_MS = 2 * 60 * 1000;
 
 export function marketTimestampMs(value: unknown): number | null {

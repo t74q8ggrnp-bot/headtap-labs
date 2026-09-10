@@ -38,7 +38,9 @@ test("a fresh trade cannot hide an old quote in coverage diagnostics", () => {
 test("diagnostics preserve the existing five-minute source boundary and do not mutate evidence", () => {
   const input = [{ ...row, quote_as_of: new Date(now - 300_000).toISOString() }];
   const before = structuredClone(input);
-  assert.equal(describeProxMicrostructureCoverage(input, now).coverageState, "complete");
+  const atBoundary = describeProxMicrostructureCoverage(input, now);
+  assert.equal(atBoundary.coverageState, "complete");
+  assert.equal(atBoundary.sourceWindowSeconds, 300);
   assert.equal(describeProxMicrostructureCoverage(input, now + 1).coverageState, "partial");
   assert.deepEqual(input, before);
 });

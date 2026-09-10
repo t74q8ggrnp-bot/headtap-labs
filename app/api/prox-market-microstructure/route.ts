@@ -12,6 +12,7 @@ import {
   fetchMassiveRecentTrades,
   probeMassiveRealtimeEntitlement,
 } from "@/lib/massive-stocks";
+import { ACTIVE_MARKET_DATA_MAX_AGE_SECONDS } from "@/lib/market-data-time";
 import { getProxEasternMarketClock } from "@/lib/prox/market-discovery";
 import {
   PROX_MICROSTRUCTURE_AUTHORITY,
@@ -24,7 +25,6 @@ export const maxDuration = 60;
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const RESEARCH_LOOKBACK_HOURS = 6;
-const TAPE_WINDOW_SECONDS = 120;
 const TAPE_LIMIT = 1_000;
 const MAX_TICKERS = 20;
 const CONCURRENCY = 4;
@@ -142,8 +142,10 @@ export async function GET(request: Request) {
       probeMassiveRealtimeEntitlement(),
       loadResearchTickers(supabase),
     ]);
+    // Query the same interval that source freshness accepts. A shorter tape
+    // request can incorrectly label a valid provider-time trade unavailable.
     const tapeStart = new Date(
-      now.getTime() - TAPE_WINDOW_SECONDS * 1_000,
+      now.getTime() - ACTIVE_MARKET_DATA_MAX_AGE_SECONDS * 1_000,
     );
     const observations: Array<Record<string, unknown>> = [];
     let providerErrorCount = 0;
@@ -254,7 +256,7 @@ export async function GET(request: Request) {
         research.length > 0
           ? Number(((tradeObservationCount / research.length) * 100).toFixed(1))
           : 0,
-      tapeWindowSeconds: TAPE_WINDOW_SECONDS,
+      tapeWindowSeconds: ACTIVE_MARKET_DATA_MAX_AGE_SECONDS,
       tapeLimit: TAPE_LIMIT,
       errors: errors.slice(0, 10),
     };
