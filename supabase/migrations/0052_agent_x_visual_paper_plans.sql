@@ -455,7 +455,7 @@ begin
   end if;
   select coalesce(jsonb_agg(to_jsonb(q)),'[]'::jsonb) into v_rows from (
     select v.id as "planVersionId",v.plan_id as "planId",v.profile_id as "profileId",
-      v.user_id as "userId",v.symbol,v.definition,s.lifecycle_state as "state",
+      v.user_id as "userId",p.symbol,v.definition,s.lifecycle_state as "state",
       s.state_version as "stateVersion",s.last_evaluated_candle_at as "lastEvaluatedCandleAt"
     from public.ht_agent_visual_plans p
     join public.ht_agent_visual_plan_versions v on v.id=p.active_version_id
@@ -465,7 +465,7 @@ begin
         v_scope @> '{"symbols":["*"]}'::jsonb or
         exists(
           select 1 from jsonb_array_elements_text(v_scope->'symbols') scoped(symbol)
-          where scoped.symbol=v.symbol
+          where scoped.symbol=p.symbol
         )
       )
     order by s.updated_at asc

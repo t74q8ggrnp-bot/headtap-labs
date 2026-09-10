@@ -1,6 +1,6 @@
--- Run only after 0054 has collected a successful shadow worker receipt and
--- ht_agent_phase2_visual_plan_release_health() reports shadowReady=true.
--- This exposes SPY/QQQ plans internally while Paper handoff remains disabled.
+-- Run only after 0055 has repaired the shadow claim path, a successful worker
+-- receipt has completed, and ht_agent_phase2_visual_plan_release_health()
+-- reports shadowReady=true. Paper handoff remains disabled.
 begin;
 
 do $$

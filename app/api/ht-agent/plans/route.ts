@@ -260,6 +260,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("[ht-agent-plans] read failed", error);
-    return response({ ok: false, error: "Agent X visual plans are not ready. Confirm migrations 0052 through 0055." }, 503);
+    return response({ ok: false, error: "Agent X visual plans are not ready. Confirm migrations 0052 through 0056." }, 503);
   }
 }

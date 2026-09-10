@@ -14,8 +14,12 @@ const release = readFileSync(
   new URL("../../supabase/migrations/0054_agent_x_visual_plan_release_contract.sql", import.meta.url),
   "utf8",
 );
+const shadowWorkerFix = readFileSync(
+  new URL("../../supabase/migrations/0055_agent_x_visual_plan_shadow_worker_fix.sql", import.meta.url),
+  "utf8",
+);
 const internalVisible = readFileSync(
-  new URL("../../supabase/migrations/0055_agent_x_visual_plan_internal_visible.sql", import.meta.url),
+  new URL("../../supabase/migrations/0056_agent_x_visual_plan_internal_visible.sql", import.meta.url),
   "utf8",
 );
 
@@ -70,12 +74,16 @@ test("forward-only release contract stores separate deterministic target R/R and
   assert.match(release, /intraminute_order_unprovable/);
 });
 
-test("0054 enables only shadow and 0055 promotes only after a fail-closed verifier", () => {
+test("0054 enables only shadow, 0055 repairs claims, and 0056 promotes fail-closed", () => {
   assert.match(release, /visual_plan_mode='shadow'/);
   assert.match(release, /visual_plan_lifecycle_enabled=true/);
   assert.match(release, /visual_plan_paper_handoff_enabled=false/);
   assert.match(release, /ht_agent_phase2_visual_plan_release_health/);
   assert.match(release, /phase2_shadow_verification_not_ready/);
+  assert.match(shadowWorkerFix, /p\.symbol/);
+  assert.doesNotMatch(shadowWorkerFix, /v\.symbol/);
+  assert.doesNotMatch(shadowWorkerFix, /visual_plan_mode='visible'/);
+  assert.doesNotMatch(shadowWorkerFix, /visual_plan_paper_handoff_enabled=true/);
   assert.match(internalVisible, /ht_agent_promote_visual_plan_internal_visible/);
   assert.doesNotMatch(internalVisible, /visual_plan_paper_handoff_enabled=true/);
 });
