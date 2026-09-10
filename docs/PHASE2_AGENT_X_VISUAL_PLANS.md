@@ -38,7 +38,7 @@ The returned `verified` value must be true before changing any gate.
 
 1. Shadow: set `visual_plan_mode = 'shadow'` and lifecycle enabled. Keep paper handoff disabled. Confirm idempotency, completed-minute evidence, worker freshness, no ambiguous auto-resolution, and provider-request telemetry.
 2. Visible: set `visual_plan_mode = 'visible'` only after the shadow checks pass. Keep the initial symbol scope at SPY/QQQ.
-3. Paper review: enable `visual_plan_paper_handoff_enabled` only after the existing Paper Trading validator passes plan provenance, duplicate, lifecycle, freshness, and kill-switch checks.
+3. Paper review: apply `0057_agent_x_manual_paper_handoff.sql` only after the isolated staging acceptance fixture passes the real chart host, desktop/iPhone synchronization, mobile bottom-sheet, completed-minute lifecycle, ambiguity, and existing Paper Trading intent validator. The receipt is release metadata and is never counted as production plan evidence. The gate permits only authenticated, explicitly user-reviewed HT Paper orders.
 4. Universal tickers: expand the symbol scope only after SPY/QQQ production evidence is clean.
 
 No rollout step changes scoring, ProX authority, HT Agent risk rules, or paper execution behavior.

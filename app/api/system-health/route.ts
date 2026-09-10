@@ -3404,9 +3404,10 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
-    const [infrastructureResult, releaseResult, workerResult] = await Promise.all([
+    const [infrastructureResult, releaseResult, acceptanceResult, workerResult] = await Promise.all([
       supabase.rpc("ht_agent_phase2_visual_plan_infrastructure_health"),
       supabase.rpc("ht_agent_phase2_visual_plan_release_health"),
+      supabase.rpc("ht_agent_phase2_visual_plan_acceptance_health"),
       supabase.from("ht_agent_visual_plan_worker_runs")
         .select("completed_at,status,claimed_plan_count,unique_symbol_count,provider_request_count,reused_provider_request_count,accepted_evidence_count,transition_counts,lifecycle_session,closed_market_skipped")
         .order("completed_at", { ascending: false })
@@ -3423,9 +3424,13 @@ export async function GET(request: Request) {
     const release = !releaseResult.error && releaseResult.data && typeof releaseResult.data === "object"
       ? releaseResult.data as Record<string, unknown>
       : null;
+    const acceptance = !acceptanceResult.error && acceptanceResult.data && typeof acceptanceResult.data === "object"
+      ? acceptanceResult.data as Record<string, unknown>
+      : null;
     const mode = String(rollout.mode ?? "off");
     const lifecycleRequired = mode === "shadow" || mode === "visible";
     const lifecycleEnabled = rollout.lifecycleEnabled === true;
+    const paperHandoffEnabled = rollout.paperHandoffEnabled === true;
     const latestWorker = workerResult.error ? null : workerResult.data;
     const workerAgeMinutes = latestWorker
       ? hoursSince(latestWorker.completed_at) * 60
@@ -3444,9 +3449,10 @@ export async function GET(request: Request) {
     const priorShadowVerified = typeof releaseRollout.shadowVerifiedAt === "string";
     const rolloutReady = mode === "off" ||
       (mode === "shadow" ? shadowReady : mode === "visible" && priorShadowVerified);
+    const acceptanceReady = !paperHandoffEnabled || acceptance?.verified === true;
     checks.push({
       name: "agent_x_visual_plan_infrastructure",
-      ok: verified && workerHealthy && releaseContractReady && rolloutReady,
+      ok: verified && workerHealthy && releaseContractReady && rolloutReady && acceptanceReady,
       message: !verified
         ? "Agent X visual-plan infrastructure is incomplete; apply migrations 0052 and 0053 without enabling rollout."
         : !releaseContractReady
@@ -3455,6 +3461,8 @@ export async function GET(request: Request) {
           ? "Agent X visual-plan lifecycle is enabled but its provider-minute worker is not current."
           : !rolloutReady
             ? "Agent X visual plans are in shadow mode but the release evidence has not passed yet."
+          : !acceptanceReady
+            ? "Agent X Paper handoff is enabled without a verified isolated acceptance receipt."
           : mode === "off"
             ? "Agent X visual plans are verified and safely gated off pending rollout approval."
             : `Agent X visual plans are verified in ${mode} mode with paper-only authority.`,
@@ -3463,12 +3471,14 @@ export async function GET(request: Request) {
         policyVersion: HT_AGENT_VISUAL_PLAN_POLICY_VERSION,
         infrastructure,
         release,
+        acceptance,
         latestWorker,
         workerAgeMinutes: Number.isFinite(workerAgeMinutes) ? Number(workerAgeMinutes.toFixed(2)) : null,
         lifecycleRequired,
         workerHealthy,
         releaseContractReady,
         rolloutReady,
+        acceptanceReady,
         executionAuthority: "none",
         paperOnly: true,
         liveBrokerage: false,

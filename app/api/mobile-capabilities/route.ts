@@ -62,6 +62,7 @@ export async function GET() {
       displayTimeframes: ["1m", "5m", "15m"],
       executionAuthority: "none",
       manualPaperReviewOnly: true,
+      paperHandoffGate: "authenticated_user_reviewed_ht_paper_only",
       liveBrokerConnection: false,
     },
     crypto: {

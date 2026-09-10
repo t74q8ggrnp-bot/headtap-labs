@@ -22,6 +22,10 @@ const internalVisible = readFileSync(
   new URL("../../supabase/migrations/0056_agent_x_visual_plan_internal_visible.sql", import.meta.url),
   "utf8",
 );
+const manualPaperHandoff = readFileSync(
+  new URL("../../supabase/migrations/0057_agent_x_manual_paper_handoff.sql", import.meta.url),
+  "utf8",
+);
 
 test("Phase 2 starts off and cannot authorize live execution", () => {
   assert.match(migration, /visual_plan_mode text not null default 'off'/);
@@ -93,4 +97,19 @@ test("closed-market lifecycle telemetry cannot claim evidence or provider reques
   assert.match(release, /closed_market_skipped/);
   assert.match(release, /provider_request_count=0/);
   assert.match(release, /closedMarketLifecycleRequests/);
+});
+
+test("0057 records isolated acceptance separately and enables only manual HT Paper review", () => {
+  assert.match(manualPaperHandoff, /isolated_staging_fixture/);
+  assert.match(manualPaperHandoff, /productionPlanEvidence',false/);
+  assert.match(manualPaperHandoff, /completedProviderMinutes',3/);
+  assert.match(manualPaperHandoff, /needs_review_ambiguous/);
+  assert.match(manualPaperHandoff, /\["1m","5m","15m"\]/);
+  assert.match(manualPaperHandoff, /mobileBottomSheetVerified/);
+  assert.match(manualPaperHandoff, /prefillMatchedImmutablePlan/);
+  assert.match(manualPaperHandoff, /visual_plan_paper_handoff_enabled=true/);
+  assert.match(manualPaperHandoff, /visual_plan_symbol_scope<>'\{"symbols":\["SPY","QQQ"\]\}'::jsonb/);
+  assert.match(manualPaperHandoff, /executionAuthority','none/);
+  assert.match(manualPaperHandoff, /liveBrokerConnection',false/);
+  assert.doesNotMatch(manualPaperHandoff, /alpaca|live[_ ]order|brokerage execution/i);
 });

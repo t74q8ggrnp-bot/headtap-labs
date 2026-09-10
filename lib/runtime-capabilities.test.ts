@@ -16,7 +16,7 @@ test("publishes the release-approved stock refresh cadences", () => {
 test("keeps provider time authoritative and closed stock data non-live", () => {
   assert.equal(
     HT_RUNTIME_CONTRACT_VERSION,
-    "ht-runtime-capabilities-v8-agent-x-shadow-worker-fix",
+    "ht-runtime-capabilities-v9-agent-x-manual-paper-handoff",
   );
   assert.equal(HT_MARKET_DATA_AUTHORITY.freshnessTimestamp, "provider_market_time");
   assert.equal(HT_MARKET_DATA_AUTHORITY.processingTimestampsAreFreshnessAuthority, false);
@@ -48,5 +48,6 @@ test("publishes every migration required by the native runtime contract", () => 
     "0054_agent_x_visual_plan_release_contract.sql",
     "0055_agent_x_visual_plan_shadow_worker_fix.sql",
     "0056_agent_x_visual_plan_internal_visible.sql",
+    "0057_agent_x_manual_paper_handoff.sql",
   ]);
 });

@@ -1,4 +1,4 @@
-export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v8-agent-x-shadow-worker-fix";
+export const HT_RUNTIME_CONTRACT_VERSION = "ht-runtime-capabilities-v9-agent-x-manual-paper-handoff";
 
 export const HT_REQUIRED_MIGRATIONS = Object.freeze([
   "0024_manual_paper_trading.sql",
@@ -14,6 +14,7 @@ export const HT_REQUIRED_MIGRATIONS = Object.freeze([
   "0054_agent_x_visual_plan_release_contract.sql",
   "0055_agent_x_visual_plan_shadow_worker_fix.sql",
   "0056_agent_x_visual_plan_internal_visible.sql",
+  "0057_agent_x_manual_paper_handoff.sql",
 ]);
 
 export const HT_REFRESH_RATES_MS = Object.freeze({
