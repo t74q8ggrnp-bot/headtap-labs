@@ -44,6 +44,11 @@ import {
   type MarketChartIndicatorSlot,
   type MarketChartRenderFrame,
 } from "@/lib/market-chart-rendering";
+import {
+  marketChartIsFollowingLatest,
+  marketChartVisibleLogicalRange,
+  type MarketChartVisibleRange,
+} from "@/lib/market-chart-visible-range";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import {
   isHtChartObject,
@@ -74,6 +79,8 @@ export type MarketChartCanvasProps = {
   showVolume?: boolean;
   layerHost?: ChartLayerSlots;
   preserveEngineOnLocalControls?: boolean;
+  visibleRange?: MarketChartVisibleRange;
+  latestResetToken?: number;
   /** @deprecated Prefer layerHost. Kept as a compatibility alias. */
   layerSlots?: ChartLayerSlots;
   className?: string;
@@ -374,18 +381,14 @@ function setDefaultVisibleRange(input: {
   compact: boolean;
   intervalSeconds: number;
   pointCount: number;
+  visibleRange?: MarketChartVisibleRange;
 }) {
-  const visibleMinutes = input.compact ? 90 : 180;
-  const intervalMinutes = input.intervalSeconds / 60;
-  const visiblePoints = Math.max(
-    1,
-    Math.floor(visibleMinutes / Math.max(intervalMinutes, 1 / 60)),
-  );
-  const to = input.pointCount + 2;
-  input.chart.timeScale().setVisibleLogicalRange({
-    from: Math.max(0, to - visiblePoints),
-    to,
-  });
+  input.chart.timeScale().setVisibleLogicalRange(marketChartVisibleLogicalRange({
+    visibleRange: input.visibleRange,
+    legacyVisibleMinutes: input.compact ? 90 : 180,
+    intervalSeconds: input.intervalSeconds,
+    pointCount: input.pointCount,
+  }));
 }
 
 export function MarketChartCanvas({
@@ -403,6 +406,8 @@ export function MarketChartCanvas({
   layerHost,
   layerSlots,
   preserveEngineOnLocalControls = false,
+  visibleRange,
+  latestResetToken = 0,
   className = "",
 }: MarketChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -422,6 +427,7 @@ export function MarketChartCanvas({
   const previousFrameRef = useRef<MarketChartRenderFrame | null>(null);
   const savedViewportRef = useRef<SavedViewport | null>(null);
   const renderedViewportKeyRef = useRef<string | null>(null);
+  const appliedRangeCommandRef = useRef<string | null>(null);
   const activeViewportKeyRef = useRef("");
   const latestChartObjectsRef = useRef(chartObjects);
   const slotCountRef = useRef(0);
@@ -630,6 +636,11 @@ export function MarketChartCanvas({
 
     const rememberViewport = (range: { from: number; to: number } | null) => {
       if (!range) return;
+      container.dataset.chartVisibleLogicalFrom = String(range.from);
+      container.dataset.chartVisibleLogicalTo = String(range.to);
+      container.dataset.chartFollowingLatest = String(
+        marketChartIsFollowingLatest(range, slotCountRef.current),
+      );
       savedViewportRef.current = {
         key: activeViewportKeyRef.current,
         pointCount: slotCountRef.current,
@@ -795,7 +806,13 @@ export function MarketChartCanvas({
       savedViewport?.pointCount ??
       0;
     const wasFollowingLatest = !previousRange || previousPointCount === 0 ||
-      previousRange.to >= previousPointCount - 3;
+      marketChartIsFollowingLatest(previousRange, previousPointCount);
+    const rangeCommand = [
+      resolvedViewportKey,
+      visibleRange ?? `legacy-${compact ? 90 : 180}`,
+      latestResetToken,
+    ].join(":");
+    const rangeCommandChanged = appliedRangeCommandRef.current !== rangeCommand;
     const incrementalStart = getIncrementalMarketChartStart(
       previousFrame,
       frame,
@@ -826,7 +843,7 @@ export function MarketChartCanvas({
     previousFrameRef.current = frame;
     renderedViewportKeyRef.current = resolvedViewportKey;
 
-    if (previousRange && !wasFollowingLatest) {
+    if (!rangeCommandChanged && previousRange && !wasFollowingLatest) {
       chart.timeScale().setVisibleLogicalRange(previousRange);
     } else {
       setDefaultVisibleRange({
@@ -834,8 +851,10 @@ export function MarketChartCanvas({
         compact,
         intervalSeconds: resolvedIntervalSeconds,
         pointCount: frame.slots.length,
+        visibleRange,
       });
     }
+    appliedRangeCommandRef.current = rangeCommand;
 
     const range = chart.timeScale().getVisibleLogicalRange();
     if (range) {
@@ -846,7 +865,7 @@ export function MarketChartCanvas({
       };
     }
     chartObjectWriterRef.current?.refresh();
-  }, [compact, frame, resolvedIntervalSeconds, resolvedViewportKey]);
+  }, [compact, frame, latestResetToken, resolvedIntervalSeconds, resolvedViewportKey, visibleRange]);
 
   return (
     <div
@@ -854,6 +873,8 @@ export function MarketChartCanvas({
       data-market-chart-canvas="true"
       data-chart-mode={mode}
       data-chart-interval-seconds={resolvedIntervalSeconds}
+      data-chart-visible-range={visibleRange ?? "automatic"}
+      data-chart-latest-reset-token={latestResetToken}
       style={{ height }}
     >
       <div ref={containerRef} className="h-full w-full" data-market-chart-container="true" />

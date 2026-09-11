@@ -50,7 +50,8 @@ test("mobile navigation uses a truthful primary state and exact secondary route 
 
   const mobile = source("app/components/MobileAppNavigation.tsx");
   assert.match(mobile, /aria-haspopup="dialog"/);
-  assert.match(mobile, /APPLICATION_ROUTES\.map/);
+  assert.match(mobile, /moreRoutes\.map/);
+  assert.match(mobile, /grid grid-cols-5/);
   assert.match(mobile, /aria-current=\{active \? "page" : undefined\}/);
 });
 
@@ -58,8 +59,8 @@ test("the root shell shares desktop route identity without adding data requests"
   const layout = source("app/layout.tsx");
   const shell = source("app/components/ResponsiveApplicationShell.tsx");
   assert.match(layout, /<ResponsiveApplicationShell>/);
-  assert.match(shell, /APPLICATION_ROUTES\.map/);
-  assert.match(shell, /aria-label="Application navigation"/);
+  assert.match(shell, /primaryRoutes\.map/);
+  assert.match(shell, /aria-label="Primary application navigation"/);
   assert.match(shell, /aria-current=\{active \? "page" : undefined\}/);
   assert.match(shell, /Skip to page content/);
   assert.doesNotMatch(shell, /fetch\(|XMLHttpRequest|\/api\//);

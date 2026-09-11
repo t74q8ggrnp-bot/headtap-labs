@@ -8,7 +8,7 @@ test("the consolidated desktop navigation exposes the Trading Workspace entry", 
   const source = readFileSync(new URL("../lib/application-navigation.ts", import.meta.url), "utf8");
   const shell = readFileSync(new URL("../app/components/ResponsiveApplicationShell.tsx", import.meta.url), "utf8");
   assert.match(source, /shortLabel: "Workspace", href: "\/trade"/);
-  assert.match(shell, /APPLICATION_ROUTES\.map/);
+  assert.match(shell, /primaryRoutes\.map/);
   assert.match(shell, /aria-current=\{active \? "page" : undefined\}/);
 });
 
@@ -21,10 +21,10 @@ test("mobile navigation exposes and activates the Trading Workspace", () => {
   assert.match(source, /\{ tab: "workspace", label: "Trade", href: "\/trade" \}/);
   assert.equal(resolveMobileActiveTab("/trade", "home"), "workspace");
   assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "workspace");
-  assert.match(source, /resolveMobileActiveTab\(pathname, homeTab\)/);
-  assert.match(source, /if \(tab === "workspace"\)/);
+  assert.match(source, /resolveMobileActiveTab\(pathname, pathname === "\/" \? "home" : homeTab\)/);
+  assert.match(source, /\{ tab: "workspace", label: "Trade", href: "\/trade" \}/);
   assert.match(source, /tab === "more"/);
-  assert.match(source, /type MobileHomeTab/);
+  assert.match(source, /grid grid-cols-5/);
 });
 
 test("the Trading Workspace entry opens a useful default instrument", () => {

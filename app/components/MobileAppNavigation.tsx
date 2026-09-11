@@ -6,18 +6,19 @@ import { Fragment, useState } from "react";
 import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
 import { resolveMobileActiveTab, type MobileAppTab as AppTab } from "@/lib/checkpoint-a-ui-state";
 import { AccessibleDialogSheet } from "./ui/ApplicationPrimitives";
-import { useMobileAppNavigation, type MobileHomeTab } from "./MobileAppNavigationContext";
+import { useMobileAppNavigation } from "./MobileAppNavigationContext";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "home", label: "Home", href: "/" },
-  { tab: "convictions", label: "Top", href: "/?tab=convictions" },
-  { tab: "scanner", label: "Scanner", href: "/?tab=scanner" },
+  { tab: "scanner", label: "Scan", href: "/scanner" },
   { tab: "workspace", label: "Trade", href: "/trade" },
-  { tab: "watchlist", label: "Saved", href: "/?tab=watchlist" },
-  { tab: "profile", label: "Profile", href: "/?tab=profile" },
   { tab: "paper", label: "Paper", href: "/paper" },
   { tab: "more", label: "More", href: "#application-routes" },
 ];
+
+const moreRoutes = APPLICATION_ROUTES.filter((route) =>
+  ["signals", "news", "prox", "agent", "account", "support", "qa", "validation", "trading-bot"].includes(route.id),
+);
 
 function TabIcon({ tab }: { tab: AppTab }) {
   const common = {
@@ -61,18 +62,16 @@ function TabIcon({ tab }: { tab: AppTab }) {
 
 export default function MobileAppNavigation() {
   const pathname = usePathname();
-  const { homeTab, setHomeTab } = useMobileAppNavigation();
-  const activeTab = resolveMobileActiveTab(pathname, homeTab);
+  const { homeTab } = useMobileAppNavigation();
+  const activeTab = resolveMobileActiveTab(pathname, pathname === "/" ? "home" : homeTab);
   const currentRoute = resolveApplicationRoute(pathname);
   const [moreOpen, setMoreOpen] = useState(false);
-
-  const activateHomeTab = (tab: MobileHomeTab) => setHomeTab(tab);
 
   return (
     <Fragment>
       <nav className="ht-mobile-global-nav" aria-label="Primary app navigation">
-        <div className="w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="grid min-w-[352px] grid-cols-8 px-1 pt-1">
+        <div className="w-full">
+          <div className="grid grid-cols-5 px-1 pt-1">
           {items.map(({ tab, label, href }) => {
             const active = activeTab === tab;
             const className = `relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition active:scale-95 ${active ? "text-orange-400" : "text-zinc-600"}`;
@@ -95,21 +94,6 @@ export default function MobileAppNavigation() {
                   aria-label="More application routes"
                   aria-current={active ? "page" : undefined}
                   aria-haspopup="dialog"
-                  className={className}
-                >
-                  {content}
-                </button>
-              );
-            }
-
-            if (pathname === "/" && tab !== "paper" && tab !== "workspace") {
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => activateHomeTab(tab)}
-                  aria-label={label}
-                  aria-current={active ? "page" : undefined}
                   className={className}
                 >
                   {content}
@@ -141,7 +125,7 @@ export default function MobileAppNavigation() {
         presentation="sheet"
       >
         <nav id="application-routes" className="ht-mobile-route-list" aria-label="All application routes">
-          {APPLICATION_ROUTES.map((route) => {
+          {moreRoutes.map((route) => {
             const active = currentRoute?.id === route.id;
             return (
               <Link

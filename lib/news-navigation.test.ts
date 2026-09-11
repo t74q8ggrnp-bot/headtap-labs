@@ -7,7 +7,8 @@ test("consolidated desktop News navigation opens the News Intel interface", () =
   const shell = readFileSync(new URL("../app/components/ResponsiveApplicationShell.tsx", import.meta.url), "utf8");
   assert.match(source, /shortLabel: "News", href: "\/news-feed"/);
   assert.doesNotMatch(source, /href: "\/news"/);
-  assert.match(shell, /APPLICATION_ROUTES\.map/);
+  assert.match(shell, /secondaryRoutes\.map/);
+  assert.match(shell, /secondaryRouteIds = new Set\(\["signals", "news"/);
 });
 
 test("bare legacy News URL redirects instead of returning JSON", () => {

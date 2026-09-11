@@ -22,6 +22,7 @@ import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileExperience from "./components/mobile/MobileExperience";
 import { useMobileAppNavigation } from "./components/MobileAppNavigationContext";
 import HomeTradePlan from "./components/agent/HomeTradePlan";
+import HomeReferenceSurface from "./components/home/HomeReferenceSurface";
 import { supabase } from "@/lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
 import type {
@@ -1213,6 +1214,32 @@ export default function HomeClient({
   // The backend/API owns Top Opportunity, Spot Momentum, and Before The Crowd decisions.
   // Secondary opportunity surfaces consume the canonical feed below; there is
   // intentionally no local fallback selector.
+
+  const referenceOpportunity = selectedStock
+    ? selectedOpportunity
+      ?? apiFullRankedList.find((opportunity) => opportunity.ticker === selectedStock.symbol)
+      ?? apiMomentum
+    : apiMomentum;
+  const referenceFramework = tradeFrameworkToDisplay(referenceOpportunity?.tradeFramework);
+  const referenceSliceEnabled = process.env.NEXT_PUBLIC_PHASE_25B_REFERENCE_SLICE !== "off";
+
+  if (referenceSliceEnabled) {
+    return (
+      <HomeReferenceSurface
+        opportunity={referenceOpportunity}
+        opportunities={apiFullRankedList}
+        framework={referenceFramework}
+        marketContext={marketCtx}
+        loading={apiOpportunitiesLoading}
+        selectionLoading={selectedOpportunityLoading}
+        selectionError={selectedOpportunityError}
+        onSelect={(opportunity) => {
+          setSelectedStock(opportunityToStock(opportunity));
+          recordRecentlyViewed(opportunity.ticker);
+        }}
+      />
+    );
+  }
 
   return (
     <main className="ht-simplified-ui ht-discovery-home min-h-screen overflow-hidden bg-[#050505] text-white">

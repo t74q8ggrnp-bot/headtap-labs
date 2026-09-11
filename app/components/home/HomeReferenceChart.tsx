@@ -1,0 +1,199 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import MarketChartCanvas, {
+  type ChartLayerSlots,
+  type MarketChartIndicatorOverlays,
+  type MarketChartMode,
+} from "@/app/components/market/MarketChartCanvas";
+import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
+import { calculateMarketIndicators } from "@/lib/market-indicators";
+import {
+  deriveMarketChartTimeframeBars,
+  getMarketChartTimeframeMetadata,
+  PHASE_ONE_MARKET_CHART_TIMEFRAMES,
+  type MarketChartTimeframe,
+} from "@/lib/market-chart-timeframes";
+import type { MarketChartVisibleRange } from "@/lib/market-chart-visible-range";
+
+const EMPTY_LAYER_HOST: ChartLayerSlots = Object.freeze({});
+
+const layerLabels = {
+  volume: "Volume",
+  vwap: "VWAP",
+  ema9: "EMA 9",
+  ema20: "EMA 20",
+} as const;
+
+type Layer = keyof typeof layerLabels;
+
+const visibleRanges = [
+  { id: "1h", label: "1H" },
+  { id: "2h", label: "2H" },
+  { id: "session", label: "Session" },
+] as const satisfies ReadonlyArray<{ id: MarketChartVisibleRange; label: string }>;
+
+export default function HomeReferenceChart({ symbol }: { symbol: string }) {
+  const marketView = useLiveMarketView(symbol, { chart: true });
+  const [timeframe, setTimeframe] = useState<MarketChartTimeframe>("1m");
+  const [mode, setMode] = useState<MarketChartMode>("candles");
+  const [height, setHeight] = useState(500);
+  const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>("2h");
+  const [latestResetToken, setLatestResetToken] = useState(0);
+  const rangeSelectedByUserRef = useRef(false);
+  const [layers, setLayers] = useState<Record<Layer, boolean>>({
+    volume: true,
+    vwap: true,
+    ema9: true,
+    ema20: false,
+  });
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      setHeight(query.matches ? 300 : 500);
+      if (!rangeSelectedByUserRef.current) {
+        setVisibleRange(query.matches ? "1h" : "2h");
+      }
+    };
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+
+  const baseBars = useMemo(() => marketView.chart?.bars ?? [], [marketView.chart]);
+  const bars = useMemo(
+    () => deriveMarketChartTimeframeBars(baseBars, timeframe),
+    [baseBars, timeframe],
+  );
+  const calculated = useMemo(
+    () => calculateMarketIndicators(bars, { vwapResetMode: "eastern_date", precision: 8 }),
+    [bars],
+  );
+  const indicators = useMemo<MarketChartIndicatorOverlays>(() => ({
+    ...(layers.vwap ? { vwap: calculated.vwap } : {}),
+    ...(layers.ema9 ? { ema9: calculated.ema9 } : {}),
+    ...(layers.ema20 ? { ema20: calculated.ema20 } : {}),
+  }), [calculated, layers.ema20, layers.ema9, layers.vwap]);
+  const intervalSeconds = getMarketChartTimeframeMetadata(timeframe).intervalSeconds;
+
+  const toggleLayer = (layer: Layer) => {
+    setLayers((current) => ({ ...current, [layer]: !current[layer] }));
+  };
+
+  const selectVisibleRange = (range: MarketChartVisibleRange) => {
+    rangeSelectedByUserRef.current = true;
+    setVisibleRange(range);
+  };
+
+  return (
+    <section className="htb-chart" aria-label={`${symbol} verified market chart`}>
+      <div className="htb-chart__toolbar">
+        <div className="htb-chart__controls" role="group" aria-label="Chart timeframe">
+          {PHASE_ONE_MARKET_CHART_TIMEFRAMES.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={timeframe === option.id}
+              onClick={() => setTimeframe(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="htb-chart__controls htb-chart__controls--mode" role="group" aria-label="Chart style">
+          {(["candles", "graph"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={mode === option}
+              onClick={() => setMode(option)}
+            >
+              {option === "candles" ? "Candles" : "Line"}
+            </button>
+          ))}
+        </div>
+        <div className="htb-chart__range" aria-label="Visible chart range">
+          <div className="htb-chart__range-desktop" role="group" aria-label="Visible chart range">
+            {visibleRanges.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={visibleRange === option.id}
+                onClick={() => selectVisibleRange(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <label className="htb-chart__range-mobile">
+            <span>Range</span>
+            <select
+              aria-label="Visible chart range"
+              value={visibleRange}
+              onChange={(event) => selectVisibleRange(event.target.value as MarketChartVisibleRange)}
+            >
+              {visibleRanges.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </label>
+        </div>
+        <button
+          type="button"
+          className="htb-chart__latest"
+          aria-label="Latest / reset visible chart range"
+          onClick={() => setLatestResetToken((current) => current + 1)}
+        >
+          Latest
+        </button>
+        <div className="htb-chart__layers" role="group" aria-label="Chart layers">
+          {(Object.keys(layerLabels) as Layer[]).map((layer) => (
+            <button
+              key={layer}
+              type="button"
+              aria-pressed={layers[layer]}
+              onClick={() => toggleLayer(layer)}
+            >
+              {layerLabels[layer]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {marketView.error && !marketView.chart ? (
+        <div className="htb-chart__state" style={{ height }} role="status">
+          <strong>Verified chart unavailable</strong>
+          <span>No estimated candles are shown.</span>
+        </div>
+      ) : bars.length === 0 ? (
+        <div className="htb-chart__state" style={{ height }} role="status" aria-live="polite">
+          <strong>Loading verified chart</strong>
+          <span>Connecting to the existing provider-backed frame.</span>
+        </div>
+      ) : (
+        <div data-chart-timeframe={timeframe} data-chart-provider-requests-on-switch="0" data-chart-range-provider-requests-on-switch="0">
+          <MarketChartCanvas
+            bars={bars}
+            intervalSeconds={intervalSeconds}
+            mode={mode}
+            accent="orange"
+            height={height}
+            compact={height < 400}
+            timeZone="America/New_York"
+            viewportKey={`home-reference:${symbol}:${timeframe}`}
+            indicators={indicators}
+            showVolume={layers.volume}
+            layerHost={EMPTY_LAYER_HOST}
+            preserveEngineOnLocalControls
+            visibleRange={visibleRange}
+            latestResetToken={latestResetToken}
+          />
+        </div>
+      )}
+
+      <div className="htb-chart__caption">
+        <span>{marketView.chart?.sourceLabel ?? "Provider-backed market history"}</span>
+        <span className="ht-tabular-numbers">{marketView.label}</span>
+      </div>
+    </section>
+  );
+}
