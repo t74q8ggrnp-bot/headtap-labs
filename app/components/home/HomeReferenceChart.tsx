@@ -113,7 +113,7 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
             </button>
           ))}
         </div>
-        <div className="htb-chart__range" aria-label="Visible chart range">
+        <div className="htb-chart__range">
           <div className="htb-chart__range-desktop" role="group" aria-label="Visible chart range">
             {visibleRanges.map((option) => (
               <button

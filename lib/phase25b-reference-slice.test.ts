@@ -87,3 +87,12 @@ test("visible-range controls remain local and cannot remount or refetch the Home
   assert.match(css, /\.htb-chart__latest \{ grid-column: 4; grid-row: 1/);
   assert.match(css, /\.htb-chart__layers \{ grid-column: 2 \/ 5; grid-row: 2/);
 });
+
+test("visible-range semantics avoid a redundant roleless wrapper announcement", () => {
+  const chart = source("app/components/home/HomeReferenceChart.tsx");
+
+  assert.match(chart, /<div className="htb-chart__range">/);
+  assert.doesNotMatch(chart, /className="htb-chart__range" aria-label=/);
+  assert.match(chart, /className="htb-chart__range-desktop" role="group" aria-label="Visible chart range"/);
+  assert.match(chart, /<select\s+aria-label="Visible chart range"/);
+});
