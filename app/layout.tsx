@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import { Suspense } from "react";
 import MobileAppNavigation from "./components/MobileAppNavigation";
 import { MobileAppNavigationProvider } from "./components/MobileAppNavigationContext";
@@ -8,6 +9,13 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import Phase25BaselineProbe from "./components/dev/Phase25BaselineProbe";
 import ResponsiveApplicationShell from "./components/ResponsiveApplicationShell";
 import "./globals.css";
+
+const htTerminalFont = localFont({
+  src: "./fonts/Manrope-Variable.ttf",
+  variable: "--font-ht-terminal",
+  display: "swap",
+  weight: "200 800",
+});
 
 export const metadata: Metadata = {
   title: "HT Labs",
@@ -39,7 +47,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={htTerminalFont.variable} suppressHydrationWarning>
       <body suppressHydrationWarning>
         <NativeAppBridge />
         <Analytics />
