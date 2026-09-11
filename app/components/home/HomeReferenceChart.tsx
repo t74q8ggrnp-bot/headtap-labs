@@ -46,16 +46,29 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   const layers = chartLayers.preferences;
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 767px)");
+    const mobileQuery = window.matchMedia("(max-width: 767px)");
+    const terminalQuery = window.matchMedia("(min-width: 1180px)");
     const apply = () => {
-      setHeight(query.matches ? 300 : 500);
+      setHeight(
+        mobileQuery.matches
+          ? 300
+          : terminalQuery.matches
+            ? Math.max(620, window.innerHeight - 125)
+            : 500,
+      );
       if (!rangeSelectedByUserRef.current) {
-        setVisibleRange(query.matches ? "1h" : "2h");
+        setVisibleRange(mobileQuery.matches ? "1h" : "2h");
       }
     };
     apply();
-    query.addEventListener("change", apply);
-    return () => query.removeEventListener("change", apply);
+    mobileQuery.addEventListener("change", apply);
+    terminalQuery.addEventListener("change", apply);
+    window.addEventListener("resize", apply);
+    return () => {
+      mobileQuery.removeEventListener("change", apply);
+      terminalQuery.removeEventListener("change", apply);
+      window.removeEventListener("resize", apply);
+    };
   }, []);
 
   const baseBars = useMemo(() => marketView.chart?.bars ?? [], [marketView.chart]);
@@ -81,6 +94,37 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
 
   return (
     <section className="htb-chart" aria-label={`${symbol} verified market chart`}>
+      {marketView.error && !marketView.chart ? (
+        <div className="htb-chart__state" style={{ height }} role="status">
+          <strong>Verified chart unavailable</strong>
+          <span>No estimated candles are shown.</span>
+        </div>
+      ) : bars.length === 0 ? (
+        <div className="htb-chart__state" style={{ height }} role="status" aria-live="polite">
+          <strong>Loading verified chart</strong>
+          <span>Connecting to the existing provider-backed frame.</span>
+        </div>
+      ) : (
+        <div data-chart-timeframe={timeframe} data-chart-provider-requests-on-switch="0" data-chart-range-provider-requests-on-switch="0">
+          <MarketChartCanvas
+            bars={bars}
+            intervalSeconds={intervalSeconds}
+            mode={mode}
+            accent="orange"
+            height={height}
+            compact={height < 400}
+            timeZone="America/New_York"
+            viewportKey={`home-reference:${symbol}:${timeframe}`}
+            indicators={indicators}
+            showVolume={layers.volume}
+            layerHost={EMPTY_LAYER_HOST}
+            preserveEngineOnLocalControls
+            visibleRange={visibleRange}
+            latestResetToken={latestResetToken}
+          />
+        </div>
+      )}
+
       <div className="htb-chart__toolbar">
         <div className="htb-chart__controls" role="group" aria-label="Chart timeframe">
           {PHASE_ONE_MARKET_CHART_TIMEFRAMES.map((option) => (
@@ -153,37 +197,6 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
           ))}
         </div>
       </div>
-
-      {marketView.error && !marketView.chart ? (
-        <div className="htb-chart__state" style={{ height }} role="status">
-          <strong>Verified chart unavailable</strong>
-          <span>No estimated candles are shown.</span>
-        </div>
-      ) : bars.length === 0 ? (
-        <div className="htb-chart__state" style={{ height }} role="status" aria-live="polite">
-          <strong>Loading verified chart</strong>
-          <span>Connecting to the existing provider-backed frame.</span>
-        </div>
-      ) : (
-        <div data-chart-timeframe={timeframe} data-chart-provider-requests-on-switch="0" data-chart-range-provider-requests-on-switch="0">
-          <MarketChartCanvas
-            bars={bars}
-            intervalSeconds={intervalSeconds}
-            mode={mode}
-            accent="orange"
-            height={height}
-            compact={height < 400}
-            timeZone="America/New_York"
-            viewportKey={`home-reference:${symbol}:${timeframe}`}
-            indicators={indicators}
-            showVolume={layers.volume}
-            layerHost={EMPTY_LAYER_HOST}
-            preserveEngineOnLocalControls
-            visibleRange={visibleRange}
-            latestResetToken={latestResetToken}
-          />
-        </div>
-      )}
 
       <div className="htb-chart__caption">
         <span>{marketView.chart?.sourceLabel ?? "Provider-backed market history"}</span>

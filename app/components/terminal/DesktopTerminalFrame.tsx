@@ -125,11 +125,11 @@ export default function DesktopTerminalFrame({
 
   const collapse = (pane: "markets" | "intelligence") => {
     setPane(pane, "closed");
-    queueMicrotask(() => (pane === "markets" ? marketsHandleRef : intelligenceHandleRef).current?.focus());
+    window.requestAnimationFrame(() => (pane === "markets" ? marketsHandleRef : intelligenceHandleRef).current?.focus());
   };
   const expand = (pane: "markets" | "intelligence") => {
     setPane(pane, "open");
-    queueMicrotask(() => (pane === "markets" ? marketsCollapseRef : intelligenceCollapseRef).current?.focus());
+    window.requestAnimationFrame(() => (pane === "markets" ? marketsCollapseRef : intelligenceCollapseRef).current?.focus());
   };
 
   const style = {
@@ -151,8 +151,8 @@ export default function DesktopTerminalFrame({
         id={`${prefix}-markets-pane`}
         className="ht-terminal-pane ht-terminal-pane--markets"
         aria-label={marketsTitle}
-        aria-hidden={!layout.marketsOpen}
-        inert={!layout.marketsOpen}
+        aria-hidden={layout.terminal && !layout.marketsOpen}
+        inert={layout.terminal && !layout.marketsOpen}
       >
         <header className="ht-terminal-pane__header">
           <h2>{marketsTitle}</h2>
@@ -161,7 +161,7 @@ export default function DesktopTerminalFrame({
         <div className="ht-terminal-pane__body">{markets}</div>
         <ResizeHandle label="Resize Markets pane" value={layout.marketsWidth} minimum={210} maximum={260} direction={1} onChange={(value) => setPaneWidth("markets", value)} />
       </aside>
-      {!layout.marketsOpen ? (
+      {layout.terminal && !layout.marketsOpen ? (
         <button ref={marketsHandleRef} type="button" className="ht-terminal-pane-handle ht-terminal-pane-handle--markets" aria-label="Expand Markets pane" aria-controls={`${prefix}-markets-pane`} aria-expanded="false" onClick={() => expand("markets")}>
           <span aria-hidden="true">▦</span>
         </button>
@@ -175,8 +175,8 @@ export default function DesktopTerminalFrame({
         id={`${prefix}-intelligence-pane`}
         className="ht-terminal-pane ht-terminal-pane--intelligence"
         aria-label={intelligenceTitle}
-        aria-hidden={!layout.intelligenceOpen}
-        inert={!layout.intelligenceOpen}
+        aria-hidden={layout.terminal && !layout.intelligenceOpen}
+        inert={layout.terminal && !layout.intelligenceOpen}
       >
         <ResizeHandle label="Resize HT Intelligence pane" value={layout.intelligenceWidth} minimum={280} maximum={360} direction={-1} onChange={(value) => setPaneWidth("intelligence", value)} />
         <header className="ht-terminal-pane__header">
@@ -185,7 +185,7 @@ export default function DesktopTerminalFrame({
         </header>
         <div className="ht-terminal-pane__body">{intelligence}</div>
       </aside>
-      {!layout.intelligenceOpen ? (
+      {layout.terminal && !layout.intelligenceOpen ? (
         <button ref={intelligenceHandleRef} type="button" className="ht-terminal-pane-handle ht-terminal-pane-handle--intelligence" aria-label="Expand HT Intelligence pane" aria-controls={`${prefix}-intelligence-pane`} aria-expanded="false" onClick={() => expand("intelligence")}>
           <span aria-hidden="true">HT</span>
         </button>
@@ -193,4 +193,3 @@ export default function DesktopTerminalFrame({
     </div>
   );
 }
-

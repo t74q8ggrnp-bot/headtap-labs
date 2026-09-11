@@ -236,11 +236,12 @@ export default function HomeClient({
     symbols: watchlist,
     add: addWatchlistSymbol,
     toggle: toggleWatchlistSymbol,
+    loading: watchlistLoading,
     cloudEnabled: watchlistCloudEnabled,
     syncState: watchlistSyncState,
     error: watchlistSyncError,
   } = useWatchlist({ userId: session?.user?.id ?? null });
-  const { record: recordRecentlyViewed } = useRecentlyViewed();
+  const { symbols: recentlyViewed, record: recordRecentlyViewed } = useRecentlyViewed();
   const [mounted, setMounted] = useState(false);
   const [mobileCardIndex, setMobileCardIndex] = useState(0);
 
@@ -1230,12 +1231,19 @@ export default function HomeClient({
         opportunities={apiFullRankedList}
         framework={referenceFramework}
         marketContext={marketCtx}
+        watchlist={watchlist}
+        recents={recentlyViewed}
+        watched={referenceOpportunity ? watchlist.includes(referenceOpportunity.ticker) : false}
+        watchlistBusy={watchlistLoading}
         loading={apiOpportunitiesLoading}
         selectionLoading={selectedOpportunityLoading}
         selectionError={selectedOpportunityError}
         onSelect={(opportunity) => {
           setSelectedStock(opportunityToStock(opportunity));
           recordRecentlyViewed(opportunity.ticker);
+        }}
+        onToggleWatchlist={() => {
+          if (referenceOpportunity) void toggleWatchlistSymbol(referenceOpportunity.ticker);
         }}
       />
     );

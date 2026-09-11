@@ -57,8 +57,8 @@ test("terminal foundation keeps pane interactions local and chart content stable
   assert.match(frame, /role="separator"/);
   assert.match(frame, /setPointerCapture/);
   assert.match(frame, /onLostPointerCapture=\{clear\}/);
-  assert.match(frame, /inert=\{!layout\.marketsOpen\}/);
-  assert.match(frame, /inert=\{!layout\.intelligenceOpen\}/);
+  assert.match(frame, /inert=\{layout\.terminal && !layout\.marketsOpen\}/);
+  assert.match(frame, /inert=\{layout\.terminal && !layout\.intelligenceOpen\}/);
   assert.doesNotMatch(frame, /key=\{/);
 });
 
@@ -68,7 +68,8 @@ test("terminal typography is locally bundled and scoped", () => {
   assert.match(layout, /localFont/);
   assert.match(layout, /\.\/fonts\/Manrope-Variable\.ttf/);
   assert.match(layout, /variable: "--font-ht-terminal"/);
-  assert.match(css, /\.ht-terminal \{ display: none; \}/);
+  assert.match(css, /\.ht-terminal \{ display: block; \}/);
+  assert.match(css, /\.ht-terminal-pane,[\s\S]*\.ht-terminal-chart \{ display: contents; \}/);
   assert.match(css, /font-family: var\(--font-ht-terminal\)/);
   assert.doesNotMatch(css.match(/body\s*\{[\s\S]*?\}/)?.[0] ?? "", /font-ht-terminal/);
 });

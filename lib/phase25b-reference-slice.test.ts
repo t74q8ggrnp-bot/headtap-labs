@@ -49,7 +49,8 @@ test("Phase 2.5B styles retain flat surfaces and exact reference proportions", (
   const css = source("app/globals.css");
   assert.match(css, /height: 58px/);
   assert.match(css, /grid-template-columns: 232px minmax\(0, 1fr\) 300px/);
-  assert.match(source("app/components/home/HomeReferenceChart.tsx"), /setHeight\(query\.matches \? 300 : 500\)/);
+  const chart = source("app/components/home/HomeReferenceChart.tsx");
+  assert.match(chart, /mobileQuery\.matches[\s\S]*\? 300[\s\S]*terminalQuery\.matches[\s\S]*window\.innerHeight - 125[\s\S]*: 500/);
   assert.match(css, /\.htb-opportunities \{ border-right: 1px solid/);
   assert.match(css, /\.htb-intelligence \{ border-left: 1px solid/);
 });
@@ -71,7 +72,7 @@ test("visible-range controls remain local and cannot remount or refetch the Home
   const css = source("app/globals.css");
 
   for (const label of ["1H", "2H", "Session"]) assert.match(chart, new RegExp(`label: "${label}"`));
-  assert.match(chart, /query\.matches \? "1h" : "2h"/);
+  assert.match(chart, /mobileQuery\.matches \? "1h" : "2h"/);
   assert.match(chart, /aria-label="Latest \/ reset visible chart range"/);
   assert.match(chart, /data-chart-range-provider-requests-on-switch="0"/);
   assert.match(chart, /preserveEngineOnLocalControls/);

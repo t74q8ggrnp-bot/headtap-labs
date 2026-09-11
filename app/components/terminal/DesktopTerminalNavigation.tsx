@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
 
 const routes = [
   { href: "/", label: "Home", icon: "⌂", exact: true },
@@ -11,6 +12,7 @@ const routes = [
   { href: "/trade", label: "Trade", icon: "▥", exact: false },
   { href: "/paper", label: "Paper", icon: "▤", exact: true },
 ] as const;
+const primaryRouteIds = new Set(["home", "scanner", "workspace", "paper"]);
 
 export default function DesktopTerminalNavigation() {
   const pathname = usePathname();
@@ -19,6 +21,9 @@ export default function DesktopTerminalNavigation() {
   const [ticker, setTicker] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  const currentRoute = resolveApplicationRoute(pathname);
+  const moreRoutes = APPLICATION_ROUTES.filter((route) => !primaryRouteIds.has(route.id));
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -66,9 +71,18 @@ export default function DesktopTerminalNavigation() {
           <span aria-hidden="true">⌕</span>
         </button>
       </div>
-      <Link href="/support" className="ht-terminal-nav__more" aria-label="More HT Labs routes" data-label="More">
-        <span aria-hidden="true">•••</span>
-      </Link>
+      <details ref={moreRef} className="ht-terminal-nav__more-wrap">
+        <summary className="ht-terminal-nav__more" aria-label="More HT Labs routes" aria-current={currentRoute && !primaryRouteIds.has(currentRoute.id) ? "page" : undefined} data-label="More">
+          <span aria-hidden="true">•••</span>
+        </summary>
+        <nav className="ht-terminal-nav__more-menu" aria-label="Additional HT Labs routes">
+          {moreRoutes.map((route) => (
+            <Link key={route.id} href={route.href} aria-current={currentRoute?.id === route.id ? "page" : undefined} onClick={() => moreRef.current?.removeAttribute("open")}>
+              {route.label}
+            </Link>
+          ))}
+        </nav>
+      </details>
       {searchOpen ? (
         <form className="ht-terminal-search" role="search" onSubmit={submit}>
           <label htmlFor="ht-terminal-ticker-search">Search ticker</label>
@@ -88,4 +102,3 @@ export default function DesktopTerminalNavigation() {
     </nav>
   );
 }
-
