@@ -30,17 +30,18 @@ test("workspace chart height tolerates unusable viewport input", () => {
   assert.equal(resolveTradeWorkspaceChartHeight({ width: Number.NaN, height: 0 }), 500);
 });
 
-test("workspace header uses a compact desktop provenance layout below the wide workspace breakpoint", () => {
+test("workspace header uses one flat shell and a compact provenance layout", () => {
   const source = readFileSync(
     fileURLToPath(new URL("../app/components/trade/TradeWorkspaceHeader.tsx", import.meta.url)),
     "utf8",
   );
 
-  assert.match(source, /lg:py-2 2xl:py-3/);
-  assert.match(source, /lg:py-3 2xl:py-5/);
-  assert.match(source, /lg:mt-2 2xl:mt-4/);
+  assert.doesNotMatch(source, /TickerSearchCombobox/);
+  assert.doesNotMatch(source, /<Image/);
+  assert.match(source, /ht-workspace-symbol-header/);
+  assert.match(source, /ht-workspace-provenance/);
   assert.equal(
-    source.match(/lg:flex lg:min-w-0 lg:items-center lg:gap-2 lg:py-1\.5 2xl:block 2xl:py-2\.5/g)?.length,
+    source.match(/lg:flex lg:min-w-0 lg:items-center lg:gap-2/g)?.length,
     3,
   );
 });

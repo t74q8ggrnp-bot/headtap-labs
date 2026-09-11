@@ -536,25 +536,21 @@ textarea {
   }
 }
 
-/* Phase 2.5 Checkpoint D: opt-in reference styling for /trade/[ticker]. */
+/* Phase 2.5B Checkpoint 1: flat terminal reference styling for /trade/[ticker]. */
 .ht-trade-workspace {
   min-width: 0;
-  padding:
-    calc(env(safe-area-inset-top, 0px) + var(--ht-space-2))
-    calc(env(safe-area-inset-right, 0px) + var(--ht-space-2))
-    calc(env(safe-area-inset-bottom, 0px) + var(--ht-space-4))
-    calc(env(safe-area-inset-left, 0px) + var(--ht-space-2));
-  background:
-    radial-gradient(circle at 48% -10%, rgba(249, 115, 22, 0.09), transparent 28%),
-    radial-gradient(circle at 92% 12%, rgba(34, 211, 238, 0.045), transparent 22%),
-    var(--ht-color-canvas);
+  min-height: calc(100dvh - 58px);
+  overflow-x: clip;
+  background: #07090b;
 }
 
 .ht-trade-workspace__frame {
-  border: 1px solid var(--ht-border-subtle);
-  border-radius: var(--ht-radius-shell);
-  background: color-mix(in srgb, var(--ht-color-surface) 96%, transparent);
-  box-shadow: 0 1.875rem 6.25rem rgba(0, 0, 0, 0.5);
+  min-width: 0;
+  overflow: clip;
+  border: 0;
+  border-radius: 0;
+  background: #07090b;
+  box-shadow: none;
 }
 
 .ht-workspace-header,
@@ -567,7 +563,8 @@ textarea {
   border-color: var(--ht-divider);
 }
 
-.ht-workspace-header { border-bottom: 1px solid var(--ht-divider); }
+.ht-workspace-header { border-bottom: 1px solid #24282e; background: #090b0e; }
+.ht-workspace-symbol-header { min-width: 0; }
 .ht-workspace-header__toolbar,
 .ht-workspace-mobile-tabs,
 .ht-workspace-panel-header,
@@ -575,17 +572,19 @@ textarea {
 .ht-workspace-column { border-color: var(--ht-divider); }
 
 .ht-workspace-panel {
-  border: 1px solid var(--ht-border-subtle);
-  border-radius: var(--ht-radius-panel);
-  background: var(--ht-color-surface-inset);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .ht-workspace-chart {
-  background: color-mix(in srgb, var(--ht-color-surface-inset) 94%, #111820);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.015);
+  background: #07090b;
+  box-shadow: none;
 }
 
-.ht-workspace-chart-column { background: rgba(0, 0, 0, 0.08); }
+.ht-workspace-terminal-grid { background: #07090b; }
+.ht-workspace-chart-column { background: #07090b; }
+.ht-workspace-column { background: #0a0d10; }
 .ht-workspace-eyebrow {
   color: var(--ht-color-text-subtle);
   font-size: 0.5625rem;
@@ -596,12 +595,16 @@ textarea {
 
 .ht-workspace-segmented {
   border: 1px solid var(--ht-border-subtle);
-  border-radius: calc(var(--ht-radius-control) - 0.125rem);
+  border-radius: 6px;
   background: rgba(0, 0, 0, 0.4);
 }
 
 .ht-workspace-segment {
-  border-radius: calc(var(--ht-radius-control) - 0.25rem);
+  min-height: 32px;
+  border-radius: 5px;
+  padding: 0.4rem 0.62rem;
+  font-size: 0.67rem;
+  font-weight: 780;
   color: var(--ht-color-text-subtle);
   transition:
     background var(--ht-motion-fast) var(--ht-motion-ease),
@@ -617,6 +620,21 @@ textarea {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 .ht-workspace-segment--accent[aria-pressed="true"] { background: rgba(249, 115, 22, 0.14); color: #fdba74; }
+
+.ht-workspace-range { flex: 0 0 auto; }
+.ht-workspace-range__desktop { display: flex; align-items: center; gap: 0.2rem; padding: 0.125rem; }
+.ht-workspace-range__mobile { display: none; }
+.ht-workspace-latest {
+  min-height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid #2b3036;
+  border-radius: 5px;
+  padding: 0.42rem 0.62rem;
+  color: #d7d8dc;
+  font-size: 0.67rem;
+  font-weight: 780;
+}
+.ht-workspace-latest:hover { border-color: rgba(251, 146, 60, 0.5); color: #fdba74; }
 
 .ht-workspace-layer-toggle {
   transition:
@@ -644,23 +662,39 @@ textarea {
 }
 .ht-workspace-search:focus-within { border-color: rgba(251, 146, 60, 0.45); background: rgba(0, 0, 0, 0.55); }
 
-.ht-workspace-list-row { transition: border-color var(--ht-motion-fast) var(--ht-motion-ease), background var(--ht-motion-fast) var(--ht-motion-ease); }
+.ht-workspace-list-row { border-radius: 4px; transition: border-color var(--ht-motion-fast) var(--ht-motion-ease), background var(--ht-motion-fast) var(--ht-motion-ease); }
 .ht-workspace-list-row:hover { border-color: var(--ht-divider); background: var(--ht-color-surface-hover); }
 .ht-workspace-empty { border-color: var(--ht-border-subtle); background: rgba(255, 255, 255, 0.015); color: var(--ht-color-text-subtle); }
 .ht-workspace-disclaimer { color: var(--ht-color-text-subtle); }
 
 @media (max-width: 767px) {
   .ht-trade-workspace {
-    padding-top: calc(env(safe-area-inset-top, 0px) + var(--ht-space-1));
-    padding-right: max(env(safe-area-inset-right, 0px), var(--ht-space-1));
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ht-space-3));
-    padding-left: max(env(safe-area-inset-left, 0px), var(--ht-space-1));
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: calc(61px + env(safe-area-inset-bottom, 0px));
+    padding-left: env(safe-area-inset-left, 0px);
   }
 
-  .ht-trade-workspace__frame { border-radius: var(--ht-radius-panel); }
-  .ht-workspace-mobile-tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: color-mix(in srgb, var(--ht-color-surface) 96%, transparent); backdrop-filter: blur(18px); }
+  .ht-trade-workspace__frame { border-radius: 0; }
+  .ht-workspace-mobile-tabs { position: sticky; top: calc(58px + env(safe-area-inset-top, 0px)); z-index: 20; background: #090b0e; }
   .ht-workspace-lists { gap: var(--ht-space-4); }
-  .ht-workspace-layer-bar { gap: var(--ht-space-1); }
+  .ht-workspace-panel-header { gap: 0.45rem; padding: 0.5rem 0.55rem; }
+  .ht-workspace-chart-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.85fr);
+    gap: 0.3rem;
+  }
+  .ht-workspace-timeframes { grid-column: 1; grid-row: 1; }
+  .ht-workspace-modes { grid-column: 2; grid-row: 1; }
+  .ht-workspace-range { grid-column: 1; grid-row: 2; min-width: 0; }
+  .ht-workspace-latest { grid-column: 2; grid-row: 2; width: 100%; }
+  .ht-workspace-panel-header .ht-workspace-segmented { width: 100%; }
+  .ht-workspace-range__desktop { display: none; }
+  .ht-workspace-range__mobile { display: flex; width: 100%; min-height: 44px; align-items: center; gap: 0.3rem; border: 1px solid #2b3036; border-radius: 5px; padding: 0 0.3rem 0 0.45rem; color: #989ba3; font-size: 0.62rem; font-weight: 760; }
+  .ht-workspace-range__mobile select { min-width: 0; min-height: 40px; flex: 1; border: 0; background: #11151a; color: #f1f1f2; font: 780 0.65rem/1 var(--ht-font-number); }
+  .ht-workspace-latest { min-height: 44px; padding-inline: 0.5rem; }
+  .ht-workspace-layer-bar { display: flex; flex-wrap: nowrap; gap: var(--ht-space-1); overflow-x: auto; scrollbar-width: none; }
+  .ht-workspace-layer-bar::-webkit-scrollbar { display: none; }
+  .ht-workspace-layer-toggle { min-width: max-content; border-radius: 5px; }
   .ht-workspace-stat { padding-inline: var(--ht-space-2); }
 
   .ht-agent-plan-sheet[data-presentation="sheet"] {
@@ -675,14 +709,14 @@ textarea {
   }
 }
 
-@media (min-width: 768px) {
-  .ht-trade-workspace {
-    padding:
-      calc(env(safe-area-inset-top, 0px) + var(--ht-space-5))
-      calc(env(safe-area-inset-right, 0px) + var(--ht-space-5))
-      calc(env(safe-area-inset-bottom, 0px) + var(--ht-space-8))
-      calc(env(safe-area-inset-left, 0px) + var(--ht-space-5));
-  }
+@media (min-width: 1180px) {
+  .ht-workspace-header { position: sticky; top: 58px; z-index: 25; }
+  .ht-workspace-column { min-height: calc(100dvh - 230px); }
+  .ht-workspace-column--lists,
+  .ht-workspace-column--intelligence { overflow-y: auto; }
+  .ht-workspace-chart > .ht-workspace-panel-header { min-height: 82px; }
+  .ht-workspace-column--intelligence .ht-workspace-panel { border-bottom: 1px solid #24282e; }
+  .ht-workspace-chart-column > .ht-workspace-panel + .ht-workspace-panel { border-top: 1px solid #24282e; }
 }
 
 /* Phase 2.5 Checkpoint E: discovery and intelligence surfaces. */

@@ -12,7 +12,7 @@ export default function TermsPage() {
     <LegalDocument
       eyebrow="HT Labs Legal"
       title="Terms of Use"
-      updated="August 23, 2026"
+      updated="September 11, 2026"
       summary="These terms govern your use of the HT Labs website and mobile application."
     >
       <section>
@@ -43,6 +43,13 @@ export default function TermsPage() {
       <section>
         <h2>Ownership and third-party services</h2>
         <p>HT Labs software, branding, interfaces, and original research systems are protected by applicable intellectual-property laws. Market data, news, AI infrastructure, hosting, and authentication may be supplied by third parties and remain subject to their rights and terms.</p>
+      </section>
+
+      <section id="chart-attribution">
+        <h2>Chart attribution</h2>
+        <p>TradingView Lightweight Charts™</p>
+        <p>Copyright © 2025 TradingView, Inc. <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>.</p>
+        <p>Lightweight Charts is provided under the Apache License, Version 2.0. This notice preserves the attribution supplied with the charting library; HT Labs remains responsible for its own interface, research, and data presentation.</p>
       </section>
 
       <section>

@@ -67,7 +67,7 @@ export default function TradeWorkspaceLists({
   onRemoveWatchlist: (symbol: string) => void;
 }) {
   return (
-    <aside className="ht-workspace-lists space-y-5" aria-label="Workspace lists">
+    <div className="ht-workspace-lists space-y-5">
       <section>
         <div className="mb-2 flex items-center justify-between px-1">
           <h2 className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-600">Quick markets</h2>
@@ -123,6 +123,6 @@ export default function TradeWorkspaceLists({
         <p className="text-[7px] font-black uppercase tracking-[0.16em] text-cyan-400/70">Workspace boundary</p>
         <p className="mt-1.5 text-[9px] font-semibold leading-relaxed text-zinc-600">Viewing an instrument does not add it to Canonical, ProX, Agent, or Paper Trading.</p>
       </div>
-    </aside>
+    </div>
   );
 }

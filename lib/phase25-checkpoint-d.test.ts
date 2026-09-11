@@ -55,7 +55,7 @@ test("the reference workspace uses shared visual and accessible state primitives
   assert.match(plan, /presentation="sheet"/);
   assert.match(plan, /className="ht-agent-plan-sheet md:hidden"/);
   assert.match(primitives, /className=\{classes\("ht-dialog-sheet", className\)\}/);
-  assert.match(css, /Phase 2\.5 Checkpoint D: opt-in reference styling/);
+  assert.match(css, /Phase 2\.5B Checkpoint 1: flat terminal reference styling/);
   assert.match(css, /\.ht-workspace-segment\[aria-pressed="true"\]/);
   assert.match(css, /\.ht-agent-plan-sheet\[data-presentation="sheet"\]/);
   assert.match(css, /safe-area-inset-bottom/);

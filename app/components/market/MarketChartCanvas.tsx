@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   useEffect,
   useMemo,
@@ -491,6 +492,7 @@ export function MarketChartCanvas({
         textColor: "#71717a",
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
         fontSize: 10,
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: "rgba(255,255,255,0.035)" },
@@ -878,6 +880,16 @@ export function MarketChartCanvas({
       style={{ height }}
     >
       <div ref={containerRef} className="h-full w-full" data-market-chart-container="true" />
+      <Image
+        src="/logo.png"
+        alt=""
+        aria-hidden="true"
+        width={2909}
+        height={1959}
+        draggable={false}
+        className="pointer-events-none absolute bottom-[30px] left-2 z-[1] h-auto w-10 select-none opacity-[0.12]"
+        data-chart-watermark="ht-labs"
+      />
       <ChartLayerHost slots={layerHost ?? layerSlots} nativeLayerRef={nativeLayerRef} />
     </div>
   );

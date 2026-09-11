@@ -339,7 +339,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
   }, [instrumentSupported, marketSessionActive, refreshIntelligence]);
 
   useEffect(() => {
-    const media = window.matchMedia("(min-width: 1536px)");
+    const media = window.matchMedia("(min-width: 1180px)");
     const sync = () => setWideWorkspace(media.matches);
     sync();
     media.addEventListener("change", sync);
@@ -472,7 +472,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
       data-trade-workspace={symbol}
       data-feed-version="market-chart-feed-v1"
     >
-      <div className="ht-trade-workspace__frame mx-auto max-w-[1720px] overflow-hidden">
+      <div className="ht-trade-workspace__frame overflow-hidden">
         <TradeWorkspaceHeader
           symbol={symbol}
           instrument={instrument}
@@ -491,7 +491,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
           efficiency={efficiency}
         />
 
-        <div className="ht-workspace-mobile-tabs border-b px-3 py-2 2xl:hidden">
+        <div className="ht-workspace-mobile-tabs border-b px-3 py-2 min-[1180px]:hidden">
           <div className="ht-workspace-segmented grid grid-cols-3 p-1" role="tablist" aria-label="Workspace sections" aria-orientation="horizontal">
             {MOBILE_PANELS.map((panel) => (
               <button
@@ -513,12 +513,12 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
           </div>
         </div>
 
-        <div className="grid min-w-0 2xl:min-h-[650px] 2xl:grid-cols-[250px_minmax(0,1fr)_360px]">
+        <div className="ht-workspace-terminal-grid grid min-w-0 min-[1180px]:min-h-[650px] min-[1180px]:grid-cols-[220px_minmax(0,1fr)_330px]">
           <div
             id={`${panelIdPrefix}-workspace-panel-lists`}
             role={wideWorkspace ? "region" : "tabpanel"}
             aria-labelledby={wideWorkspace ? `${panelIdPrefix}-workspace-region-lists` : `${panelIdPrefix}-workspace-tab-lists`}
-            className={`${mobilePanel === "lists" ? "block" : "hidden"} ht-workspace-column min-w-0 p-3 2xl:block 2xl:border-r 2xl:p-4`}
+            className={`${mobilePanel === "lists" ? "block" : "hidden"} ht-workspace-column ht-workspace-column--lists min-w-0 p-3 min-[1180px]:block min-[1180px]:border-r min-[1180px]:p-3`}
           >
             <h2 id={`${panelIdPrefix}-workspace-region-lists`} className="sr-only">Workspace lists</h2>
             {lists}
@@ -527,7 +527,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
             id={`${panelIdPrefix}-workspace-panel-chart`}
             role={wideWorkspace ? "region" : "tabpanel"}
             aria-labelledby={wideWorkspace ? `${panelIdPrefix}-workspace-region-chart` : `${panelIdPrefix}-workspace-tab-chart`}
-            className={`${mobilePanel === "chart" ? "block" : "hidden"} ht-workspace-chart-column min-w-0 p-2 sm:p-3 md:p-4 2xl:block 2xl:p-5`}
+            className={`${mobilePanel === "chart" ? "block" : "hidden"} ht-workspace-chart-column min-w-0 min-[1180px]:block`}
           >
             <h2 id={`${panelIdPrefix}-workspace-region-chart`} className="sr-only">Verified market chart</h2>
             {chart}
@@ -536,7 +536,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
             id={`${panelIdPrefix}-workspace-panel-intelligence`}
             role={wideWorkspace ? "region" : "tabpanel"}
             aria-labelledby={wideWorkspace ? `${panelIdPrefix}-workspace-region-intelligence` : `${panelIdPrefix}-workspace-tab-intelligence`}
-            className={`${mobilePanel === "intelligence" ? "block" : "hidden"} ht-workspace-column min-w-0 p-3 md:p-4 2xl:block 2xl:border-l`}
+            className={`${mobilePanel === "intelligence" ? "block" : "hidden"} ht-workspace-column ht-workspace-column--intelligence min-w-0 p-3 md:p-4 min-[1180px]:block min-[1180px]:border-l min-[1180px]:p-3`}
           >
             <div className="mb-3 flex items-center justify-between px-1">
               <h2 id={`${panelIdPrefix}-workspace-region-intelligence`} className="ht-workspace-eyebrow">HT Intelligence</h2>
@@ -544,7 +544,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
                 type="button"
                 onClick={() => void refreshIntelligence(true)}
                 disabled={!instrumentSupported || intelligenceRefreshing}
-                className="ht-control min-h-11 px-3 text-[8px] uppercase tracking-[0.1em] 2xl:min-h-8"
+                className="ht-control min-h-11 px-3 text-[8px] uppercase tracking-[0.1em] min-[1180px]:min-h-8"
                 data-variant="quiet"
                 data-size="small"
               >
@@ -555,7 +555,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
           </div>
         </div>
       </div>
-      <p className="ht-workspace-disclaimer mx-auto mt-3 max-w-[1720px] px-2 text-center text-[8px] font-semibold leading-relaxed">
+      <p className="ht-workspace-disclaimer px-3 py-2 text-center text-[8px] font-semibold leading-relaxed">
         HT Labs Trading Workspace is a research surface. Market data is provider-time stamped; opening Paper Trading does not submit an order.
       </p>
     </main>

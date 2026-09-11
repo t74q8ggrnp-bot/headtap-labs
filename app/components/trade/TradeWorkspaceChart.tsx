@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import MarketChartCanvas, {
   type ChartLayerSlots,
   type MarketChartIndicatorOverlays,
@@ -18,6 +18,7 @@ import { resolveTradeWorkspaceChartHeight } from "@/lib/trade-workspace-layout";
 import type { HtChartObject } from "@/lib/chart-objects";
 import type { ChartLayerPreferences } from "@/app/hooks/useChartLayerPreferences";
 import { StatusState } from "@/app/components/ui/ApplicationPrimitives";
+import type { MarketChartVisibleRange } from "@/lib/market-chart-visible-range";
 
 export type WorkspaceIndicatorVisibility = {
   vwap: boolean;
@@ -32,6 +33,12 @@ const indicatorStyles = {
 } as const;
 
 const EMPTY_CHART_LAYER_HOST: ChartLayerSlots = Object.freeze({});
+
+const visibleRanges = [
+  { id: "1h", label: "1H" },
+  { id: "2h", label: "2H" },
+  { id: "session", label: "Session" },
+] as const satisfies ReadonlyArray<{ id: MarketChartVisibleRange; label: string }>;
 
 export default function TradeWorkspaceChart({
   symbol,
@@ -63,6 +70,9 @@ export default function TradeWorkspaceChart({
   error: string | null;
 }) {
   const [layout, setLayout] = useState({ compact: false, height: 560 });
+  const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>("2h");
+  const [latestResetToken, setLatestResetToken] = useState(0);
+  const rangeSelectedByUserRef = useRef(false);
   useEffect(() => {
     const query = window.matchMedia("(max-width: 767px)");
     let animationFrame = 0;
@@ -77,6 +87,9 @@ export default function TradeWorkspaceChart({
             height: viewportHeight,
           }),
         });
+        if (!rangeSelectedByUserRef.current) {
+          setVisibleRange(query.matches ? "1h" : "2h");
+        }
       });
     };
     apply();
@@ -103,10 +116,14 @@ export default function TradeWorkspaceChart({
     (object.authority === "agent" && layerVisibility.agent) ||
     (object.authority === "prox" && layerVisibility.prox),
   ), [chartObjects, layerVisibility.agent, layerVisibility.prox]);
+  const selectVisibleRange = (range: MarketChartVisibleRange) => {
+    rangeSelectedByUserRef.current = true;
+    setVisibleRange(range);
+  };
 
   return (
     <section className="ht-workspace-panel ht-workspace-chart overflow-hidden" aria-label={`${symbol} market chart`}>
-      <div className="ht-workspace-panel-header flex flex-col gap-1 px-3 py-1.5 sm:gap-3 sm:py-3 md:flex-row md:items-center md:justify-between md:px-4">
+      <div className="ht-workspace-panel-header flex flex-col gap-1 px-3 py-1.5 sm:gap-3 sm:py-3 md:px-4">
         <div className="hidden sm:block">
           <div className="flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.55)]" />
@@ -114,8 +131,8 @@ export default function TradeWorkspaceChart({
           </div>
           <p className="mt-1 text-[8px] font-semibold text-zinc-600">One 1-minute provider frame · timeframes derived locally</p>
         </div>
-        <div className="flex w-full items-center gap-2 md:w-auto">
-          <div className="ht-workspace-segmented grid min-w-0 flex-[3] grid-cols-3 p-0.5 md:flex-none" role="group" aria-label="Chart timeframe">
+        <div className="ht-workspace-chart-toolbar flex w-full min-w-0 items-center gap-2">
+          <div className="ht-workspace-timeframes ht-workspace-segmented grid min-w-0 flex-[3] grid-cols-3 p-0.5 md:flex-none" role="group" aria-label="Chart timeframe">
             {PHASE_ONE_MARKET_CHART_TIMEFRAMES.map((option) => (
               <button
                 key={option.id}
@@ -128,7 +145,7 @@ export default function TradeWorkspaceChart({
               </button>
             ))}
           </div>
-          <div className="ht-workspace-segmented grid min-w-0 flex-[2] grid-cols-2 p-0.5 md:flex-none" role="group" aria-label="Chart style">
+          <div className="ht-workspace-modes ht-workspace-segmented grid min-w-0 flex-[2] grid-cols-2 p-0.5 md:flex-none" role="group" aria-label="Chart style">
             {(["graph", "candles"] as const).map((option) => (
               <button
                 key={option}
@@ -141,6 +158,39 @@ export default function TradeWorkspaceChart({
               </button>
             ))}
           </div>
+          <div className="ht-workspace-range min-w-0">
+            <div className="ht-workspace-range__desktop ht-workspace-segmented" role="group" aria-label="Visible chart range">
+              {visibleRanges.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={visibleRange === option.id}
+                  onClick={() => selectVisibleRange(option.id)}
+                  className="ht-workspace-segment ht-tabular-numbers"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <label className="ht-workspace-range__mobile">
+              <span>Range</span>
+              <select
+                aria-label="Visible chart range"
+                value={visibleRange}
+                onChange={(event) => selectVisibleRange(event.target.value as MarketChartVisibleRange)}
+              >
+                {visibleRanges.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <button
+            type="button"
+            className="ht-workspace-latest"
+            aria-label="Latest / reset visible chart range"
+            onClick={() => setLatestResetToken((current) => current + 1)}
+          >
+            Latest
+          </button>
         </div>
       </div>
 
@@ -173,7 +223,7 @@ export default function TradeWorkspaceChart({
         </div>
       ) : (
         <>
-          <div className="relative" data-chart-timeframe={timeframe} data-chart-provider-requests-on-switch="0">
+          <div className="relative" data-chart-timeframe={timeframe} data-chart-provider-requests-on-switch="0" data-chart-range-provider-requests-on-switch="0">
             <MarketChartCanvas
               bars={bars}
               intervalSeconds={intervalSeconds}
@@ -188,6 +238,8 @@ export default function TradeWorkspaceChart({
               showVolume={layerVisibility.volume}
               layerHost={EMPTY_CHART_LAYER_HOST}
               preserveEngineOnLocalControls
+              visibleRange={visibleRange}
+              latestResetToken={latestResetToken}
             />
           </div>
           <div className="ht-workspace-stat-grid grid grid-cols-4">

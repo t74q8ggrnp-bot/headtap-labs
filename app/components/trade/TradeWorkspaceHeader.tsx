@@ -1,11 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import type { WorkspaceInstrument } from "@/lib/instrument-search";
 import type { MarketChartFeedFrame } from "@/lib/market-chart-feed";
 import { formatMarketPrice } from "@/lib/market-price-format";
-import TickerSearchCombobox from "@/app/components/trade/TickerSearchCombobox";
 
 export type FeedEfficiencySummary = {
   observedProviderRequests: number;
@@ -109,31 +107,7 @@ export default function TradeWorkspaceHeader({
       data-market-live={feedLive ? "true" : "false"}
       data-instrument-availability={instrumentLoading ? "loading" : instrumentUnavailable ? "unavailable" : "available"}
     >
-      <div className="ht-workspace-header__toolbar flex min-w-0 items-center gap-2 px-2.5 py-1.5 sm:gap-3 sm:px-3 sm:py-3 md:px-5 lg:py-2 2xl:py-3">
-        <Link
-          href="/"
-          aria-label="Back to HT Labs"
-          className="flex shrink-0 items-center gap-2 rounded-xl pr-1 transition hover:opacity-80"
-        >
-          <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} priority className="h-6 w-auto sm:h-8" />
-          <span className="hidden text-[9px] font-black uppercase tracking-[0.16em] text-zinc-600 xl:inline">Workspace</span>
-        </Link>
-        <TickerSearchCombobox currentSymbol={symbol} compact />
-        {!instrumentLoading && !instrumentUnavailable && (
-          <Link
-            href={`/paper?symbol=${encodeURIComponent(symbol)}`}
-            className="ht-control hidden shrink-0 items-center gap-2 px-3.5 py-2.5 text-[10px] uppercase tracking-[0.11em] sm:flex"
-            data-variant="secondary"
-          >
-            Open in Paper
-            <svg aria-hidden="true" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M5 12h14M13 6l6 6-6 6" />
-            </svg>
-          </Link>
-        )}
-      </div>
-
-      <div className="px-3 py-2 sm:px-4 sm:py-4 md:px-6 md:py-5 lg:py-3 2xl:py-5">
+      <div className="ht-workspace-symbol-header px-3 py-2 sm:px-4 sm:py-3 md:px-5">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:gap-x-3">
@@ -182,10 +156,11 @@ export default function TradeWorkspaceHeader({
             {!instrumentLoading && !instrumentUnavailable && (
               <Link
                 href={`/paper?symbol=${encodeURIComponent(symbol)}`}
-                className="ht-control inline-flex min-h-11 items-center px-3 text-[9px] uppercase tracking-[0.11em] sm:hidden"
+                className="ht-control inline-flex min-h-11 items-center px-3 text-[9px] uppercase tracking-[0.11em]"
                 data-variant="secondary"
               >
-                Paper
+                <span className="sm:hidden">Paper</span>
+                <span className="hidden sm:inline">Open in Paper</span>
               </Link>
             )}
           </div>
@@ -200,24 +175,24 @@ export default function TradeWorkspaceHeader({
           </p>
         </div>
 
-        <div className="mt-4 hidden gap-px overflow-hidden rounded-xl border border-white/[0.065] bg-white/[0.065] sm:grid sm:grid-cols-3 lg:mt-2 2xl:mt-4">
-          <div className="bg-[#080b0d] px-3 py-2.5 lg:flex lg:min-w-0 lg:items-center lg:gap-2 lg:py-1.5 2xl:block 2xl:py-2.5">
+        <div className="ht-workspace-provenance mt-3 hidden gap-px overflow-hidden border-y border-white/[0.065] bg-white/[0.065] sm:grid sm:grid-cols-3">
+          <div className="bg-[#080b0d] px-3 py-2 lg:flex lg:min-w-0 lg:items-center lg:gap-2">
             <p className="shrink-0 text-[7px] font-black uppercase tracking-[0.16em] text-zinc-700">Provider trade time</p>
-              <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">{formatProviderTime(quote?.asOf, true)}</p>
+              <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate">{formatProviderTime(quote?.asOf, true)}</p>
           </div>
-          <div className="bg-[#080b0d] px-3 py-2.5 lg:flex lg:min-w-0 lg:items-center lg:gap-2 lg:py-1.5 2xl:block 2xl:py-2.5">
+          <div className="bg-[#080b0d] px-3 py-2 lg:flex lg:min-w-0 lg:items-center lg:gap-2">
             <p className="shrink-0 text-[7px] font-black uppercase tracking-[0.16em] text-zinc-700">Candle interval</p>
-              <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">{formatProviderTime(authority?.candleIntervalTimestamp, true)}</p>
+              <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate">{formatProviderTime(authority?.candleIntervalTimestamp, true)}</p>
           </div>
-          <div className="bg-[#080b0d] px-3 py-2.5 lg:flex lg:min-w-0 lg:items-center lg:gap-2 lg:py-1.5 2xl:block 2xl:py-2.5">
+          <div className="bg-[#080b0d] px-3 py-2 lg:flex lg:min-w-0 lg:items-center lg:gap-2">
             <p className="shrink-0 text-[7px] font-black uppercase tracking-[0.16em] text-zinc-700">Provider event / chart scope</p>
-            <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">
+            <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate">
               {sessionLabel(authority?.providerSession)} · {authority?.sessionScope === "regular" ? "RTH only" : "Extended"} · {authority?.displayedSessionDate ?? "Date pending"}
             </p>
           </div>
         </div>
 
-        <div className="mt-2 hidden min-h-5 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[8px] font-bold text-zinc-500 sm:flex lg:mt-1 2xl:mt-2">
+        <div className="mt-2 hidden min-h-5 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[8px] font-bold text-zinc-500 sm:flex">
           <p className="min-w-0 leading-relaxed" aria-live="polite">
             {instrumentUnavailable ? instrumentMessage || "This instrument is unavailable in the Phase 1 workspace" : `${feedLabel} · ${feedError
               ? reconnecting
