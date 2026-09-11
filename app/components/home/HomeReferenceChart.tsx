@@ -7,6 +7,7 @@ import MarketChartCanvas, {
   type MarketChartMode,
 } from "@/app/components/market/MarketChartCanvas";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
+import { useChartLayerPreferences } from "@/app/hooks/useChartLayerPreferences";
 import { calculateMarketIndicators } from "@/lib/market-indicators";
 import {
   deriveMarketChartTimeframeBars,
@@ -41,12 +42,8 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>("2h");
   const [latestResetToken, setLatestResetToken] = useState(0);
   const rangeSelectedByUserRef = useRef(false);
-  const [layers, setLayers] = useState<Record<Layer, boolean>>({
-    volume: true,
-    vwap: true,
-    ema9: true,
-    ema20: false,
-  });
+  const chartLayers = useChartLayerPreferences();
+  const layers = chartLayers.preferences;
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 767px)");
@@ -76,10 +73,6 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     ...(layers.ema20 ? { ema20: calculated.ema20 } : {}),
   }), [calculated, layers.ema20, layers.ema9, layers.vwap]);
   const intervalSeconds = getMarketChartTimeframeMetadata(timeframe).intervalSeconds;
-
-  const toggleLayer = (layer: Layer) => {
-    setLayers((current) => ({ ...current, [layer]: !current[layer] }));
-  };
 
   const selectVisibleRange = (range: MarketChartVisibleRange) => {
     rangeSelectedByUserRef.current = true;
@@ -151,8 +144,10 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
               key={layer}
               type="button"
               aria-pressed={layers[layer]}
-              onClick={() => toggleLayer(layer)}
+              data-layer={layer}
+              onClick={() => chartLayers.toggle(layer)}
             >
+              {layer !== "volume" ? <span className={`ht-chart-layer-key ht-chart-layer-key--${layer}`} aria-hidden="true" /> : null}
               {layerLabels[layer]}
             </button>
           ))}

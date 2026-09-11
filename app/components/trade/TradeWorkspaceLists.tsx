@@ -119,8 +119,8 @@ export default function TradeWorkspaceLists({
         )}
       </section>
 
-      <div className="rounded-xl border border-cyan-400/[0.09] bg-cyan-500/[0.025] px-3 py-3">
-        <p className="text-[7px] font-black uppercase tracking-[0.16em] text-cyan-400/70">Workspace boundary</p>
+      <div className="ht-workspace-boundary rounded-xl border border-white/[0.07] bg-white/[0.018] px-3 py-3">
+        <p className="text-[7px] font-black text-zinc-500">Workspace boundary</p>
         <p className="mt-1.5 text-[9px] font-semibold leading-relaxed text-zinc-600">Viewing an instrument does not add it to Canonical, ProX, Agent, or Paper Trading.</p>
       </div>
     </div>

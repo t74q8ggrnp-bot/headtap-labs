@@ -26,12 +26,6 @@ export type WorkspaceIndicatorVisibility = {
   ema20: boolean;
 };
 
-const indicatorStyles = {
-  vwap: "border-cyan-400/25 bg-cyan-500/10 text-cyan-300",
-  ema9: "border-orange-400/25 bg-orange-500/10 text-orange-300",
-  ema20: "border-violet-400/25 bg-violet-500/10 text-violet-300",
-} as const;
-
 const EMPTY_CHART_LAYER_HOST: ChartLayerSlots = Object.freeze({});
 
 const visibleRanges = [
@@ -125,11 +119,8 @@ export default function TradeWorkspaceChart({
     <section className="ht-workspace-panel ht-workspace-chart overflow-hidden" aria-label={`${symbol} market chart`}>
       <div className="ht-workspace-panel-header flex flex-col gap-1 px-3 py-1.5 sm:gap-3 sm:py-3 md:px-4">
         <div className="hidden sm:block">
-          <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.55)]" />
-            <p className="text-[9px] font-black uppercase tracking-[0.19em] text-cyan-300">Verified price history</p>
-          </div>
-          <p className="mt-1 text-[8px] font-semibold text-zinc-600">One 1-minute provider frame · timeframes derived locally</p>
+          <p className="ht-workspace-chart-kicker">Verified price history</p>
+          <p className="ht-workspace-chart-subtitle">One 1-minute provider frame · timeframes derived locally</p>
         </div>
         <div className="ht-workspace-chart-toolbar flex w-full min-w-0 items-center gap-2">
           <div className="ht-workspace-timeframes ht-workspace-segmented grid min-w-0 flex-[3] grid-cols-3 p-0.5 md:flex-none" role="group" aria-label="Chart timeframe">
@@ -152,7 +143,7 @@ export default function TradeWorkspaceChart({
                 type="button"
                 aria-pressed={mode === option}
                 onClick={() => onModeChange(option)}
-                className="ht-workspace-segment ht-workspace-segment--accent min-h-11 px-1.5 py-1.5 text-[8px] font-black uppercase tracking-[0.08em] sm:px-2.5 md:min-h-0"
+                className="ht-workspace-segment ht-workspace-segment--accent min-h-11 px-1.5 py-1.5 text-[9px] font-bold sm:px-2.5 md:min-h-0"
               >
                 {option === "candles" ? "Candle" : "Line"}
               </button>
@@ -195,7 +186,7 @@ export default function TradeWorkspaceChart({
       </div>
 
       <div className="ht-workspace-layer-bar grid grid-cols-3 items-center gap-1.5 px-3 py-1 sm:flex sm:flex-wrap sm:py-2 md:px-4" role="group" aria-label="Chart layers">
-        <span className="mr-1 hidden text-[7px] font-black uppercase tracking-[0.15em] text-zinc-600 sm:inline">Layers</span>
+        <span className="mr-1 hidden text-[8px] font-semibold text-zinc-400 sm:inline">Layers</span>
         {([
           ...(intelligenceLayersEnabled ? ["agent", "prox"] as const : []),
           "vwap", "ema9", "ema20", "volume",
@@ -204,9 +195,11 @@ export default function TradeWorkspaceChart({
             key={indicator}
             type="button"
             aria-pressed={layerVisibility[indicator]}
+            data-layer={indicator}
             onClick={() => onToggleLayer(indicator)}
-            className={`ht-workspace-layer-toggle min-h-11 rounded-full border px-1.5 py-1 font-mono text-[8px] font-black uppercase sm:min-h-0 sm:px-2.5 ${layerVisibility[indicator] ? (indicator in indicatorStyles ? indicatorStyles[indicator as keyof typeof indicatorStyles] : indicator === "agent" ? "border-orange-400/25 bg-orange-500/10 text-orange-300" : "border-violet-400/25 bg-violet-500/10 text-violet-300") : "border-white/[0.07] bg-white/[0.025] text-zinc-600 hover:text-zinc-400"}`}
+            className="ht-workspace-layer-toggle min-h-11 px-1.5 py-1 text-[8px] sm:min-h-0 sm:px-2.5"
           >
+            {indicator === "vwap" || indicator === "ema9" || indicator === "ema20" ? <span className={`ht-chart-layer-key ht-chart-layer-key--${indicator}`} aria-hidden="true" /> : null}
             {indicator === "ema9" ? "EMA 9" : indicator === "ema20" ? "EMA 20" : indicator === "agent" ? "Agent X" : indicator === "prox" ? "ProX" : indicator === "volume" ? "Volume" : "VWAP"}
           </button>
         ))}
@@ -250,7 +243,7 @@ export default function TradeWorkspaceChart({
               ["Close", formatMarketPrice(summary?.close)],
             ].map(([label, value]) => (
               <div key={label} className="ht-workspace-stat min-w-0 px-2.5 py-2.5 md:px-3">
-                <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-700">{label}</p>
+                <p className="text-[8px] font-semibold text-zinc-400">{label}</p>
                 <p className="ht-tabular-numbers mt-1 truncate text-[9px] font-black text-zinc-300 md:text-[10px]">{value}</p>
               </div>
             ))}

@@ -15,7 +15,7 @@ const STORAGE_KEY = "ht-chart-layer-preferences-v1";
 const DEFAULTS: ChartLayerPreferences = {
   agent: true,
   prox: true,
-  vwap: true,
+  vwap: false,
   ema9: false,
   ema20: false,
   volume: true,

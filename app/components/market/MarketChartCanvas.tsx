@@ -553,7 +553,7 @@ export function MarketChartCanvas({
       wickVisible: true,
       wickUpColor: "#86efac",
       wickDownColor: "#fca5a5",
-      priceLineVisible: true,
+      priceLineVisible: false,
       priceLineColor: `${palette.line}66`,
       lastValueVisible: true,
       priceFormat,
@@ -564,7 +564,7 @@ export function MarketChartCanvas({
       topColor: `${palette.line}38`,
       bottomColor: `${palette.line}00`,
       lineWidth: 2,
-      priceLineVisible: true,
+      priceLineVisible: false,
       priceLineColor: `${palette.line}66`,
       lastValueVisible: true,
       priceFormat,
@@ -603,16 +603,17 @@ export function MarketChartCanvas({
     const indicatorWriters = new Map<MarketChartIndicatorKey, IndicatorWriter>();
     const indicatorSeries = new Map<MarketChartIndicatorKey, ISeriesApi<"Line">>();
     const indicatorDefinitions = [
-      { key: "vwap", visible: showVwap, color: "#22d3ee", width: 2 },
-      { key: "ema9", visible: showEma9, color: "#fb923c", width: 1 },
-      { key: "ema20", visible: showEma20, color: "#a78bfa", width: 1 },
+      { key: "vwap", title: "VWAP", visible: showVwap, color: "#94a3b8", width: 2 },
+      { key: "ema9", title: "EMA 9", visible: showEma9, color: "#d6a86a", width: 1 },
+      { key: "ema20", title: "EMA 20", visible: showEma20, color: "#a8a29e", width: 1 },
     ] as const;
     for (const definition of indicatorDefinitions) {
       const series = chart.addSeries(LineSeries, {
         color: definition.color,
+        title: definition.title,
         lineWidth: definition.width,
         priceLineVisible: false,
-        lastValueVisible: false,
+        lastValueVisible: definition.visible,
         crosshairMarkerVisible: false,
         priceFormat,
         visible: definition.visible,
@@ -703,11 +704,13 @@ export function MarketChartCanvas({
       topColor: `${palette.line}38`,
       bottomColor: `${palette.line}00`,
       priceLineColor: `${palette.line}66`,
+      priceLineVisible: false,
       priceFormat,
       visible: mode === "graph",
     });
     priceSeriesRef.current?.candles.applyOptions({
       priceLineColor: `${palette.line}66`,
+      priceLineVisible: false,
       priceFormat,
       visible: mode === "candles",
     });
@@ -738,9 +741,9 @@ export function MarketChartCanvas({
   }, [resolvedTimeZone]);
 
   useEffect(() => {
-    indicatorSeriesRef.current.get("vwap")?.applyOptions({ visible: showVwap });
-    indicatorSeriesRef.current.get("ema9")?.applyOptions({ visible: showEma9 });
-    indicatorSeriesRef.current.get("ema20")?.applyOptions({ visible: showEma20 });
+    indicatorSeriesRef.current.get("vwap")?.applyOptions({ visible: showVwap, lastValueVisible: showVwap });
+    indicatorSeriesRef.current.get("ema9")?.applyOptions({ visible: showEma9, lastValueVisible: showEma9 });
+    indicatorSeriesRef.current.get("ema20")?.applyOptions({ visible: showEma20, lastValueVisible: showEma20 });
     volumeSeriesRef.current?.applyOptions({ visible: showVolume });
   }, [showEma20, showEma9, showVolume, showVwap]);
 

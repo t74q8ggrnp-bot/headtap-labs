@@ -40,9 +40,9 @@ function freshnessTone(state: WorkspaceReadFreshnessState) {
 
 function Metric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "positive" | "violet" | "neutral" }) {
   return (
-    <div className="ht-workspace-stat rounded-xl px-3 py-2.5">
-      <p className="text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">{label}</p>
-      <p className={`ht-tabular-numbers mt-1 text-[11px] font-black ${tone === "positive" ? "text-emerald-400" : tone === "violet" ? "text-violet-300" : "text-zinc-300"}`}>{value}</p>
+    <div className="ht-workspace-stat ht-workspace-read-metric rounded-xl px-3 py-2.5">
+      <p className="text-[8px] font-semibold text-zinc-400">{label}</p>
+      <p className={`ht-tabular-numbers mt-1 text-[11px] font-black ${tone === "positive" ? "text-emerald-400" : tone === "violet" ? "text-zinc-200" : "text-zinc-300"}`}>{value}</p>
     </div>
   );
 }
@@ -101,7 +101,7 @@ export default function TradeWorkspaceIntelligence({
         data-ht-read="none"
         data-chart-as-of={chartAsOf ?? ""}
       >
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-400/15 bg-violet-500/[0.07] text-violet-300">
+        <div className="ht-workspace-read-icon flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-zinc-400">
           <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
             <path d="M4 18V9M10 18V5M16 18v-7M22 18V3" />
           </svg>
@@ -117,8 +117,8 @@ export default function TradeWorkspaceIntelligence({
             Read refresh failed; no newer intelligence was substituted. {refreshError}
           </p>
         )}
-        <div className="mt-4 rounded-xl border border-white/[0.055] bg-black/30 px-3 py-3">
-          <p className="text-[7px] font-black uppercase tracking-[0.15em] text-zinc-700">What this means</p>
+        <div className="ht-workspace-read-boundary mt-4 rounded-xl border border-white/[0.055] bg-black/30 px-3 py-3">
+          <p className="text-[8px] font-semibold text-zinc-400">What this means</p>
           <p className="mt-1.5 text-[9px] font-semibold leading-relaxed text-zinc-600">You can research any Massive-supported stock or ETF here. HT Labs only displays a Canonical or bounded ProX Market Pulse read when one actually exists.</p>
           <p className="mt-2 font-mono text-[8px] font-semibold text-zinc-700">Chart provider frame {formatEt(chartAsOf)}</p>
         </div>
@@ -154,7 +154,7 @@ export default function TradeWorkspaceIntelligence({
 
   return (
     <div
-      className="space-y-4"
+      className="ht-workspace-read space-y-4"
       data-ht-read="active"
       data-canonical-lane={opportunity.strategy ?? "unknown"}
       data-canonical-as-of={canonicalAsOf ?? ""}
@@ -168,15 +168,15 @@ export default function TradeWorkspaceIntelligence({
         </p>
       )}
 
-      <section className="ht-workspace-panel overflow-hidden border-violet-400/[0.12] bg-[linear-gradient(150deg,rgba(139,92,246,0.055),rgba(0,0,0,0)_55%)]">
+      <section className="ht-workspace-panel ht-workspace-read-card ht-workspace-read-card--canonical overflow-hidden">
         <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-3.5">
           <div>
-            <p className="text-[8px] font-black uppercase tracking-[0.18em] text-violet-300">{canonicalLane}</p>
+            <p className="ht-workspace-read-kicker text-[8px] font-black text-orange-300">{canonicalLane}</p>
             <h2 className="mt-1.5 text-sm font-black leading-tight text-zinc-100">{opportunity.stageEmoji} {opportunity.stage}</h2>
           </div>
           <div className="text-right">
-            <p className="ht-tabular-numbers text-2xl font-black tracking-[-0.04em] text-emerald-400">{Math.round(opportunity.opportunityScore)}</p>
-            <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-700">HT score</p>
+            <p className="ht-workspace-read-score ht-tabular-numbers text-xl font-black tracking-[-0.04em] text-orange-300">{Math.round(opportunity.opportunityScore)}</p>
+            <p className="text-[8px] font-semibold text-zinc-400">HT score</p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 p-3">
@@ -184,9 +184,9 @@ export default function TradeWorkspaceIntelligence({
           <Metric label="Relative volume" value={`${opportunity.relativeVolume.toFixed(1)}x`} tone="positive" />
         </div>
         <div className="border-t border-white/[0.055] px-4 py-3.5">
-          <p className="text-[7px] font-black uppercase tracking-[0.15em] text-emerald-400/75">What changed</p>
+          <p className="text-[8px] font-semibold text-zinc-400">What changed</p>
           <p className="mt-1.5 text-[10px] font-semibold leading-relaxed text-zinc-400">{opportunity.whatChanged}</p>
-          <p className="mt-3 text-[7px] font-black uppercase tracking-[0.15em] text-zinc-700">Why it matters</p>
+          <p className="mt-3 text-[8px] font-semibold text-zinc-400">Why it matters</p>
           <p className="mt-1.5 text-[10px] font-semibold leading-relaxed text-zinc-500">{opportunity.whyItMatters}</p>
         </div>
         <div className="space-y-1 border-t border-white/[0.055] px-4 py-2.5">
@@ -201,10 +201,10 @@ export default function TradeWorkspaceIntelligence({
       </section>
 
       {opportunity.signals.length > 0 && (
-        <section>
+        <section className="ht-workspace-read-evidence">
           <div className="mb-2 flex items-center justify-between px-1">
-            <h3 className="text-[8px] font-black uppercase tracking-[0.17em] text-zinc-600">Evidence</h3>
-            <span className="text-[7px] font-bold uppercase tracking-[0.1em] text-zinc-700">Read only</span>
+            <h3 className="text-[9px] font-bold text-zinc-400">Evidence</h3>
+            <span className="text-[8px] font-semibold text-zinc-400">Read only</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {opportunity.signals.slice(0, 6).map((signal) => (
@@ -214,11 +214,11 @@ export default function TradeWorkspaceIntelligence({
         </section>
       )}
 
-      <section className="ht-workspace-panel overflow-hidden border-cyan-400/[0.11] bg-cyan-500/[0.025]">
+      <section className="ht-workspace-panel ht-workspace-read-card ht-workspace-read-card--prox overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-white/[0.055] px-4 py-3.5">
           <div>
-            <p className="text-[8px] font-black uppercase tracking-[0.18em] text-cyan-300">ProX Market Pulse</p>
-            <p className="mt-1 text-[8px] font-bold uppercase tracking-[0.1em] text-zinc-600">
+            <p className="ht-workspace-read-kicker text-[8px] font-black text-zinc-300">ProX Market Pulse</p>
+            <p className="mt-1 text-[8px] font-semibold text-zinc-400">
               {proxHasBoundedAuthority
                 ? "Bounded Canonical input · no execution"
                 : opportunity.proxMarketDataAligned === false
@@ -242,10 +242,10 @@ export default function TradeWorkspaceIntelligence({
               <div className="border-t border-white/[0.055] px-4 py-3">
                 <div className="flex flex-wrap gap-1.5">
                   {prox.supportFlags.slice(0, 4).map((flag) => (
-                    <span key={flag} className="rounded-full border border-cyan-400/15 bg-cyan-500/[0.055] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-cyan-300/80">{titleCase(flag)}</span>
+                    <span key={flag} className="rounded border border-white/[0.08] bg-white/[0.025] px-2 py-1 text-[7px] font-bold text-zinc-400">{titleCase(flag)}</span>
                   ))}
                   {prox.riskFlags.slice(0, 3).map((flag) => (
-                    <span key={flag} className="rounded-full border border-orange-400/15 bg-orange-500/[0.05] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-orange-300/75">{titleCase(flag)}</span>
+                    <span key={flag} className="rounded border border-red-400/15 bg-red-500/[0.04] px-2 py-1 text-[7px] font-bold text-red-300/80">{titleCase(flag)}</span>
                   ))}
                 </div>
               </div>
@@ -260,8 +260,8 @@ export default function TradeWorkspaceIntelligence({
         )}
       </section>
 
-      <div className="rounded-xl border border-white/[0.055] bg-white/[0.018] px-3 py-3">
-        <p className="text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">Authority stays separate</p>
+      <div className="ht-workspace-read-boundary rounded-xl border border-white/[0.055] bg-white/[0.018] px-3 py-3">
+        <p className="text-[8px] font-semibold text-zinc-400">Authority stays separate</p>
         <ul className="mt-1.5 space-y-1 text-[9px] font-semibold leading-relaxed text-zinc-400">
           <li>Canonical → {canonicalLane} owns this detection and ranking.</li>
           <li>ProX Market Pulse → {proxHasBoundedAuthority ? "bounded support/warn evidence shown above" : "observational evidence only in this frame"}.</li>
