@@ -73,6 +73,7 @@ export type MarketChartCanvasProps = {
   chartObjects?: readonly HtChartObject[];
   showVolume?: boolean;
   layerHost?: ChartLayerSlots;
+  preserveEngineOnLocalControls?: boolean;
   /** @deprecated Prefer layerHost. Kept as a compatibility alias. */
   layerSlots?: ChartLayerSlots;
   className?: string;
@@ -142,6 +143,13 @@ type PriceWriter = {
   setData: (slots: readonly MarketChartTimeSlot[]) => void;
   update: (slot: MarketChartTimeSlot) => void;
 };
+
+type PriceSeriesRegistry = {
+  graph: ISeriesApi<"Area">;
+  candles: ISeriesApi<"Candlestick">;
+};
+
+type PriceWriterRegistry = Record<MarketChartMode, PriceWriter>;
 
 type VolumeWriter = {
   setData: (slots: readonly MarketChartTimeSlot[]) => void;
@@ -394,19 +402,28 @@ export function MarketChartCanvas({
   showVolume = true,
   layerHost,
   layerSlots,
+  preserveEngineOnLocalControls = false,
   className = "",
 }: MarketChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const nativeLayerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const priceWriterRef = useRef<PriceWriter | null>(null);
+  const priceSeriesRef = useRef<PriceSeriesRegistry | null>(null);
+  const priceWritersRef = useRef<PriceWriterRegistry | null>(null);
   const volumeWriterRef = useRef<VolumeWriter | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const indicatorWritersRef = useRef(
     new Map<MarketChartIndicatorKey, IndicatorWriter>(),
+  );
+  const indicatorSeriesRef = useRef(
+    new Map<MarketChartIndicatorKey, ISeriesApi<"Line">>(),
   );
   const chartObjectWriterRef = useRef<ChartObjectWriter | null>(null);
   const previousFrameRef = useRef<MarketChartRenderFrame | null>(null);
   const savedViewportRef = useRef<SavedViewport | null>(null);
+  const renderedViewportKeyRef = useRef<string | null>(null);
+  const activeViewportKeyRef = useRef("");
+  const latestChartObjectsRef = useRef(chartObjects);
   const slotCountRef = useRef(0);
   const palette = MARKET_CHART_ACCENTS[accent];
   const resolvedTimeZone = timeZone || "America/New_York";
@@ -426,6 +443,29 @@ export function MarketChartCanvas({
     () => resolveMarketChartPriceResolution(bars),
     [bars],
   );
+  const chartEngineIdentity = preserveEngineOnLocalControls
+    ? "persistent-local-controls"
+    : [
+        compact,
+        mode,
+        palette.line,
+        priceResolution.minMove,
+        resolvedIntervalSeconds,
+        resolvedTimeZone,
+        resolvedViewportKey,
+        showEma20,
+        showEma9,
+        showVolume,
+        showVwap,
+      ].join(":");
+
+  useEffect(() => {
+    activeViewportKeyRef.current = resolvedViewportKey;
+  }, [resolvedViewportKey]);
+
+  useEffect(() => {
+    latestChartObjectsRef.current = chartObjects;
+  }, [chartObjects]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -491,54 +531,51 @@ export function MarketChartCanvas({
       },
     });
 
-    let priceWriter: PriceWriter;
-    let chartObjectWriter: ChartObjectWriter;
     const priceFormat = {
       type: "custom" as const,
       formatter: (price: number) => formatMarketPrice(price),
       minMove: priceResolution.minMove,
     };
-    if (mode === "candles") {
-      const priceSeries = chart.addSeries(CandlestickSeries, {
-        upColor: "#22c55e",
-        downColor: "#ef4444",
-        borderVisible: true,
-        borderUpColor: "#4ade80",
-        borderDownColor: "#f87171",
-        wickVisible: true,
-        wickUpColor: "#86efac",
-        wickDownColor: "#fca5a5",
-        priceLineVisible: true,
-        priceLineColor: `${palette.line}66`,
-        lastValueVisible: true,
-        priceFormat,
-      });
-      priceWriter = {
-        setData: (slots) => priceSeries.setData(slots.map(candlestickDatum)),
-        update: (slot) => priceSeries.update(candlestickDatum(slot)),
-      };
-      const overlay = nativeLayerRef.current;
-      if (!overlay) throw new Error("ChartLayerHost is unavailable.");
-      chartObjectWriter = createChartObjectWriter({ chart, series: priceSeries, overlay, intervalSeconds: resolvedIntervalSeconds, compact });
-    } else {
-      const priceSeries = chart.addSeries(AreaSeries, {
-        lineColor: palette.line,
-        topColor: `${palette.line}38`,
-        bottomColor: `${palette.line}00`,
-        lineWidth: 2,
-        priceLineVisible: true,
-        priceLineColor: `${palette.line}66`,
-        lastValueVisible: true,
-        priceFormat,
-      });
-      priceWriter = {
-        setData: (slots) => priceSeries.setData(slots.map(areaDatum)),
-        update: (slot) => priceSeries.update(areaDatum(slot)),
-      };
-      const overlay = nativeLayerRef.current;
-      if (!overlay) throw new Error("ChartLayerHost is unavailable.");
-      chartObjectWriter = createChartObjectWriter({ chart, series: priceSeries, overlay, intervalSeconds: resolvedIntervalSeconds, compact });
-    }
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderVisible: true,
+      borderUpColor: "#4ade80",
+      borderDownColor: "#f87171",
+      wickVisible: true,
+      wickUpColor: "#86efac",
+      wickDownColor: "#fca5a5",
+      priceLineVisible: true,
+      priceLineColor: `${palette.line}66`,
+      lastValueVisible: true,
+      priceFormat,
+      visible: mode === "candles",
+    });
+    const graphSeries = chart.addSeries(AreaSeries, {
+      lineColor: palette.line,
+      topColor: `${palette.line}38`,
+      bottomColor: `${palette.line}00`,
+      lineWidth: 2,
+      priceLineVisible: true,
+      priceLineColor: `${palette.line}66`,
+      lastValueVisible: true,
+      priceFormat,
+      visible: mode === "graph",
+    });
+    const priceSeries: PriceSeriesRegistry = {
+      graph: graphSeries,
+      candles: candleSeries,
+    };
+    const priceWriters: PriceWriterRegistry = {
+      graph: {
+        setData: (slots) => graphSeries.setData(slots.map(areaDatum)),
+        update: (slot) => graphSeries.update(areaDatum(slot)),
+      },
+      candles: {
+        setData: (slots) => candleSeries.setData(slots.map(candlestickDatum)),
+        update: (slot) => candleSeries.update(candlestickDatum(slot)),
+      },
+    };
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -556,13 +593,13 @@ export function MarketChartCanvas({
     };
 
     const indicatorWriters = new Map<MarketChartIndicatorKey, IndicatorWriter>();
+    const indicatorSeries = new Map<MarketChartIndicatorKey, ISeriesApi<"Line">>();
     const indicatorDefinitions = [
-      { key: "vwap", enabled: showVwap, color: "#22d3ee", width: 2 },
-      { key: "ema9", enabled: showEma9, color: "#fb923c", width: 1 },
-      { key: "ema20", enabled: showEma20, color: "#a78bfa", width: 1 },
+      { key: "vwap", visible: showVwap, color: "#22d3ee", width: 2 },
+      { key: "ema9", visible: showEma9, color: "#fb923c", width: 1 },
+      { key: "ema20", visible: showEma20, color: "#a78bfa", width: 1 },
     ] as const;
     for (const definition of indicatorDefinitions) {
-      if (!definition.enabled) continue;
       const series = chart.addSeries(LineSeries, {
         color: definition.color,
         lineWidth: definition.width,
@@ -570,7 +607,9 @@ export function MarketChartCanvas({
         lastValueVisible: false,
         crosshairMarkerVisible: false,
         priceFormat,
+        visible: definition.visible,
       });
+      indicatorSeries.set(definition.key, series);
       indicatorWriters.set(definition.key, {
         setData: (slots) => series.setData(slots.map(indicatorDatum)),
         update: (slot) => series.update(indicatorDatum(slot)),
@@ -578,16 +617,21 @@ export function MarketChartCanvas({
     }
 
     chartRef.current = chart;
-    priceWriterRef.current = priceWriter;
+    priceSeriesRef.current = priceSeries;
+    priceWritersRef.current = priceWriters;
     volumeWriterRef.current = volumeWriter;
+    volumeSeriesRef.current = volumeSeries;
     indicatorWritersRef.current = indicatorWriters;
-    chartObjectWriterRef.current = chartObjectWriter;
+    indicatorSeriesRef.current = indicatorSeries;
     previousFrameRef.current = null;
+    container.dataset.chartInitializationCount = String(
+      Number(container.dataset.chartInitializationCount || "0") + 1,
+    );
 
     const rememberViewport = (range: { from: number; to: number } | null) => {
       if (!range) return;
       savedViewportRef.current = {
-        key: resolvedViewportKey,
+        key: activeViewportKeyRef.current,
         pointCount: slotCountRef.current,
         range,
       };
@@ -616,19 +660,103 @@ export function MarketChartCanvas({
       resizeObserver?.disconnect();
       if (!resizeObserver) window.removeEventListener("resize", resizeChart);
       chartRef.current = null;
-      priceWriterRef.current = null;
+      priceSeriesRef.current = null;
+      priceWritersRef.current = null;
       volumeWriterRef.current = null;
+      volumeSeriesRef.current = null;
       indicatorWritersRef.current = new Map();
+      indicatorSeriesRef.current = new Map();
       previousFrameRef.current = null;
+      renderedViewportKeyRef.current = null;
       chartObjectWriterRef.current?.destroy();
       chartObjectWriterRef.current = null;
       chart.remove();
     };
-  }, [compact, mode, palette.line, priceResolution.minMove, resolvedIntervalSeconds, resolvedTimeZone, resolvedViewportKey, showEma20, showEma9, showVolume, showVwap]);
+    // The trade workspace opts into a persistent identity. Its display mode,
+    // timeframe, layers, sizing, precision, and provider data are updated below
+    // so local controls never destroy and recreate that chart engine. Existing
+    // callers retain their prior reconstruction behavior by default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartEngineIdentity]);
+
+  useEffect(() => {
+    const priceFormat = {
+      type: "custom" as const,
+      formatter: (price: number) => formatMarketPrice(price),
+      minMove: priceResolution.minMove,
+    };
+    priceSeriesRef.current?.graph.applyOptions({
+      lineColor: palette.line,
+      topColor: `${palette.line}38`,
+      bottomColor: `${palette.line}00`,
+      priceLineColor: `${palette.line}66`,
+      priceFormat,
+      visible: mode === "graph",
+    });
+    priceSeriesRef.current?.candles.applyOptions({
+      priceLineColor: `${palette.line}66`,
+      priceFormat,
+      visible: mode === "candles",
+    });
+    for (const series of indicatorSeriesRef.current.values()) {
+      series.applyOptions({ priceFormat });
+    }
+  }, [mode, palette.line, priceResolution.minMove]);
+
+  useEffect(() => {
+    const locale = navigator.language || "en-US";
+    const chartTimeFormatter = new Intl.DateTimeFormat(locale, {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: resolvedTimeZone,
+    });
+    chartRef.current?.applyOptions({
+      timeScale: {
+        tickMarkFormatter: (chartTime: Time, tickMarkType: TickMarkType) =>
+          formatChartTick(chartTime, tickMarkType, locale, resolvedTimeZone),
+      },
+      localization: {
+        locale,
+        priceFormatter: (price: number) => formatMarketPrice(price),
+        timeFormatter: (chartTime: Time) =>
+          chartTimeFormatter.format(chartTimeToDate(chartTime)),
+      },
+    });
+  }, [resolvedTimeZone]);
+
+  useEffect(() => {
+    indicatorSeriesRef.current.get("vwap")?.applyOptions({ visible: showVwap });
+    indicatorSeriesRef.current.get("ema9")?.applyOptions({ visible: showEma9 });
+    indicatorSeriesRef.current.get("ema20")?.applyOptions({ visible: showEma20 });
+    volumeSeriesRef.current?.applyOptions({ visible: showVolume });
+  }, [showEma20, showEma9, showVolume, showVwap]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const overlay = nativeLayerRef.current;
+    const series = priceSeriesRef.current?.[mode];
+    if (!chart || !overlay || !series) return;
+    chartObjectWriterRef.current?.destroy();
+    const writer = createChartObjectWriter({
+      chart,
+      series,
+      overlay,
+      intervalSeconds: resolvedIntervalSeconds,
+      compact,
+    });
+    chartObjectWriterRef.current = writer;
+    writer.setObjects(latestChartObjectsRef.current);
+    return () => {
+      if (chartObjectWriterRef.current === writer) {
+        writer.destroy();
+        chartObjectWriterRef.current = null;
+      }
+    };
+  }, [compact, mode, resolvedIntervalSeconds]);
 
   useEffect(() => {
     chartObjectWriterRef.current?.setObjects(chartObjects);
-  }, [chartObjects, mode, resolvedIntervalSeconds]);
+  }, [chartObjects]);
 
   useEffect(() => {
     chartRef.current?.applyOptions({ height });
@@ -636,29 +764,33 @@ export function MarketChartCanvas({
 
   useEffect(() => {
     const chart = chartRef.current;
-    const priceWriter = priceWriterRef.current;
+    const priceWriters = priceWritersRef.current;
     const volumeWriter = volumeWriterRef.current;
-    if (!chart || !priceWriter || !volumeWriter) return;
+    if (!chart || !priceWriters || !volumeWriter) return;
+
+    const viewportChanged = renderedViewportKeyRef.current !== resolvedViewportKey;
+    const previousFrame = viewportChanged ? null : previousFrameRef.current;
 
     if (frame.slots.length === 0) {
-      if (previousFrameRef.current?.slots.length) {
-        priceWriter.setData([]);
+      if (previousFrame?.slots.length) {
+        for (const writer of Object.values(priceWriters)) writer.setData([]);
         volumeWriter.setData([]);
         for (const writer of indicatorWritersRef.current.values()) {
           writer.setData([]);
         }
       }
       previousFrameRef.current = frame;
+      renderedViewportKeyRef.current = resolvedViewportKey;
       slotCountRef.current = 0;
       return;
     }
 
-    const previousFrame = previousFrameRef.current;
     const savedViewport = savedViewportRef.current?.key === resolvedViewportKey
       ? savedViewportRef.current
       : null;
-    const previousRange = chart.timeScale().getVisibleLogicalRange() ??
-      savedViewport?.range;
+    const previousRange = viewportChanged
+      ? savedViewport?.range ?? null
+      : chart.timeScale().getVisibleLogicalRange() ?? savedViewport?.range;
     const previousPointCount = previousFrame?.slots.length ??
       savedViewport?.pointCount ??
       0;
@@ -670,7 +802,7 @@ export function MarketChartCanvas({
     );
 
     if (incrementalStart === null) {
-      priceWriter.setData(frame.slots);
+      for (const writer of Object.values(priceWriters)) writer.setData(frame.slots);
       volumeWriter.setData(frame.slots);
       for (const [key, writer] of indicatorWritersRef.current) {
         writer.setData(frame.indicators[key]);
@@ -681,7 +813,7 @@ export function MarketChartCanvas({
         index < frame.slots.length;
         index += 1
       ) {
-        priceWriter.update(frame.slots[index]);
+        for (const writer of Object.values(priceWriters)) writer.update(frame.slots[index]);
         volumeWriter.update(frame.slots[index]);
         for (const [key, writer] of indicatorWritersRef.current) {
           const indicatorSlot = frame.indicators[key][index];
@@ -692,6 +824,7 @@ export function MarketChartCanvas({
 
     slotCountRef.current = frame.slots.length;
     previousFrameRef.current = frame;
+    renderedViewportKeyRef.current = resolvedViewportKey;
 
     if (previousRange && !wasFollowingLatest) {
       chart.timeScale().setVisibleLogicalRange(previousRange);
@@ -713,7 +846,7 @@ export function MarketChartCanvas({
       };
     }
     chartObjectWriterRef.current?.refresh();
-  }, [compact, frame, mode, palette.line, resolvedIntervalSeconds, resolvedTimeZone, resolvedViewportKey, showEma20, showEma9, showVwap]);
+  }, [compact, frame, resolvedIntervalSeconds, resolvedViewportKey]);
 
   return (
     <div
@@ -723,7 +856,7 @@ export function MarketChartCanvas({
       data-chart-interval-seconds={resolvedIntervalSeconds}
       style={{ height }}
     >
-      <div ref={containerRef} className="h-full w-full" />
+      <div ref={containerRef} className="h-full w-full" data-market-chart-container="true" />
       <ChartLayerHost slots={layerHost ?? layerSlots} nativeLayerRef={nativeLayerRef} />
     </div>
   );

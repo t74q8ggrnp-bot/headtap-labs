@@ -99,7 +99,7 @@ export default function TradeWorkspaceHeader({
 
   return (
     <header
-      className="border-b border-white/[0.07]"
+      className="ht-workspace-header"
       data-market-symbol={symbol}
       data-market-price={quote?.price ?? ""}
       data-market-as-of={quote?.asOf ?? ""}
@@ -109,7 +109,7 @@ export default function TradeWorkspaceHeader({
       data-market-live={feedLive ? "true" : "false"}
       data-instrument-availability={instrumentLoading ? "loading" : instrumentUnavailable ? "unavailable" : "available"}
     >
-      <div className="flex min-w-0 items-center gap-2 border-b border-white/[0.055] px-2.5 py-1.5 sm:gap-3 sm:px-3 sm:py-3 md:px-5 lg:py-2 2xl:py-3">
+      <div className="ht-workspace-header__toolbar flex min-w-0 items-center gap-2 px-2.5 py-1.5 sm:gap-3 sm:px-3 sm:py-3 md:px-5 lg:py-2 2xl:py-3">
         <Link
           href="/"
           aria-label="Back to HT Labs"
@@ -122,7 +122,8 @@ export default function TradeWorkspaceHeader({
         {!instrumentLoading && !instrumentUnavailable && (
           <Link
             href={`/paper?symbol=${encodeURIComponent(symbol)}`}
-            className="hidden shrink-0 items-center gap-2 rounded-xl border border-orange-400/20 bg-orange-500/10 px-3.5 py-2.5 text-[10px] font-black uppercase tracking-[0.11em] text-orange-300 transition hover:border-orange-400/35 hover:bg-orange-500/15 sm:flex"
+            className="ht-control hidden shrink-0 items-center gap-2 px-3.5 py-2.5 text-[10px] uppercase tracking-[0.11em] sm:flex"
+            data-variant="secondary"
           >
             Open in Paper
             <svg aria-hidden="true" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -170,7 +171,8 @@ export default function TradeWorkspaceHeader({
               disabled={watchlistBusy}
               onClick={onToggleWatchlist}
               aria-label={watched ? `Remove ${symbol} from watchlist` : `Add ${symbol} to watchlist`}
-              className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border px-2.5 text-[10px] font-black uppercase tracking-[0.11em] transition disabled:opacity-50 sm:min-h-10 sm:min-w-0 sm:px-3.5 ${watched ? "border-violet-400/30 bg-violet-500/10 text-violet-200" : "border-white/[0.09] bg-white/[0.035] text-zinc-400 hover:border-white/[0.15] hover:text-white"}`}
+              className={`ht-control inline-flex min-h-11 min-w-11 px-2.5 text-[10px] uppercase tracking-[0.11em] sm:min-h-10 sm:min-w-0 sm:px-3.5 ${watched ? "border-violet-400/30 bg-violet-500/10 text-violet-200" : ""}`}
+              data-variant={watched ? "quiet" : "secondary"}
             >
               <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill={watched ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8">
                 <path d="m12 3.2 2.7 5.5 6 .9-4.4 4.2 1 6-5.3-2.8-5.3 2.8 1-6-4.4-4.2 6-.9z" />
@@ -180,7 +182,8 @@ export default function TradeWorkspaceHeader({
             {!instrumentLoading && !instrumentUnavailable && (
               <Link
                 href={`/paper?symbol=${encodeURIComponent(symbol)}`}
-                className="inline-flex min-h-11 items-center rounded-xl border border-orange-400/20 bg-orange-500/10 px-3 text-[9px] font-black uppercase tracking-[0.11em] text-orange-300 sm:hidden"
+                className="ht-control inline-flex min-h-11 items-center px-3 text-[9px] uppercase tracking-[0.11em] sm:hidden"
+                data-variant="secondary"
               >
                 Paper
               </Link>
@@ -200,15 +203,15 @@ export default function TradeWorkspaceHeader({
         <div className="mt-4 hidden gap-px overflow-hidden rounded-xl border border-white/[0.065] bg-white/[0.065] sm:grid sm:grid-cols-3 lg:mt-2 2xl:mt-4">
           <div className="bg-[#080b0d] px-3 py-2.5 lg:flex lg:min-w-0 lg:items-center lg:gap-2 lg:py-1.5 2xl:block 2xl:py-2.5">
             <p className="shrink-0 text-[7px] font-black uppercase tracking-[0.16em] text-zinc-700">Provider trade time</p>
-            <p className="mt-1 font-mono text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">{formatProviderTime(quote?.asOf, true)}</p>
+              <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">{formatProviderTime(quote?.asOf, true)}</p>
           </div>
           <div className="bg-[#080b0d] px-3 py-2.5 lg:flex lg:min-w-0 lg:items-center lg:gap-2 lg:py-1.5 2xl:block 2xl:py-2.5">
             <p className="shrink-0 text-[7px] font-black uppercase tracking-[0.16em] text-zinc-700">Candle interval</p>
-            <p className="mt-1 font-mono text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">{formatProviderTime(authority?.candleIntervalTimestamp, true)}</p>
+              <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">{formatProviderTime(authority?.candleIntervalTimestamp, true)}</p>
           </div>
           <div className="bg-[#080b0d] px-3 py-2.5 lg:flex lg:min-w-0 lg:items-center lg:gap-2 lg:py-1.5 2xl:block 2xl:py-2.5">
             <p className="shrink-0 text-[7px] font-black uppercase tracking-[0.16em] text-zinc-700">Provider event / chart scope</p>
-            <p className="mt-1 font-mono text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">
+            <p className="ht-tabular-numbers mt-1 text-[9px] font-bold text-zinc-400 lg:mt-0 lg:min-w-0 lg:truncate 2xl:mt-1">
               {sessionLabel(authority?.providerSession)} · {authority?.sessionScope === "regular" ? "RTH only" : "Extended"} · {authority?.displayedSessionDate ?? "Date pending"}
             </p>
           </div>

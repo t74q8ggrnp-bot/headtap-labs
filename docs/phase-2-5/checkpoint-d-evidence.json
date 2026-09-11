@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "D",
+  "status": "ready_for_acceptance",
+  "scope": "/trade/[ticker] reference implementation only",
+  "headCommit": "1461f354309e990ac4caf28f4755fd265fe7591a",
+  "committed": false,
+  "deployed": false,
+  "qaRequestClarification": {
+    "checkpointBBaselineSameOriginRequests": 9,
+    "checkpointCEarlyCompletedSameOriginRequests": 8,
+    "totalDiagnosticChecks": 10,
+    "sameOriginDiagnosticRequests": 9,
+    "crossOriginDiagnostic": "Supabase authentication settings",
+    "lateCompletedRequest": "/api/system-health",
+    "observedCompletionMs": 5200,
+    "requestRemoved": false,
+    "diagnosticSkipped": false,
+    "conclusion": "The 8 count was an early Resource Timing read before system-health completed. QA still starts all ten checks concurrently and awaits all ten; all nine same-origin API diagnostics remain present."
+  },
+  "requestEvidence": {
+    "checkpointBBaseline": 3,
+    "initial5s": {
+      "apiRequestCount": 3,
+      "apiRequestsByPath": {
+        "/api/instruments/SPY": 2,
+        "/api/opportunity-ticker?ticker=SPY&mode=full": 1
+      }
+    },
+    "beforeLocalControlChanges": {
+      "elapsedMs": 14245,
+      "apiRequestCount": 3
+    },
+    "afterKeyboardTimeframeLayerAndModeChanges": {
+      "elapsedMs": 16245,
+      "apiRequestCount": 3
+    },
+    "positiveDelta": 0,
+    "providerRequestsAttemptedByUnavailableLocalChartBootstrap": 0
+  },
+  "responsiveEvidence": [
+    {
+      "viewport": "375x812",
+      "horizontalOverflowPx": 0,
+      "applicationRoute": "workspace",
+      "activeNavigation": "Trade",
+      "navigationBounds": { "left": 0, "right": 375, "top": 751, "bottom": 812 }
+    },
+    {
+      "viewport": "390x844",
+      "horizontalOverflowPx": 0,
+      "applicationRoute": "workspace",
+      "activeNavigation": "Trade",
+      "navigationBounds": { "left": 0, "right": 390, "top": 783, "bottom": 844 }
+    },
+    {
+      "viewport": "430x932",
+      "horizontalOverflowPx": 0,
+      "applicationRoute": "workspace",
+      "activeNavigation": "Trade",
+      "navigationBounds": { "left": 0, "right": 430, "top": 871, "bottom": 932 }
+    },
+    {
+      "viewport": "1280x800",
+      "horizontalOverflowPx": 0,
+      "applicationRoute": "workspace"
+    },
+    {
+      "viewport": "1720x1000",
+      "horizontalOverflowPx": 0,
+      "applicationRoute": "workspace"
+    }
+  ],
+  "visualCaptures": {
+    "manifest": ".artifacts/phase25-checkpoint-d/manifest.json",
+    "captures": [
+      { "viewport": "375x812", "sha256": "638e70ef6be81c0fd846f1a475eefca7515daa526a34d10b7788a20bd20bf6d4" },
+      { "viewport": "390x844", "sha256": "2931e05fd82118aca4437e917974ff3112fc4cc1cbe95b954dad3f47eac7efcd" },
+      { "viewport": "430x932", "sha256": "3a0539c3fb874c4ed279d0b2bcd99af7d4e556ea6f0798f1f770e82b139498c1" },
+      { "viewport": "1280x800", "sha256": "36ba50501795cfa5e2c411da008f62c2b8294dd3251a9a2827971c509fe68971" },
+      { "viewport": "1720x1000", "sha256": "a8e948cc85257c91f0fcffe8921808ffa26bbf9ba934b8fbcff3a1a328d3832e" }
+    ]
+  },
+  "chartRuntimeEvidence": {
+    "fixture": "temporary unshipped deterministic browser fixture using the production TradeWorkspaceChart component",
+    "temporaryFixtureRemoved": true,
+    "developmentStrictModeInitializationCount": 2,
+    "initializationCountAfter1m5m15mLayerAndModeChanges": 2,
+    "canvasCountBefore": 7,
+    "canvasCountAfter": 7,
+    "layerHostCount": 1,
+    "semanticZoneCount": 1,
+    "desktopChartRect": { "left": 17, "top": 165.8515625, "width": 1246, "height": 500 },
+    "desktopChartRectUnchangedAcrossIntervals": true,
+    "intervalsVerifiedSeconds": [60, 300, 900],
+    "objectsInsideChartAtAllIntervals": true,
+    "mobile390ChartRect": { "left": 17, "top": 181, "width": 356, "height": 552 },
+    "mobile390HorizontalOverflowPx": 0,
+    "mobile390ObjectsInsideChart": true,
+    "chartLayerHostPreserved": true,
+    "coordinateProjectionContractPreserved": true
+  },
+  "keyboardAndSheetEvidence": {
+    "workspaceArrowRightMovedChartToHtRead": true,
+    "timeframeEnterActivated": true,
+    "layerSpaceActivated": true,
+    "agentPlanDetailsOpenedByEnter": true,
+    "agentSheetNativeDialogCount": 1,
+    "agentSheetViewport": "390x844",
+    "agentSheetBounds": { "left": 0, "right": 352, "top": 191.2109375, "bottom": 844 },
+    "agentSheetInsideViewport": true,
+    "agentSheetClosedByEscape": true,
+    "agentSheetFocusReturnedToPlanDetails": true,
+    "paperReviewDeepLinkPreserved": "/paper?symbol=SPY&source=ht_agent&agentPlanVersion=00000000-0000-4000-8000-000000000001"
+  },
+  "verification": {
+    "focusedTests": { "passed": 16, "failed": 0 },
+    "fullTests": { "passed": 605, "failed": 0 },
+    "typescript": "passed",
+    "eslint": "passed",
+    "diffCheck": "passed",
+    "productionWebpackBuild": "passed"
+  },
+  "environmentNotes": [
+    "The local production route could not obtain a provider-backed chart frame because server-side Supabase service credentials and shared display-frame coordination are not configured on this workstation.",
+    "The failed bootstrap reported providerRequestsAttempted: 0, so no Massive/provider request was made by that unavailable local path.",
+    "Chart engine, interval, layer, object-alignment, and Agent X sheet runtime checks were completed with temporary deterministic fixtures that were removed before final verification."
+  ],
+  "filesChangedForCheckpointD": [
+    "app/components/market/MarketChartCanvas.tsx",
+    "app/components/trade/TickerSearchCombobox.tsx",
+    "app/components/trade/TradeWorkspace.tsx",
+    "app/components/trade/TradeWorkspaceAgentPlan.tsx",
+    "app/components/trade/TradeWorkspaceChart.tsx",
+    "app/components/trade/TradeWorkspaceHeader.tsx",
+    "app/components/trade/TradeWorkspaceIntelligence.tsx",
+    "app/components/trade/TradeWorkspaceLists.tsx",
+    "app/components/ui/ApplicationPrimitives.tsx",
+    "app/globals.css",
+    "docs/phase-2-5/checkpoint-c-evidence.json",
+    "docs/phase-2-5/checkpoint-d-evidence.json",
+    "lib/phase25-checkpoint-d.test.ts"
+  ],
+  "remainingIssues": [],
+  "checkpointEStarted": false
+}

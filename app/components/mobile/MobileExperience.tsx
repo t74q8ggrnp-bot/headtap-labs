@@ -98,7 +98,7 @@ export default function MobileExperience({
     : null;
 
   return (
-    <div className="ht-mobile-page-shell md:hidden fixed inset-0 bg-[#050505] text-white flex flex-col z-[200]">
+    <div className="ht-mobile-page-shell ht-discovery-home-mobile fixed inset-0 z-[200] flex flex-col bg-[#050505] text-white md:hidden" aria-label="Mobile Home">
 
         {/* Mobile Header */}
         <div className="flex-shrink-0 border-b border-white/10 bg-black/80 backdrop-blur-xl px-4 pt-safe">
@@ -110,6 +110,7 @@ export default function MobileExperience({
                 <input
                   type="text"
                   placeholder="Search ticker..."
+                  aria-label="Search ticker"
                   value={ticker}
                   onChange={(e) => setTicker(e.target.value.toUpperCase())}
                   onKeyDown={(e) => { if (e.key === "Enter") { handleTickerSearch(); setMobileTab("home"); } }}
@@ -148,7 +149,7 @@ export default function MobileExperience({
           {mobileTab === "home" && (() => {
             // Show mobile skeleton on first load — same gate as desktop
             if (!lastUpdated && apiOpportunitiesLoading) return (
-              <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2 space-y-4 animate-pulse">
+              <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2 pt-4 animate-pulse" role="status" aria-live="polite" aria-label="Loading Home opportunities">
                 <div className="rounded-2xl border border-white/8 bg-black overflow-hidden">
                   <div className="px-5 pt-4 pb-0 flex items-center gap-2">
                     <div className="h-1.5 w-1.5 rounded-full bg-violet-400/40" />
@@ -190,8 +191,9 @@ export default function MobileExperience({
             const mobileCards = canonicalMobileOpportunities.slice(0, 8);
             const current = mobileCards[mobileCardIndex];
             return (
-              <div
-                className="h-full flex flex-col overflow-y-auto"
+              <section
+                className="flex h-full flex-col overflow-y-auto"
+                aria-label="Home opportunity intelligence"
                 onTouchStart={(e) => setMobileTouchStart(e.touches[0].clientX)}
                 onTouchEnd={(e) => {
                   if (mobileTouchStart === null) return;
@@ -253,7 +255,7 @@ export default function MobileExperience({
                     onWatch={toggleWatchlist}
                   />
                 )}
-              </div>
+              </section>
             );
           })()}
 
@@ -270,8 +272,8 @@ export default function MobileExperience({
 
           {/* SCANNER TAB */}
           {mobileTab === "scanner" && (
-            <div className="h-full overflow-y-auto px-4 pt-12 pb-24">
-              <p className="text-[11px] font-black uppercase tracking-[0.24em] text-orange-300 mb-2">Live Scanner</p>
+            <section className="h-full overflow-y-auto px-4 pb-24 pt-12" aria-labelledby="mobile-scanner-title">
+              <h2 id="mobile-scanner-title" className="ht-section-label mb-2">Live scanner</h2>
               <p className="text-xs font-semibold text-zinc-500 mb-4">Every name HT is watching right now</p>
               <div className="mb-4">
                 <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/50 px-4 py-3">
@@ -279,6 +281,7 @@ export default function MobileExperience({
                   <input
                     type="text"
                     placeholder="Search ticker..."
+                    aria-label="Search ticker"
                     value={ticker}
                     onChange={(e) => setTicker(e.target.value.toUpperCase())}
                     onKeyDown={(e) => { if (e.key === "Enter") handleTickerSearch(); }}
@@ -292,15 +295,12 @@ export default function MobileExperience({
                   <p className="mt-1 text-[10px] font-semibold text-zinc-600">The market&apos;s quiet, or nothing clears the bar at the moment.</p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <ol className="ht-ranked-list" aria-label="Mobile scanner results">
                   {mobileScannerReads.map((o) => {
                     const backendState = o.stage || o.freshnessLabel;
                     return (
-                      <button
-                        key={o.ticker}
-                        onClick={() => openReadTicker(o.ticker)}
-                        className="w-full flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-left"
-                      >
+                      <li key={o.ticker}>
+                        <button onClick={() => openReadTicker(o.ticker)} className="ht-ranked-list__row">
                         <div className="flex items-center gap-3">
                           <span className="text-xl">🔎</span>
                           <div>
@@ -314,12 +314,13 @@ export default function MobileExperience({
                           </p>
                           <p className="text-[10px] font-black text-orange-300">{o.opportunityScore}</p>
                         </div>
-                      </button>
+                        </button>
+                      </li>
                     );
                   })}
-                </div>
+                </ol>
               )}
-            </div>
+            </section>
           )}
 
           {/* WATCHLIST TAB — canonical score when evaluated, honest unranked state otherwise */}
@@ -371,6 +372,7 @@ export default function MobileExperience({
                   <input
                     type="email"
                     placeholder="Email"
+                    aria-label="Email address"
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-black/50 px-4 py-4 text-sm outline-none placeholder:text-zinc-600 focus:border-orange-500"
@@ -378,6 +380,7 @@ export default function MobileExperience({
                   <input
                     type="password"
                     placeholder="Password"
+                    aria-label="Password"
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") handleAuth("signin"); }}

@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { AgentXVisualPlanRead } from "@/lib/ht-agent/visual-plan-api";
 import { visualPlanPaperUrl } from "@/lib/ht-agent/visual-plan-api";
 import { formatMarketPrice } from "@/lib/market-price-format";
+import { AccessibleDialogSheet, Control } from "@/app/components/ui/ApplicationPrimitives";
 
 const lifecycleLabel = {
   watching: "Watching",
@@ -26,7 +27,7 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
   if (!read?.visible) return null;
   if (!read.plan) {
     return (
-      <section className="mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.018] px-4 py-3" aria-label="Agent X visual paper plan">
+      <section className="ht-workspace-panel mt-3 px-4 py-3" aria-label="Agent X visual paper plan">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-[9px] font-black uppercase tracking-[0.16em] text-violet-300">Agent X · Paper only</p>
@@ -52,9 +53,9 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
           ["Target 1 R/R", `${definition.riskReward.targetOne.toFixed(2)}R`],
           ["Target 2 R/R", definition.riskReward.targetTwo === null ? "Unavailable" : `${definition.riskReward.targetTwo.toFixed(2)}R`],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-xl border border-white/[0.07] bg-black/25 px-3 py-2.5">
+          <div key={label} className="ht-workspace-stat rounded-xl px-3 py-2.5">
             <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-600">{label}</p>
-            <p className="mt-1 font-mono text-[10px] font-black text-zinc-200">{value}</p>
+            <p className="ht-tabular-numbers mt-1 text-[10px] font-black text-zinc-200">{value}</p>
           </div>
         ))}
       </div>
@@ -65,9 +66,9 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
           ["Est. notional", money.format(definition.positionRisk.estimatedNotional)],
           ["Maximum risk", money.format(definition.positionRisk.maximumRisk)],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
+          <div key={label} className="ht-workspace-stat rounded-xl px-3 py-2.5">
             <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-600">{label}</p>
-            <p className="mt-1 font-mono text-[9px] font-black text-zinc-300">{value}</p>
+            <p className="ht-tabular-numbers mt-1 text-[9px] font-black text-zinc-300">{value}</p>
           </div>
         ))}
       </div>
@@ -80,14 +81,14 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
     </div>
   );
   return (
-    <section className="mt-3 overflow-hidden rounded-2xl border border-violet-400/15 bg-violet-500/[0.035]" aria-label="Agent X visual paper plan">
+    <section className="ht-workspace-panel mt-3 overflow-hidden border-violet-400/15 bg-violet-500/[0.035]" aria-label="Agent X visual paper plan">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div>
           <p className="text-[9px] font-black uppercase tracking-[0.16em] text-violet-300">Agent X · Visual paper plan</p>
           <p className="mt-1 text-sm font-black text-white">{lifecycleLabel[lifecycleState]} · Long above {formatMarketPrice(definition.triggerPrice)}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setDetailsOpen(true)} className="min-h-11 rounded-xl border border-white/10 px-4 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 md:hidden">Plan details</button>
+          <Control type="button" variant="secondary" onClick={() => setDetailsOpen(true)} className="min-h-11 px-4 text-[9px] uppercase tracking-[0.1em] md:hidden">Plan details</Control>
           {read.plan.paperReviewEligible ? (
             <Link href={visualPlanPaperUrl({ symbol: definition.symbol, planVersionId: read.plan.planVersionId })} className="inline-flex min-h-11 items-center rounded-xl bg-orange-500 px-4 text-[9px] font-black uppercase tracking-[0.1em] text-black">Review in Paper</Link>
           ) : (
@@ -96,15 +97,17 @@ export default function TradeWorkspaceAgentPlan({ read }: { read: AgentXVisualPl
         </div>
       </div>
       <div className="hidden border-t border-white/[0.06] px-4 py-4 md:block">{detailBody}</div>
-      {detailsOpen && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70 md:hidden" role="dialog" aria-modal="true" aria-label="Agent X plan details" onClick={() => setDetailsOpen(false)}>
-          <div className="max-h-[78dvh] w-full overflow-y-auto rounded-t-[24px] border border-white/10 bg-[#0a0d10] px-4 pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] pt-3" onClick={(event) => event.stopPropagation()}>
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-zinc-700" />
-            {detailBody}
-            <button type="button" onClick={() => setDetailsOpen(false)} className="mt-5 min-h-12 w-full rounded-xl border border-white/10 text-[10px] font-black uppercase tracking-[0.12em] text-white">Close</button>
-          </div>
-        </div>
-      )}
+      <AccessibleDialogSheet
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        title="Agent X plan details"
+        description={`${definition.symbol} · ${lifecycleLabel[lifecycleState]} · Paper only`}
+        presentation="sheet"
+        className="ht-agent-plan-sheet md:hidden"
+        footer={<Control variant="secondary" size="large" onClick={() => setDetailsOpen(false)} className="w-full">Close details</Control>}
+      >
+        {detailBody}
+      </AccessibleDialogSheet>
     </section>
   );
 }

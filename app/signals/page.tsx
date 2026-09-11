@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
-import Link from "next/link";
+import { PanelHeader, StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 type Signal = {
   id: string;
@@ -71,42 +70,21 @@ export default function SignalsPage() {
   const withMoves = signals.filter(s => s.pct_move !== null).length;
 
   return (
-    <main className="min-h-screen bg-[#050505] text-white">
-
-      {/* Nav */}
-      <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-black/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1400px] items-center gap-6 px-6 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-8 w-auto" priority />
-          </Link>
-          <nav className="hidden flex-1 items-center gap-6 text-sm font-semibold text-zinc-500 md:flex">
-            <Link className="transition hover:text-orange-300" href="/">Top Convictions</Link>
-            <Link className="transition hover:text-orange-300" href="/scanner">Scanner</Link>
-            <Link className="text-orange-400" href="/signals">Signals</Link>
-            <Link className="transition hover:text-orange-300" href="/trade">Workspace</Link>
-            <Link className="transition hover:text-orange-300" href="/news-feed">News</Link>
-          </nav>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-[1400px] px-6 py-8">
+    <main className="ht-discovery-route ht-signals-route min-h-screen bg-[#050505] text-white">
+      <div className="mx-auto max-w-[1400px] px-5 py-8 sm:px-6">
 
         {/* Page header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <span className="text-[10px] font-black uppercase tracking-[0.28em] text-zinc-600">HT Labs</span>
-            <span className="text-zinc-800">/</span>
-            <span className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-400">Signal History</span>
-          </div>
-          <h1 className="text-3xl font-black text-white mb-1">Recent Signals</h1>
-          <p className="text-sm font-semibold text-zinc-500">
-            Every pick HT Labs has made. Verify the calls yourself.
-          </p>
-        </div>
+        <PanelHeader
+          headingLevel={1}
+          eyebrow="Signal history"
+          title="Recent signals"
+          description="Backend-recorded selections with entry price, current price, measured move, and the opportunity window available at selection time."
+          className="mb-7"
+        />
 
         {/* Stats row */}
         {!loading && signals.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+          <dl className="ht-route-metrics mb-8 grid grid-cols-2 md:grid-cols-4" aria-label="Signal history summary">
             {[
               { label: "Total Signals", value: signals.length.toString(), color: "text-white" },
               { label: "Dual Engine", value: dualCount.toString(), color: "text-amber-400" },
@@ -117,16 +95,16 @@ export default function SignalsPage() {
                 color: winners > withMoves / 2 ? "text-green-400" : "text-red-400"
               },
             ].map(({ label, value, color }) => (
-              <div key={label} className="rounded-xl border border-white/6 bg-black/40 px-4 py-3">
-                <p className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-600 mb-1">{label}</p>
-                <p className={`font-mono text-2xl font-black ${color}`}>{value}</p>
+              <div key={label} className="ht-route-metric">
+                <dt>{label}</dt>
+                <dd className={color}>{value}</dd>
               </div>
             ))}
-          </div>
+          </dl>
         )}
 
         {/* Filter tabs */}
-        <div className="flex items-center gap-2 mb-6">
+        <div className="mb-6 flex flex-wrap items-center gap-2" role="group" aria-label="Filter signal history">
           {[
             { key: "all", label: "All Signals" },
             { key: "spot_momentum", label: "Spot Momentum" },
@@ -135,14 +113,11 @@ export default function SignalsPage() {
             <button
               key={key}
               onClick={() => setFilter(key as typeof filter)}
-              className={`rounded-full border px-4 py-1.5 text-xs font-black transition ${
+              aria-pressed={filter === key}
+              className={`ht-filter-control ${
                 filter === key
-                  ? key === "spot_momentum"
-                    ? "border-violet-400/40 bg-violet-500/10 text-violet-300"
-                    : key === "before_the_crowd"
-                    ? "border-orange-400/40 bg-orange-500/10 text-orange-300"
-                    : "border-white/20 bg-white/[0.06] text-white"
-                  : "border-white/8 text-zinc-600 hover:text-zinc-400"
+                  ? "ht-filter-control--active"
+                  : ""
               }`}
             >
               {label}
@@ -152,62 +127,50 @@ export default function SignalsPage() {
 
         {/* Loading */}
         {loading && (
-          <div className="space-y-3">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="rounded-xl border border-white/6 bg-black/40 h-20 animate-pulse" />
-            ))}
-          </div>
+          <StatusState busy title="Loading signal history" description="Retrieving recorded selections and measured outcomes." />
         )}
 
         {/* Error */}
         {error && (
-          <div className="rounded-xl border border-red-400/20 bg-red-500/[0.06] px-5 py-4">
-            <p className="text-sm font-semibold text-red-400">{error}</p>
-          </div>
+          <StatusState tone="negative" title="Signal history unavailable" description={error} />
         )}
 
         {/* Empty state */}
         {!loading && !error && filtered.length === 0 && (
-          <div className="rounded-xl border border-white/6 bg-black/40 px-6 py-12 text-center">
-            <p className="text-lg font-black text-white mb-2">No signals yet</p>
-            <p className="text-sm font-semibold text-zinc-600">
-              Signals appear here automatically as HT Labs selects top picks.
-              {signals.length === 0
-                ? " Check back after the market opens."
-                : " Try a different filter."}
-            </p>
-          </div>
+          <StatusState
+            title="No signals yet"
+            description={`Signals appear here automatically as HT Labs records selections.${signals.length === 0 ? " Check back after the market opens." : " Try a different filter."}`}
+          />
         )}
 
         {/* Signal table */}
         {!loading && !error && filtered.length > 0 && (
-          <div className="space-y-2">
-            {/* Table header */}
-            <div className="grid grid-cols-[1fr_1.2fr_0.8fr_0.8fr_1fr_1fr] gap-4 px-4 py-2 text-[8px] font-black uppercase tracking-[0.16em] text-zinc-700">
-              <span>Ticker / Engine</span>
-              <span>When</span>
-              <span>Entry</span>
-              <span>Current</span>
-              <span>Move</span>
-              <span>Window</span>
-            </div>
-
+          <div className="ht-responsive-table-wrap">
+            <table className="ht-intel-table">
+              <caption className="sr-only">Recent HT Labs signals and measured performance</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Ticker / engine</th>
+                  <th scope="col">When</th>
+                  <th scope="col">Entry</th>
+                  <th scope="col">Current</th>
+                  <th scope="col">Move</th>
+                  <th scope="col">Window</th>
+                </tr>
+              </thead>
+              <tbody>
             {filtered.map((signal) => {
               const isSM = signal.engine === "spot_momentum";
               const isPositive = signal.pct_move !== null && signal.pct_move >= 0;
               const hasWindow = signal.upside_min != null && signal.risk_zone != null;
 
               return (
-                <div
+                <tr
                   key={signal.id}
-                  className={`grid grid-cols-[1fr_1.2fr_0.8fr_0.8fr_1fr_1fr] gap-4 items-center px-4 py-4 rounded-xl border transition ${
-                    isSM
-                      ? "border-violet-400/10 bg-violet-500/[0.02] hover:border-violet-400/20"
-                      : "border-orange-400/10 bg-orange-500/[0.02] hover:border-orange-400/20"
-                  }`}
+                  data-engine={isSM ? "spot-momentum" : "before-crowd"}
                 >
                   {/* Ticker + engine */}
-                  <div className="flex items-center gap-3">
+                  <td data-label="Ticker / engine">
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-base font-black text-white">{signal.ticker}</span>
@@ -219,33 +182,33 @@ export default function SignalsPage() {
                         {isSM ? "Spot Momentum" : "Before The Crowd"}
                       </span>
                     </div>
-                  </div>
+                  </td>
 
                   {/* When */}
-                  <div>
+                  <td data-label="When">
                     <p className="text-xs font-semibold text-zinc-400">{formatDate(signal.scanned_at)}</p>
                     {signal.state && (
                       <p className="text-[9px] font-semibold text-zinc-600 mt-0.5">{signal.state}</p>
                     )}
-                  </div>
+                  </td>
 
                   {/* Entry price */}
-                  <div>
+                  <td data-label="Entry">
                     <p className="font-mono text-sm font-black text-white">{formatPrice(signal.entry_price)}</p>
                     {signal.ht_score > 0 && (
                       <p className="text-[9px] font-semibold text-zinc-600 mt-0.5">HT {signal.ht_score}</p>
                     )}
-                  </div>
+                  </td>
 
                   {/* Current price */}
-                  <div>
+                  <td data-label="Current">
                     <p className="font-mono text-sm font-black text-zinc-400">
                       {formatPrice(signal.current_price)}
                     </p>
-                  </div>
+                  </td>
 
                   {/* % Move */}
-                  <div>
+                  <td data-label="Move">
                     {signal.pct_move !== null ? (
                       <div className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 ${
                         isPositive
@@ -259,10 +222,10 @@ export default function SignalsPage() {
                     ) : (
                       <span className="text-xs font-semibold text-zinc-700">Pending</span>
                     )}
-                  </div>
+                  </td>
 
                   {/* Opportunity Window */}
-                  <div>
+                  <td data-label="Window">
                     {hasWindow ? (
                       <div>
                         <p className="text-[9px] font-black text-green-400">
@@ -276,24 +239,26 @@ export default function SignalsPage() {
                     ) : (
                       <span className="text-[9px] font-semibold text-zinc-700">—</span>
                     )}
-                  </div>
-                </div>
+                  </td>
+                </tr>
               );
             })}
+              </tbody>
+            </table>
           </div>
         )}
 
         {/* Reasoning panel - shows on hover/expanded, for now just show inline if available */}
         {!loading && filtered.some(s => s.reasoning) && (
-          <div className="mt-8 rounded-xl border border-white/6 bg-black/40 px-5 py-4">
-            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600 mb-1">About Signal History</p>
+          <aside className="ht-route-note mt-8" aria-labelledby="signal-history-note">
+            <p id="signal-history-note" className="ht-route-note__title">About signal history</p>
             <p className="text-xs font-semibold text-zinc-500 leading-5">
               These are the actual picks made by the HT Labs engine in real time. Entry price is recorded at the moment of selection. Current price updates live. Percentage move reflects performance since selection — not a forward-looking target.
             </p>
             <p className="text-[9px] font-semibold text-zinc-700 mt-2">
               Signals are for research only, not financial advice.
             </p>
-          </div>
+          </aside>
         )}
       </div>
     </main>

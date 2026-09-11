@@ -5,11 +5,13 @@ import { MobileAppNavigationProvider } from "./components/MobileAppNavigationCon
 import NativeAppBridge from "./components/NativeAppBridge";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import Phase25BaselineProbe from "./components/dev/Phase25BaselineProbe";
+import ResponsiveApplicationShell from "./components/ResponsiveApplicationShell";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "HT Labs",
-  description: "AI-powered tools and landing pages by HT Labs.",
+  description: "Market research, visual trade planning, and paper-trading tools from HT Labs.",
   applicationName: "HT Labs",
   appleWebApp: {
     capable: true,
@@ -42,8 +44,11 @@ export default function RootLayout({
         <NativeAppBridge />
         <Analytics />
         <SpeedInsights />
+        {process.env.NODE_ENV === "development" ? <Phase25BaselineProbe /> : null}
         <MobileAppNavigationProvider>
-          <div className="ht-app-content">{children}</div>
+          <ResponsiveApplicationShell>
+            <div className="ht-app-content">{children}</div>
+          </ResponsiveApplicationShell>
           <Suspense fallback={null}>
             <MobileAppNavigation />
           </Suspense>

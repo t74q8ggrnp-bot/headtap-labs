@@ -42,7 +42,7 @@ export default function MobileCardDetail({
 
   return (
     <>
-      <div className="relative flex-shrink-0 px-4 pb-3 pt-4">
+      <section className="relative flex-shrink-0 px-4 pb-3 pt-4" data-home-priority="1-ticker-price" aria-labelledby={`mobile-card-${current.ticker}`}>
         <div className="mb-4 flex items-center justify-between">
           <div className="flex flex-col gap-1">
             <div className="flex gap-1.5">
@@ -74,14 +74,10 @@ export default function MobileCardDetail({
         <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-orange-400">
           {currentIndex === 0 ? "HT Top Signal" : `#${currentIndex + 1} Active Read`}
         </p>
-        <h1 className="font-mono text-[5rem] font-black uppercase leading-[0.82] tracking-[-0.12em] text-white">
+        <h2 id={`mobile-card-${current.ticker}`} className="font-mono text-[4rem] font-black uppercase leading-[0.9] tracking-[-0.1em] text-white">
           {current.ticker}
-        </h1>
-        <div className="mt-3 inline-flex items-center rounded-2xl border border-white/15 bg-white/[0.06] px-4 py-2">
-          <p className="text-base font-black text-white">{current.stage}</p>
-        </div>
-        <p className="mt-2 text-sm font-semibold leading-5 text-zinc-400">{current.whyItMatters}</p>
-        <div className="mt-4 flex items-center gap-3">
+        </h2>
+        <div className="mt-3 flex items-center gap-3">
           <span className="font-mono text-2xl font-black text-white">{formatMarketPrice(price)}</span>
           <span className={`font-mono text-xl font-black ${change >= 0 ? "text-green-400" : "text-red-400"}`}>
             {change >= 0 ? "+" : ""}{change.toFixed(2)}%
@@ -92,9 +88,10 @@ export default function MobileCardDetail({
             </span>
           )}
         </div>
-      </div>
+        <p className="mt-2 text-sm font-bold text-zinc-400">{current.stage}</p>
+      </section>
 
-      <div className="flex-shrink-0 px-4 pb-3">
+      <div className="flex-shrink-0 px-4 pb-3" data-home-priority="2-chart">
         <HeroPriceChart
           asset="stock"
           symbol={current.ticker}
@@ -103,7 +100,7 @@ export default function MobileCardDetail({
         />
       </div>
 
-      <div className="flex-shrink-0 px-4 pb-3">
+      <div className="flex-shrink-0 px-4 pb-3" data-home-priority="3-score-signal">
         <div className="rounded-2xl border border-orange-400/20 bg-orange-500/[0.04] p-4">
           <div className="mb-3 flex items-end justify-between">
             <div>
@@ -119,40 +116,43 @@ export default function MobileCardDetail({
         </div>
       </div>
 
-      {current.signals.length > 0 && (
-        <div className="flex-shrink-0 px-4 pb-3">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-            <p className="mb-2.5 text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">Why HT Likes This</p>
-            <div className="space-y-1.5">
-              {current.signals.slice(0, 4).map((signal, index) => (
-                <div key={`${signal}-${index}`} className="flex items-center gap-2.5">
-                  <span className="text-sm font-black text-green-400">✓</span>
-                  <p className="text-sm font-semibold text-zinc-200">{signal}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {framework && (
-        <div className="flex-shrink-0 px-4 pb-3">
+        <div className="flex-shrink-0 px-4 pb-3" data-home-priority="4-levels-risk">
           <OpportunityWindow framework={framework} />
         </div>
       )}
 
       {current.explosionAssessment?.state === "price_discovery" && (
-        <div className="flex-shrink-0 px-4 pb-3">
+        <div className="flex-shrink-0 px-4 pb-3" data-home-priority="4-levels-risk">
           <PriceDiscoveryWindow assessment={current.explosionAssessment} />
         </div>
       )}
 
-      {current.proxIntelligence &&
-        current.proxIntelligence.status !== "unavailable" && (
-          <div className="flex-shrink-0 px-4 pb-3">
-            <ProxPulse packet={current.proxIntelligence} />
+      <section className="flex-shrink-0 px-4 pb-3" data-home-priority="5-extended-interpretation" aria-labelledby={`mobile-card-interpretation-${current.ticker}`}>
+        <div className="ht-route-note">
+          <h3 id={`mobile-card-interpretation-${current.ticker}`} className="ht-route-note__title">Interpretation</h3>
+          <p className="mt-1 text-sm font-semibold leading-6 text-zinc-400">{current.whyItMatters}</p>
+        </div>
+      </section>
+
+      {current.signals.length > 0 && (
+        <div className="flex-shrink-0 px-4 pb-3" data-home-priority="5-extended-interpretation">
+          <div className="ht-route-note">
+            <p className="ht-route-note__title">Supporting evidence</p>
+            <ul className="mt-2 space-y-2">
+              {current.signals.slice(0, 4).map((signal, index) => (
+                <li key={`${signal}-${index}`} className="text-sm font-semibold text-zinc-300">{signal}</li>
+              ))}
+            </ul>
           </div>
-        )}
+        </div>
+      )}
+
+      {current.proxIntelligence && current.proxIntelligence.status !== "unavailable" && (
+        <div className="flex-shrink-0 px-4 pb-3" data-home-priority="5-extended-interpretation">
+          <ProxPulse packet={current.proxIntelligence} />
+        </div>
+      )}
 
       <div className="flex-shrink-0 px-4 pb-4">
         <button onClick={() => onOpen(current)} className="w-full rounded-2xl bg-orange-500 py-4 text-sm font-black uppercase tracking-[0.08em] text-black shadow-[0_0_20px_rgba(249,115,22,0.28)]">

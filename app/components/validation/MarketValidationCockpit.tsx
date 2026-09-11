@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 type ValidationRow = {
   ticker: string;
@@ -97,13 +98,17 @@ export default function MarketValidationCockpit() {
       const validation = (await validationResponse.json()) as ValidationPayload;
       const nextHealth = (await healthResponse.json()) as HealthPayload;
       if (!validationResponse.ok || !validation.ok) {
-        throw new Error(validation.error ?? "Validation data unavailable.");
+        throw new Error(validationResponse.status === 401 || validationResponse.status === 403
+          ? "Your operator session has expired. Sign in again to view validation observations."
+          : "Validation observations are temporarily unavailable. Existing market systems are unaffected.");
       }
       setPayload(validation);
       setHealth(nextHealth);
       setMessage("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Validation data unavailable.");
+      setMessage(error instanceof Error
+        ? error.message
+        : "Validation observations are temporarily unavailable. Existing market systems are unaffected.");
     }
   }, []);
 
@@ -126,8 +131,8 @@ export default function MarketValidationCockpit() {
   const rows = payload?.rows ?? [];
 
   return (
-    <main className="min-h-screen bg-[#040505] px-4 py-5 text-white sm:px-7 lg:px-10">
-      <div className="mx-auto max-w-[1680px] overflow-hidden rounded-[26px] border border-white/10 bg-[#080a0a] shadow-2xl shadow-black/50">
+    <main className="ht-phase25-route ht-operator-route ht-validation-route min-h-screen bg-[#040505] px-4 py-5 text-white sm:px-7 lg:px-10" data-route-audience="operator">
+      <div className="ht-phase25-frame mx-auto max-w-[1680px] overflow-hidden rounded-[26px] border border-white/10 bg-[#080a0a] shadow-2xl shadow-black/50">
         <header className="flex flex-wrap items-center justify-between gap-5 border-b border-white/8 px-5 py-5 sm:px-8">
           <div className="flex items-center gap-5">
             <Link href="/" aria-label="Back to HT Labs">
@@ -165,16 +170,22 @@ export default function MarketValidationCockpit() {
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">Priority Flow observation</p>
               <p className="mt-1 text-sm font-semibold text-zinc-500">Backend rank history, market age, microstructure, and outcomes. No browser re-ranking.</p>
             </div>
-            <button onClick={() => void refresh()} className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-bold text-zinc-300 hover:bg-white/[0.07]">Refresh now</button>
+            <button type="button" onClick={() => void refresh()} className="ht-control rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-bold text-zinc-300 hover:bg-white/[0.07]">Refresh now</button>
           </div>
 
           {message ? (
-            <div className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.04] px-5 py-12 text-center text-sm font-semibold text-amber-200">{message}</div>
+            <StatusState
+              title={message.startsWith("Loading") ? "Loading validation observations" : "Validation unavailable"}
+              description={message}
+              tone={message.startsWith("Loading") ? "info" : "warning"}
+              busy={message.startsWith("Loading")}
+            />
           ) : rows.length === 0 ? (
             <div className="rounded-2xl border border-white/8 bg-black/20 px-5 py-12 text-center text-sm font-semibold text-zinc-500">The backend has not persisted an active validation frame yet.</div>
           ) : (
-            <div className="overflow-x-auto rounded-2xl border border-white/8">
+            <div className="ht-operator-table-wrap overflow-x-auto rounded-2xl border border-white/8" tabIndex={0} role="region" aria-label="Market validation observations">
               <table className="min-w-[1220px] w-full border-collapse text-left">
+                <caption className="sr-only">Backend-ranked market validation observations</caption>
                 <thead className="bg-white/[0.025] text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600">
                   <tr>{["Rank","Ticker","Score","Δ 1m","Δ 5m","Price","RVOL","Spread","Data age","Signal","Return","Max / drawdown","ProX"].map((label) => <th key={label} className="border-b border-white/8 px-4 py-3">{label}</th>)}</tr>
                 </thead>

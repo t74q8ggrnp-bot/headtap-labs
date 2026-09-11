@@ -9,6 +9,7 @@ import {
   type Opportunity as HTOpportunity,
 } from "@/lib/opportunity-model";
 import { useWatchlist } from "@/app/hooks/useWatchlist";
+import { Control, PanelHeader, StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 // ─────────────────────────────────────────────────────────────
 //  app/scanner/page.tsx
@@ -62,6 +63,7 @@ const getLabel = (o: HTOpportunity) => {
 export default function ScannerPage() {
   const [opportunities, setOpportunities] = useState<HTOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [filter, setFilter] = useState<ScannerFilter>("all");
   const [search, setSearch] = useState("");
@@ -77,6 +79,7 @@ export default function ScannerPage() {
 
   const fetchAll = useCallback(async () => {
     try {
+      setError(false);
       // The full ranked list — same endpoint, same scoring engine,
       // same live data Home's #1 pick comes from. No separate universe,
       // no separate scoring logic, no legacy fallback watchlist.
@@ -98,6 +101,7 @@ export default function ScannerPage() {
       setLastUpdated(new Date());
     } catch (err) {
       console.error("Scanner fetch failed", err);
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -135,85 +139,75 @@ export default function ScannerPage() {
     opportunities.every(o => o.freshnessLabel === "Last Verified Signal");
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(255,106,0,0.12),transparent_40%)]" />
-      <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#050505]/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
-          <div className="flex items-center gap-6">
-            <Link href="/"><Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-10 w-auto" priority /></Link>
-            <nav className="hidden items-center gap-5 text-sm font-semibold text-zinc-500 md:flex">
-              <Link href="/" className="transition hover:text-orange-300">Dashboard</Link>
-              <span className="text-orange-400">Scanner</span>
-              <Link href="/trade" className="transition hover:text-orange-300">Workspace</Link>
-              <Link href="/news-feed" className="transition hover:text-orange-300">News</Link>
-            </nav>
-          </div>
-          <div className="flex items-center gap-3">
+    <div className="ht-discovery-route ht-scanner-route min-h-screen bg-[#050505] text-white">
+      <header className="ht-route-utility-bar">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
+          <Link href="/" aria-label="HT Labs home"><Image src="/logo.png" alt="" width={2909} height={1959} className="h-8 w-auto" priority /></Link>
+          <div className="flex min-w-0 items-center gap-3">
             {lastUpdated && (
-              <span className="hidden text-[10px] font-black uppercase tracking-[0.15em] text-zinc-600 sm:block">
+              <span className="hidden truncate text-xs font-semibold text-zinc-500 sm:block">
                 Rankings received {lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · prices update separately
               </span>
             )}
-            <button
+            <Control
               onClick={fetchAll}
-              className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black text-zinc-300 transition hover:border-orange-500/40 hover:text-orange-300"
+              size="small"
+              busy={loading}
             >
-              ↻ Refresh
-            </button>
+              Refresh
+            </Control>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-8">
-        <div className="mb-8">
-          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-orange-400">HT Labs</p>
-          <h1 className="mt-1 text-4xl font-black tracking-tight">Full Scanner</h1>
-          <p className="mt-2 text-sm text-zinc-500">The full ranked list from the same engine that picks Home&apos;s #1 signal. Auto-refreshes every 30s.</p>
-        </div>
+        <PanelHeader
+          headingLevel={1}
+          eyebrow="Market discovery"
+          title="Scanner"
+          description="The complete canonical ranking behind Home. Rankings refresh every 30 seconds; displayed prices update independently."
+          className="mb-7"
+        />
 
         {!loading && (
-          <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <dl className="ht-route-metrics mb-6 grid grid-cols-2 sm:grid-cols-4" aria-label="Scanner summary">
             {[
               { label: "Ranked", value: opportunities.length, color: "text-white" },
               { label: "Green", value: gainers, color: "text-green-300" },
               { label: "Red", value: losers, color: "text-red-300" },
               { label: "Unusual Volume", value: unusual, color: "text-orange-300" },
             ].map(({ label, value, color }) => (
-              <div key={label} className="rounded-2xl border border-white/10 bg-white/[0.025] px-4 py-3">
-                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600">{label}</p>
-                <p className={`mt-1 font-mono text-xl font-black ${color}`}>{value}</p>
+              <div key={label} className="ht-route-metric">
+                <dt>{label}</dt>
+                <dd className={color}>{value}</dd>
               </div>
             ))}
-          </div>
+          </dl>
         )}
 
         {!loading && isShowingStaleData && (
-          <div className="mb-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/[0.05] px-5 py-3 flex items-center gap-3">
-            <span className="text-lg">🌙</span>
-            <div>
-              <p className="text-sm font-black text-yellow-300">Market Quiet</p>
-              <p className="text-[10px] font-semibold text-zinc-500">Showing the last verified signals. Live scanning resumes when the market reopens.</p>
-            </div>
-          </div>
+          <StatusState className="mb-6" tone="warning" title="Market closed" description="Showing the last verified signals. Live scanning resumes when the market reopens." />
         )}
 
-        {!loading && opportunities.length === 0 && (
-          <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.025] px-5 py-3">
-            <p className="text-sm font-black text-zinc-300">No verified signals yet.</p>
-            <p className="text-[10px] font-semibold text-zinc-500">The scanner hasn&apos;t found a qualifying candidate this cycle.</p>
-          </div>
+        {!loading && error && (
+          <StatusState className="mb-6" tone="warning" title="Scanner temporarily unavailable" description="The last ranking could not be loaded. Refresh to try again." />
         )}
 
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2">
+        {!loading && !error && opportunities.length === 0 && (
+          <StatusState className="mb-6" title="No verified signals yet" description="The scanner has not found a qualifying candidate this cycle." />
+        )}
+
+        <div className="ht-route-controls mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter scanner results">
             {FILTERS.map(f => (
               <button
                 key={f.value}
                 onClick={() => setFilter(f.value)}
-                className={`rounded-full border px-4 py-2 text-xs font-black transition ${
+                aria-pressed={filter === f.value}
+                className={`ht-filter-control ${
                   filter === f.value
-                    ? "border-orange-500 bg-orange-500 text-white"
-                    : "border-white/10 bg-white/[0.03] text-zinc-400 hover:border-orange-500/40 hover:text-orange-300"
+                    ? "ht-filter-control--active"
+                    : ""
                 }`}
               >
                 {f.label}
@@ -221,17 +215,21 @@ export default function ScannerPage() {
             ))}
           </div>
           <div className="flex items-center gap-2">
+            <label htmlFor="scanner-search" className="sr-only">Search scanner by ticker</label>
             <input
+              id="scanner-search"
               type="text"
               placeholder="Search ticker..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="rounded-xl border border-white/10 bg-zinc-950 px-4 py-2 text-sm outline-none placeholder:text-zinc-700 focus:border-orange-500 w-40"
+              className="ht-route-input min-w-0 flex-1 sm:w-40"
             />
+            <label htmlFor="scanner-sort" className="sr-only">Sort scanner results</label>
             <select
+              id="scanner-sort"
               value={sortBy}
               onChange={e => setSortBy(e.target.value as typeof sortBy)}
-              className="rounded-xl border border-white/10 bg-zinc-950 px-3 py-2 text-xs font-black text-zinc-400 outline-none focus:border-orange-500"
+              className="ht-route-select"
             >
               <option value="score">Sort: Score</option>
               <option value="change">Sort: % Change</option>
@@ -241,26 +239,19 @@ export default function ScannerPage() {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-32">
-            <div className="text-center">
-              <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
-              <p className="mt-4 text-sm font-semibold text-zinc-500">Loading ranked signals...</p>
-            </div>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-32 text-center">
-            <p className="text-zinc-500">No tickers match this filter right now.</p>
-          </div>
+          <StatusState busy title="Loading ranked signals" description="Retrieving the current canonical scanner board." />
+        ) : error ? null : filtered.length === 0 ? (
+          <StatusState title="No matching tickers" description="No ranked names match the selected filters." />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <ol className="ht-market-card-list grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Ranked scanner results">
             {filtered.map((o, index) => {
               const tier = getTier(o.opportunityScore);
               const { emoji, label, color } = getLabel(o);
               const isBullish = o.change >= 0;
               return (
-                <div
+                <li
                   key={o.ticker}
-                  className="group relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/70 p-5 transition hover:border-orange-500/30"
+                  className="ht-market-card"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
@@ -278,7 +269,9 @@ export default function ScannerPage() {
                       </span>
                       <button
                         onClick={() => toggleWatchlist(o.ticker)}
-                        className="text-sm transition hover:scale-110"
+                        aria-label={`${watchlist.includes(o.ticker) ? "Remove" : "Add"} ${o.ticker} ${watchlist.includes(o.ticker) ? "from" : "to"} watchlist`}
+                        aria-pressed={watchlist.includes(o.ticker)}
+                        className="ht-icon-control"
                       >
                         {watchlist.includes(o.ticker) ? "⭐" : "☆"}
                       </button>
@@ -336,10 +329,10 @@ export default function ScannerPage() {
                       Workspace ↗
                     </Link>
                   </div>
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ol>
         )}
 
         <p className="mt-8 text-center text-[10px] font-semibold text-zinc-700">

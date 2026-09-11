@@ -7,7 +7,8 @@
 // side only; nothing here feeds or reflects canonical HT Labs scoring.
 
 import { useEffect, useState } from "react";
-import { getErrorMessage } from "@/lib/error-message";
+import { matureReadOnlyFailure } from "@/lib/checkpoint-a-ui-state";
+import { PanelHeader, StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 type ProxEventTicker = {
   ticker: string;
@@ -63,15 +64,15 @@ export default function ProxPage() {
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) {
-          setError(data?.error ?? "Failed to load Pro X events");
+          setError(matureReadOnlyFailure("prox", res.status));
           setEvents([]);
         } else {
           setError(null);
           setEvents(data.events ?? []);
           setTotalCount(data.totalCount ?? 0);
         }
-      } catch (err: unknown) {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load Pro X events"));
+      } catch {
+        if (!cancelled) setError(matureReadOnlyFailure("prox"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -87,91 +88,92 @@ export default function ProxPage() {
   const resolvedCount = events.filter((e) => e.prox_event_tickers.length > 0).length;
 
   return (
-    <div className="min-h-screen bg-black px-5 py-8 text-white">
+    <main className="ht-discovery-route ht-prox-route min-h-screen bg-black px-5 py-8 text-white">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.3em] text-orange-400">Pro X</p>
-            <h1 className="text-3xl font-black">Discovery Feed</h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              Real SEC filings collected by the connector. Discovery only — nothing here feeds HT Labs&apos; canonical scoring.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
-            <span className="text-xs font-black uppercase tracking-wider text-zinc-500">Live</span>
-          </div>
-        </div>
+        <PanelHeader
+          headingLevel={1}
+          eyebrow="Pro X · discovery only"
+          title="SEC filing feed"
+          description="Verified connector evidence for independent research. This feed does not alter canonical HT scoring, publish a second public score, or carry execution authority."
+          actions={(
+            <span className="ht-inline-status" data-tone={error ? "warning" : "positive"} role="status" aria-live="polite">
+              <span aria-hidden="true" />
+              {loading ? "Checking" : error ? "Unavailable" : "Live"}
+            </span>
+          )}
+          className="mb-7"
+        />
 
-        <div className="mb-6 grid grid-cols-3 gap-3">
-          <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-4">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">Total Events</p>
-            <p className="mt-1 text-2xl font-black">{totalCount}</p>
+        <dl className="ht-route-metrics mb-6 grid grid-cols-3" aria-label="Pro X filing summary">
+          <div className="ht-route-metric">
+            <dt>Total events</dt>
+            <dd>{totalCount}</dd>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-4">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">Showing</p>
-            <p className="mt-1 text-2xl font-black">{events.length}</p>
+          <div className="ht-route-metric">
+            <dt>Showing</dt>
+            <dd>{events.length}</dd>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-4">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">Ticker-Resolved</p>
-            <p className="mt-1 text-2xl font-black">{resolvedCount} / {events.length}</p>
+          <div className="ht-route-metric">
+            <dt>Ticker-resolved</dt>
+            <dd>{resolvedCount} / {events.length}</dd>
           </div>
-        </div>
+        </dl>
 
         {error && (
-          <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
-            {error}
+          <div className="mb-6" role="alert">
+            <StatusState tone="warning" title="Pro X feed unavailable" description={error} />
           </div>
         )}
 
         {loading ? (
-          <p className="text-sm text-zinc-600">Loading...</p>
+          <StatusState busy title="Loading Pro X discovery" description="Checking the latest connector evidence." />
         ) : events.length === 0 && !error ? (
-          <p className="text-sm text-zinc-600">No events yet. The connector runs every 15 minutes.</p>
+          <StatusState title="No events yet" description="The connector runs every 15 minutes." />
         ) : (
-          <div className="flex flex-col gap-2">
+          <ol className="ht-event-list" aria-label="Pro X SEC filing events">
             {events.map((event) => {
               const primaryTicker = event.prox_event_tickers[0];
               return (
-                <a
-                  key={event.id}
-                  href={event.raw_document_url ?? "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-zinc-950/70 p-4 transition hover:border-orange-500/30 hover:bg-zinc-950/90"
-                >
+                <li key={event.id}>
+                  <article className="ht-event-row">
                   <div className="flex min-w-0 items-center gap-4">
-                    <div className="w-16 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] font-black text-zinc-400">
+                    <div className="ht-document-type" aria-label={`Form ${event.form_type ?? "unknown"}`}>
                       {event.form_type ?? "—"}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-white">{event.headline ?? "Untitled filing"}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 font-black uppercase tracking-wide">
-                          {CATEGORY_LABEL[event.catalyst_category] ?? event.catalyst_category}
-                        </span>
+                      {event.raw_document_url ? (
+                        <a href={event.raw_document_url} target="_blank" rel="noreferrer" className="ht-event-row__link">
+                          {event.headline ?? "Untitled filing"}<span className="sr-only"> (opens in a new tab)</span>
+                        </a>
+                      ) : (
+                        <p className="truncate text-sm font-bold text-white">{event.headline ?? "Untitled filing"}</p>
+                      )}
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500">
+                        <span>{CATEGORY_LABEL[event.catalyst_category] ?? event.catalyst_category}</span>
                         <span>{timeAgo(event.filed_at)}</span>
                         <span>· confidence {event.confidence ?? "—"}</span>
+                        <span>· {event.verification_state.replaceAll("_", " ")}</span>
                       </div>
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
                     {primaryTicker ? (
-                      <span className="rounded-full border border-green-500/25 bg-green-500/10 px-3 py-1 text-sm font-black text-green-300">
+                      <span className="ht-symbol-label ht-symbol-label--positive">
                         {primaryTicker.ticker}
                       </span>
                     ) : (
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-zinc-500">
+                      <span className="text-xs font-semibold text-zinc-500">
                         Unresolved
                       </span>
                     )}
                   </div>
-                </a>
+                  </article>
+                </li>
               );
             })}
-          </div>
+          </ol>
         )}
       </div>
-    </div>
+    </main>
   );
 }

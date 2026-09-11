@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "baselineDate": "2026-09-10",
+  "checkpoint": "B",
+  "routeScoresAreDiagnosticOnly": true,
+  "binaryArtifactRoot": ".artifacts/phase25-baseline",
+  "captureCount": 75,
+  "viewports": [
+    { "name": "mobile-375", "width": 375, "height": 812 },
+    { "name": "mobile-390", "width": 390, "height": 844 },
+    { "name": "mobile-430", "width": 430, "height": 932 },
+    { "name": "desktop-1280", "width": 1280, "height": 800 },
+    { "name": "desktop-1720", "width": 1720, "height": 1000 }
+  ],
+  "routes": [
+    { "surface": "home", "path": "/", "density": "consumer" },
+    { "surface": "workspace", "path": "/trade/SPY", "density": "trading" },
+    { "surface": "scanner", "path": "/scanner", "density": "market" },
+    { "surface": "signals", "path": "/signals", "density": "market" },
+    { "surface": "news", "path": "/news-feed", "density": "market" },
+    { "surface": "prox", "path": "/prox", "density": "market" },
+    { "surface": "paper", "path": "/paper", "density": "trading" },
+    { "surface": "agent", "path": "/agent", "density": "internal" },
+    { "surface": "qa", "path": "/qa", "density": "operator" },
+    { "surface": "validation", "path": "/validation", "density": "operator" },
+    { "surface": "trading-bot", "path": "/trading-bot", "density": "operator" },
+    { "surface": "account", "path": "/account", "density": "account" },
+    { "surface": "privacy", "path": "/privacy", "density": "legal" },
+    { "surface": "terms", "path": "/terms", "density": "legal" },
+    { "surface": "support", "path": "/support", "density": "support" }
+  ],
+  "excludedRoutes": ["/crypto", "/crypto/research", "/paper/crypto"],
+  "acceptanceRules": {
+    "horizontalOverflowPx": 0,
+    "comparisonMode": "pixel-and-objective-layout-review",
+    "dynamicMarketContentMayDiffer": true,
+    "chartDimensionsMustNotChangeInCheckpointC": true
+  }
+}

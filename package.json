@@ -8,6 +8,7 @@
     "test": "node --experimental-strip-types --test lib/*.test.ts lib/crypto/*.test.ts lib/ht-agent/*.test.ts lib/prox/*.test.ts lib/trading-bot/*.test.ts",
     "start": "next start",
     "lint": "eslint",
+    "baseline:phase25": "node tools/capture-phase25-visual-baselines.mjs",
     "ios:build": "next build --webpack",
     "ios:sync": "npm run ios:build && cap sync ios",
     "ios:open": "cap open ios"

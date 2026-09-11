@@ -959,6 +959,8 @@ export default function HomeClient({
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+    }).catch(() => {
+      setAuthMessage("Your account session could not be verified. You can retry by reloading this page.");
     });
 
     const {
@@ -1049,7 +1051,7 @@ export default function HomeClient({
         });
 
         if (error) {
-          setAuthMessage(error.message);
+          setAuthMessage("Sign-in could not be completed. Check your email and password, then try again.");
           return;
         }
 
@@ -1065,7 +1067,7 @@ export default function HomeClient({
       });
 
       if (error) {
-        setAuthMessage(error.message);
+        setAuthMessage("Account creation could not be completed. Review your details or try again shortly.");
         return;
       }
 
@@ -1213,7 +1215,7 @@ export default function HomeClient({
   // intentionally no local fallback selector.
 
   return (
-    <main className="ht-simplified-ui min-h-screen overflow-hidden bg-[#050505] text-white">
+    <main className="ht-simplified-ui ht-discovery-home min-h-screen overflow-hidden bg-[#050505] text-white">
       <style jsx global>{`
         /* HT Labs v69 production hierarchy: live tape, search/auth, top conviction hero, capital, portfolio, score/signals. Legacy OS block removed.
 
@@ -1402,7 +1404,7 @@ export default function HomeClient({
 
 
         {/* ── MORNING MARKET CONTEXT ── */}
-        <div className="mx-auto max-w-[1488px] px-3 md:px-6 pb-2">
+        <section className="ht-home-market-context mx-auto max-w-[1488px] px-3 pb-2 md:px-6" aria-label="Market context">
           <div className="flex items-center gap-1.5 flex-wrap">
             {marketCtx ? (
               <>
@@ -1451,19 +1453,19 @@ export default function HomeClient({
               </>
             ) : (
               // Loading state — visible while API fetches
-              <div className="flex items-center gap-1.5 animate-pulse">
+              <div className="flex items-center gap-1.5 animate-pulse" role="status" aria-live="polite" aria-label="Loading market context">
                 {["","","","",""].map((_, i) => (
                   <div key={i} className="h-5 w-16 rounded-full bg-white/[0.03] border border-white/[0.04]" />
                 ))}
               </div>
             )}
           </div>
-        </div>
+        </section>
 
-        <section id="conviction-engine" className="mx-auto max-w-[1488px] px-3 pt-3 pb-3 md:px-6 md:pt-4 md:pb-4">
+        <section id="conviction-engine" className="ht-home-conviction mx-auto max-w-[1488px] px-3 pb-3 pt-3 md:px-6 md:pb-4 md:pt-4" aria-label="Top convictions">
           <motion.div
             initial={false}
-            className="relative overflow-hidden rounded-[1.65rem] border border-white/10 bg-[#04080b] p-3 shadow-[0_28px_90px_rgba(0,0,0,0.52)] md:p-4"
+            className="ht-home-conviction__frame relative overflow-hidden rounded-[1.65rem] border border-white/10 bg-[#04080b] p-3 shadow-[0_28px_90px_rgba(0,0,0,0.52)] md:p-4"
           >
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(255,106,0,0.11),transparent_28%),radial-gradient(circle_at_76%_28%,rgba(34,211,238,0.055),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.018),transparent_42%)]" />
 
@@ -1488,18 +1490,6 @@ export default function HomeClient({
                     >
                       Top Convictions
                     </button>
-                    <Link href="/scanner" className="transition hover:text-white">
-                      Scanner
-                    </Link>
-                    <Link href="/trade" className="transition hover:text-white">
-                      Workspace
-                    </Link>
-                    <Link href="/news-feed" className="transition hover:text-white">
-                      News
-                    </Link>
-                    <Link href="/paper" className="transition hover:text-white">
-                      Paper
-                    </Link>
                     <button
                       type="button"
                       onClick={() => document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth" })}
@@ -1516,6 +1506,7 @@ export default function HomeClient({
                     <input
                       type="text"
                       placeholder="Search ticker..."
+                      aria-label="Search ticker"
                       value={ticker}
                       onChange={(e) => setTicker(e.target.value.toUpperCase())}
                       onKeyDown={(e) => {
@@ -1563,6 +1554,7 @@ export default function HomeClient({
                         <input
                           type="email"
                           placeholder="Email"
+                          aria-label="Email address"
                           value={authEmail}
                           onChange={(e) => setAuthEmail(e.target.value)}
                           className="w-36 rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-orange-500/60"
@@ -1570,6 +1562,7 @@ export default function HomeClient({
                         <input
                           type="password"
                           placeholder="Password"
+                          aria-label="Password"
                           value={authPassword}
                           onChange={(e) => setAuthPassword(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") handleAuth("signin"); }}
@@ -1786,7 +1779,7 @@ export default function HomeClient({
 
 
 
-        <section id="watchlist" className="mx-auto max-w-7xl px-5 py-5">
+        <section id="watchlist" className="ht-home-watchlist mx-auto max-w-7xl px-5 py-5" aria-labelledby="home-watchlist-title">
           <motion.div
             className="rounded-[1.5rem] border border-orange-500/20 bg-zinc-950/70 p-5 backdrop-blur-xl ht-compact-shell"
             initial={{ opacity: 0, y: 25 }}
@@ -1796,9 +1789,10 @@ export default function HomeClient({
           >
             <div className="mb-4 flex items-center justify-start">
               <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-orange-400">
+                <p className="text-xs font-bold text-zinc-500">
                   Watchlist
                 </p>
+                <h2 id="home-watchlist-title" className="sr-only">Watchlist</h2>
                 <p className="mt-1 text-sm text-zinc-500">
                   Logged-in traders can sync watchlists across devices with
                   Supabase cloud storage.

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F",
+  "generatedAt": "2026-09-11T02:20:21Z",
+  "routeScoresAreDiagnosticOnly": true,
+  "scale": "1-5 maturity diagnostic; objective release gates remain authoritative",
+  "routes": [
+    { "path": "/", "surface": "home", "audience": "customer", "score": 4.5, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading and populated production evidence", "gate": "pass" },
+    { "path": "/trade/SPY", "surface": "workspace", "audience": "trading", "score": 4.5, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading, unavailable, and populated production chart bootstrap", "gate": "pass" },
+    { "path": "/scanner", "surface": "scanner", "audience": "market", "score": 4.4, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "local unavailable and populated production", "gate": "pass" },
+    { "path": "/signals", "surface": "signals", "audience": "market", "score": 4.3, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading, empty, and populated", "gate": "pass" },
+    { "path": "/news-feed", "surface": "news", "audience": "market", "score": 4.4, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "local unavailable and populated production API", "gate": "pass" },
+    { "path": "/prox", "surface": "prox", "audience": "market", "score": 4.4, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "local unavailable and populated production API", "gate": "pass" },
+    { "path": "/paper", "surface": "paper", "audience": "customer", "score": 4.3, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading and signed-out; credentialed account/review states not exercised", "gate": "blocked_on_credentialed_user_state" },
+    { "path": "/agent", "surface": "agent", "audience": "operator", "score": 4.3, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading, signed-out, and error; credentialed controls not exercised", "gate": "blocked_on_credentialed_user_state" },
+    { "path": "/qa", "surface": "qa", "audience": "operator", "score": 4.2, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "unresolved, populated diagnostic, degraded, and error", "gate": "ui_pass_production_health_blocked" },
+    { "path": "/validation", "surface": "validation", "audience": "operator", "score": 4.3, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading and signed-out; credentialed cockpit not exercised", "gate": "blocked_on_credentialed_user_state" },
+    { "path": "/trading-bot", "surface": "trading-bot", "audience": "operator", "score": 4.2, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading, empty, unauthorized, and mature unavailable", "gate": "pass" },
+    { "path": "/account", "surface": "account", "audience": "account", "score": 4.3, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "loading and signed-out; destructive authenticated flow not invoked", "gate": "blocked_on_credentialed_user_state" },
+    { "path": "/support", "surface": "support", "audience": "support", "score": 4.6, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "static document", "gate": "pass" },
+    { "path": "/privacy", "surface": "privacy", "audience": "legal", "score": 4.6, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "static document", "gate": "pass" },
+    { "path": "/terms", "surface": "terms", "audience": "legal", "score": 4.6, "visual": "pass", "responsive": "pass", "accessibility": "pass", "requests": "pass", "stateCoverage": "static document", "gate": "pass" }
+  ],
+  "excludedShelvedRoutes": ["/crypto", "/crypto/research", "/paper/crypto"],
+  "objectiveGateSummary": {
+    "visualMatrix": "pass",
+    "responsiveAndSafeArea": "pass",
+    "requestRegression": "pass",
+    "automatedRegression": "pass",
+    "productionDataReads": "pass",
+    "productionHealth": "fail",
+    "credentialedUserStateCoverage": "incomplete",
+    "crossBrowserCoverage": "partial",
+    "runtimeDialogInteraction": "incomplete",
+    "overall": "not_ready_for_phase_2_5_acceptance"
+  }
+}

@@ -40,24 +40,21 @@ export default function ScannerGrid({
   savedSetups, openAiModal, aiLoading, selectedStock,
 }: ScannerGridProps) {
   return (
-    <section id="scanner" className="mx-auto max-w-7xl px-5 py-5 pb-16">
+    <section id="scanner" className="ht-home-scanner mx-auto max-w-7xl px-5 pb-16 pt-5" aria-labelledby="home-scanner-title">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-start">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-orange-400">
-            Scanner
-          </p>
-          <h3 className="text-3xl font-black">Ranked Attention Spike Feed</h3>
-          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-green-500/15 bg-green-500/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-green-300">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
-            Premium scan mode
-          </div>
+          <p className="ht-section-label">Scanner</p>
+          <h2 id="home-scanner-title" className="text-3xl font-black">Ranked attention feed</h2>
+          <p className="mt-2 text-xs font-semibold text-green-300" role="status">Canonical ranked feed available</p>
           <p className="mt-2 text-sm text-zinc-500">
             Prices refresh independently of the ranked decision. Source age is shown below each price.
           </p>
         </div>
 
         <div className="flex gap-3">
+          <label htmlFor="home-scanner-ticker" className="sr-only">Add ticker to scanner</label>
           <input
+            id="home-scanner-ticker"
             type="text"
             placeholder="Add ticker, ex: PLTR"
             value={ticker}
@@ -67,12 +64,12 @@ export default function ScannerGrid({
                 addTicker();
               }
             }}
-            className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-zinc-950/90 px-4 py-4 text-sm outline-none transition placeholder:text-zinc-700 focus:border-orange-500 focus:shadow-[0_0_25px_rgba(255,106,0,0.18)] md:w-80"
+            className="ht-route-input min-w-0 flex-1 md:w-80"
           />
 
           <motion.button
             onClick={addTicker}
-            className="rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4 text-sm font-black text-white shadow-[0_0_25px_rgba(255,106,0,0.25)] transition"
+            className="ht-filter-control ht-filter-control--active px-6"
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
           >
@@ -81,15 +78,16 @@ export default function ScannerGrid({
         </div>
       </div>
 
-      <div className="mb-5 flex flex-wrap gap-2">
+      <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="Filter Home scanner">
         {scannerFilters.map((filter) => (
           <button
             key={filter.value}
             onClick={() => setScannerFilter(filter.value)}
-            className={`rounded-full border px-4 py-2 text-xs font-black transition ${
+            aria-pressed={scannerFilter === filter.value}
+            className={`ht-filter-control ${
               scannerFilter === filter.value
-                ? "border-orange-500 bg-orange-500 text-white"
-                : "border-white/10 bg-white/[0.03] text-zinc-400 hover:border-orange-500/40 hover:text-orange-300"
+                ? "ht-filter-control--active"
+                : ""
             }`}
           >
             {filter.label}
@@ -97,7 +95,7 @@ export default function ScannerGrid({
         ))}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <ol className="ht-home-scanner__list grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="Home ranked attention results">
         {filteredOpportunities.map((opportunity, index) => {
           const isBullish = opportunity.change >= 0;
           const isHot = Math.abs(opportunity.change) > 4;
@@ -106,14 +104,13 @@ export default function ScannerGrid({
           const attention = Math.round(opportunity.attentionScore);
 
           return (
-            <motion.div
+            <motion.li
               key={opportunity.ticker}
               initial={{ opacity: 0, y: 25 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: index * 0.05 }}
               viewport={{ once: true }}
-              whileHover={{ y: -6, scale: 1.015 }}
-              className="group relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 shadow-xl shadow-black/25 transition duration-300 hover:-translate-y-1 hover:border-orange-500/35 hover:bg-zinc-950/90 hover:shadow-[0_0_40px_rgba(255,106,0,0.12)] ht-compact-shell"
+              className="ht-home-scanner__card group relative overflow-hidden p-5 ht-compact-shell"
             >
               <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-orange-400/80 to-transparent" />
 
@@ -134,7 +131,9 @@ export default function ScannerGrid({
 
                 <button
                   onClick={() => toggleWatchlist(opportunity.ticker)}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm transition hover:bg-orange-500/10"
+                  aria-label={`${watchlist.includes(opportunity.ticker) ? "Remove" : "Add"} ${opportunity.ticker} ${watchlist.includes(opportunity.ticker) ? "from" : "to"} watchlist`}
+                  aria-pressed={watchlist.includes(opportunity.ticker)}
+                  className="ht-icon-control"
                 >
                   {watchlist.includes(opportunity.ticker) ? "⭐" : "☆"}
                 </button>
@@ -346,22 +345,24 @@ export default function ScannerGrid({
                   ? "Analyzing..."
                   : "View AI Setup"}
               </motion.button>
-            </motion.div>
+            </motion.li>
           );
         })}
 
         {filteredOpportunities.length === 0 &&
           [1, 2, 3].map((item) => (
-            <div
+            <li
               key={item}
-              className="rounded-[1.5rem] border border-white/10 bg-zinc-950/70 p-5 ht-compact-shell"
+              className="ht-home-scanner__card p-5 ht-compact-shell"
             >
-              <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
-              <div className="mt-4 h-10 w-32 animate-pulse rounded bg-white/10" />
-              <div className="mt-6 h-28 animate-pulse rounded-2xl bg-white/10" />
-            </div>
+              <div role="status" aria-label="Loading scanner result">
+                <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
+                <div className="mt-4 h-10 w-32 animate-pulse rounded bg-white/10" />
+                <div className="mt-6 h-28 animate-pulse rounded-2xl bg-white/10" />
+              </div>
+            </li>
           ))}
-      </div>
+      </ol>
     </section>
   );
 }

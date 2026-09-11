@@ -181,7 +181,9 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
           !payload.instrument ||
           !payload.instrument.workspaceSupported
         ) {
-          throw new Error(payload.error || "Instrument profile unavailable.");
+          throw new Error(response.status === 404
+            ? `No supported instrument profile is available for ${symbol}.`
+            : "Instrument details are temporarily unavailable. Try again shortly.");
         }
         setInstrumentState({
           symbol,
@@ -227,7 +229,9 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
       acceptTrustedTime?.(response.headers.get("Date"));
       const payload = (await response.json()) as OpportunityPayload;
       if (!response.ok) {
-        throw new Error(payload.error || "HT intelligence unavailable.");
+        throw new Error(response.status === 404
+          ? `No active HT read exists for ${requestSymbol}.`
+          : "HT intelligence is temporarily unavailable. Existing chart data is unaffected.");
       }
       if (!requestIsCurrent()) return;
       if (payload.opportunity) {
@@ -464,11 +468,11 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
 
   return (
     <main
-      className="min-h-screen w-full overflow-x-clip bg-[radial-gradient(circle_at_48%_-10%,rgba(249,115,22,0.09),transparent_28%),radial-gradient(circle_at_92%_12%,rgba(34,211,238,0.045),transparent_22%),#050607] pb-[calc(env(safe-area-inset-bottom,0px)+1rem)] pl-[calc(env(safe-area-inset-left,0px)+0.5rem)] pr-[calc(env(safe-area-inset-right,0px)+0.5rem)] pt-[calc(env(safe-area-inset-top,0px)+0.5rem)] text-white sm:pl-[calc(env(safe-area-inset-left,0px)+0.75rem)] sm:pr-[calc(env(safe-area-inset-right,0px)+0.75rem)] sm:pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] md:pb-[calc(env(safe-area-inset-bottom,0px)+2rem)] md:pl-[calc(env(safe-area-inset-left,0px)+1.25rem)] md:pr-[calc(env(safe-area-inset-right,0px)+1.25rem)] md:pt-[calc(env(safe-area-inset-top,0px)+1.25rem)]"
+      className="ht-application-shell ht-trade-workspace min-h-screen w-full overflow-x-clip text-white"
       data-trade-workspace={symbol}
       data-feed-version="market-chart-feed-v1"
     >
-      <div className="mx-auto max-w-[1720px] overflow-hidden rounded-[22px] border border-white/[0.085] bg-[#080b0d]/95 shadow-[0_30px_100px_rgba(0,0,0,0.5)] sm:rounded-[26px]">
+      <div className="ht-trade-workspace__frame mx-auto max-w-[1720px] overflow-hidden">
         <TradeWorkspaceHeader
           symbol={symbol}
           instrument={instrument}
@@ -487,8 +491,8 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
           efficiency={efficiency}
         />
 
-        <div className="border-b border-white/[0.06] px-3 py-2 2xl:hidden">
-          <div className="grid grid-cols-3 rounded-xl border border-white/[0.07] bg-black/35 p-1" role="tablist" aria-label="Workspace sections" aria-orientation="horizontal">
+        <div className="ht-workspace-mobile-tabs border-b px-3 py-2 2xl:hidden">
+          <div className="ht-workspace-segmented grid grid-cols-3 p-1" role="tablist" aria-label="Workspace sections" aria-orientation="horizontal">
             {MOBILE_PANELS.map((panel) => (
               <button
                 key={panel.id}
@@ -500,7 +504,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
                 tabIndex={mobilePanel === panel.id ? 0 : -1}
                 onClick={() => setMobilePanel(panel.id)}
                 onKeyDown={(event) => handlePanelKeyDown(event, panel.id)}
-                className={`min-h-11 rounded-lg px-2 py-2 text-[9px] font-black uppercase tracking-[0.11em] transition ${mobilePanel === panel.id ? "bg-white/[0.075] text-white shadow-sm" : "text-zinc-600"}`}
+                className="ht-workspace-segment min-h-11 px-2 py-2 text-[9px] font-black uppercase tracking-[0.11em]"
               >
                 {panel.label}
                 {panel.id === "lists" && watchlist.symbols.length > 0 ? ` · ${watchlist.symbols.length}` : ""}
@@ -514,7 +518,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
             id={`${panelIdPrefix}-workspace-panel-lists`}
             role={wideWorkspace ? "region" : "tabpanel"}
             aria-labelledby={wideWorkspace ? `${panelIdPrefix}-workspace-region-lists` : `${panelIdPrefix}-workspace-tab-lists`}
-            className={`${mobilePanel === "lists" ? "block" : "hidden"} min-w-0 border-white/[0.065] p-3 2xl:block 2xl:border-r 2xl:p-4`}
+            className={`${mobilePanel === "lists" ? "block" : "hidden"} ht-workspace-column min-w-0 p-3 2xl:block 2xl:border-r 2xl:p-4`}
           >
             <h2 id={`${panelIdPrefix}-workspace-region-lists`} className="sr-only">Workspace lists</h2>
             {lists}
@@ -523,7 +527,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
             id={`${panelIdPrefix}-workspace-panel-chart`}
             role={wideWorkspace ? "region" : "tabpanel"}
             aria-labelledby={wideWorkspace ? `${panelIdPrefix}-workspace-region-chart` : `${panelIdPrefix}-workspace-tab-chart`}
-            className={`${mobilePanel === "chart" ? "block" : "hidden"} min-w-0 border-white/[0.065] p-2 sm:p-3 md:p-4 2xl:block 2xl:p-5`}
+            className={`${mobilePanel === "chart" ? "block" : "hidden"} ht-workspace-chart-column min-w-0 p-2 sm:p-3 md:p-4 2xl:block 2xl:p-5`}
           >
             <h2 id={`${panelIdPrefix}-workspace-region-chart`} className="sr-only">Verified market chart</h2>
             {chart}
@@ -532,15 +536,17 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
             id={`${panelIdPrefix}-workspace-panel-intelligence`}
             role={wideWorkspace ? "region" : "tabpanel"}
             aria-labelledby={wideWorkspace ? `${panelIdPrefix}-workspace-region-intelligence` : `${panelIdPrefix}-workspace-tab-intelligence`}
-            className={`${mobilePanel === "intelligence" ? "block" : "hidden"} min-w-0 border-white/[0.065] p-3 md:p-4 2xl:block 2xl:border-l`}
+            className={`${mobilePanel === "intelligence" ? "block" : "hidden"} ht-workspace-column min-w-0 p-3 md:p-4 2xl:block 2xl:border-l`}
           >
             <div className="mb-3 flex items-center justify-between px-1">
-              <h2 id={`${panelIdPrefix}-workspace-region-intelligence`} className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">HT Intelligence</h2>
+              <h2 id={`${panelIdPrefix}-workspace-region-intelligence`} className="ht-workspace-eyebrow">HT Intelligence</h2>
               <button
                 type="button"
                 onClick={() => void refreshIntelligence(true)}
                 disabled={!instrumentSupported || intelligenceRefreshing}
-                className="min-h-11 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 text-[8px] font-black uppercase tracking-[0.1em] text-zinc-500 transition hover:border-white/[0.12] hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-50 2xl:min-h-8"
+                className="ht-control min-h-11 px-3 text-[8px] uppercase tracking-[0.1em] 2xl:min-h-8"
+                data-variant="quiet"
+                data-size="small"
               >
                 {intelligenceRefreshing ? "Refreshing" : "Refresh read"}
               </button>
@@ -549,7 +555,7 @@ export default function TradeWorkspace({ symbol }: { symbol: string }) {
           </div>
         </div>
       </div>
-      <p className="mx-auto mt-3 max-w-[1720px] px-2 text-center text-[8px] font-semibold leading-relaxed text-zinc-700">
+      <p className="ht-workspace-disclaimer mx-auto mt-3 max-w-[1720px] px-2 text-center text-[8px] font-semibold leading-relaxed">
         HT Labs Trading Workspace is a research surface. Market data is provider-time stamped; opening Paper Trading does not submit an order.
       </p>
     </main>

@@ -6,7 +6,8 @@
 // from canonical HT Labs scoring — this page only reflects bot_trades.
 
 import { useEffect, useState } from "react";
-import { getErrorMessage } from "@/lib/error-message";
+import { matureReadOnlyFailure } from "@/lib/checkpoint-a-ui-state";
+import { PanelHeader, StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 type BotTrade = {
   id: string;
@@ -49,14 +50,14 @@ export default function TradingBotPage() {
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok) {
-          setError(data?.error ?? "Failed to load bot trades");
+          setError(matureReadOnlyFailure("trading-bot", res.status));
         } else {
           setError(null);
           setTrades(data.trades ?? []);
           setSummary(data.summary ?? null);
         }
-      } catch (err: unknown) {
-        if (!cancelled) setError(getErrorMessage(err, "Failed to load bot trades"));
+      } catch {
+        if (!cancelled) setError(matureReadOnlyFailure("trading-bot"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -70,15 +71,15 @@ export default function TradingBotPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-black px-5 py-8 text-white">
+    <main className="ht-phase25-route ht-operator-route ht-trading-bot-route min-h-screen bg-black px-5 py-8 text-white" data-route-audience="operator">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-6">
-          <p className="text-xs font-black uppercase tracking-[0.3em] text-green-400">Paper Trading Bot</p>
-          <h1 className="text-3xl font-black">Trade Log</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Alpaca paper money only. Separate system from HT Labs and Pro X — reads the canonical top 10 as input, decides entries/exits with its own logic.
-          </p>
-        </div>
+        <PanelHeader
+          headingLevel={1}
+          eyebrow="Internal operator surface · Paper Trading Bot"
+          title="Trade Log"
+          description="Alpaca paper money only. Separate from HT Labs scoring and Pro X; this read-only log reports the bot's own entries and exits."
+          className="mb-6 px-0 pt-0"
+        />
 
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
           <div className="rounded-2xl border border-white/10 bg-zinc-950/70 p-4">
@@ -101,21 +102,18 @@ export default function TradingBotPage() {
           </div>
         </div>
 
-        {error && (
-          <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">{error}</div>
-        )}
+        {error && <StatusState title="Paper-bot log unavailable" description={error} tone="warning" role="alert" className="mb-6" />}
 
         {loading ? (
-          <p className="text-sm text-zinc-600">Loading...</p>
+          <StatusState title="Loading paper-bot records" description="Reading the isolated bot trade log…" busy />
         ) : trades.length === 0 && !error ? (
-          <p className="text-sm text-zinc-600">
-            No trades yet. Either the bot hasn&apos;t found a qualifying candidate, or it&apos;s not enabled/configured yet.
-          </p>
+          <StatusState title="No paper-bot trades" description="The bot has not recorded a qualifying paper trade, or new entries are disabled." />
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="ht-operator-record-list flex flex-col gap-2" role="list" aria-label="Paper-bot trades">
             {trades.map((trade) => (
               <div
                 key={trade.id}
+                role="listitem"
                 className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-zinc-950/70 p-4"
               >
                 <div className="flex items-center gap-4">
@@ -150,6 +148,6 @@ export default function TradingBotPage() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

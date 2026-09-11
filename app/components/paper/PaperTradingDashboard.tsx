@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { resolvePaperAccountStatus } from "@/lib/checkpoint-a-ui-state";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import HeroPriceChart from "@/app/components/market/HeroPriceChart";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
@@ -25,6 +26,7 @@ import {
 import { supabase } from "@/lib/supabaseClient";
 import { HT_REFRESH_RATES_MS } from "@/lib/runtime-capabilities";
 import type { AgentXVisualPlanRead } from "@/lib/ht-agent/visual-plan-api";
+import { StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 const money = (value: number | null) => value === null ? "—" : new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -211,6 +213,7 @@ export default function PaperTradingDashboard() {
   const requestedAgentPlanVersion = (searchParams.get("agentPlanVersion") ?? "").trim();
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState<PaperDashboard | null>(null);
   const [instrument, setInstrument] = useState<PaperInstrumentView | null>(null);
@@ -248,7 +251,15 @@ export default function PaperTradingDashboard() {
       },
     });
     const body = (await response.json()) as PaperApiResponse;
-    if (!response.ok || !body.ok) throw new Error(body.error ?? "Paper trading request failed.");
+    if (!response.ok || !body.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("Your paper session has expired. Sign in again to continue.");
+      }
+      if (response.status >= 500) {
+        throw new Error("Paper Trading is temporarily unavailable. No paper order was submitted.");
+      }
+      throw new Error(body.error ?? "This paper request could not be validated.");
+    }
     return body;
   }, []);
 
@@ -270,12 +281,19 @@ export default function PaperTradingDashboard() {
     let mounted = true;
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
+      setAuthError("");
       setSession(data.session);
       setAuthReady(true);
       if (!data.session) setLoading(false);
+    }).catch(() => {
+      if (!mounted) return;
+      setAuthError("Your secure paper session could not be verified. Reload the page to try again. No paper order was submitted.");
+      setAuthReady(true);
+      setLoading(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => {
       if (!mounted) return;
+      setAuthError("");
       setSession(next);
       setAuthReady(true);
       if (!next) {
@@ -629,26 +647,51 @@ export default function PaperTradingDashboard() {
   const reviewActionLabel = closesSelectedPosition
     ? ticket.side === "sell" ? "Sell" : "Cover"
     : sideLabels[ticket.side];
+  const paperAccountStatus = resolvePaperAccountStatus({
+    authReady,
+    signedIn: Boolean(session),
+    loading,
+    dashboardReady: Boolean(dashboard),
+  });
+  const paperAccountStatusDot = paperAccountStatus.tone === "active"
+    ? "bg-green-400 shadow-[0_0_14px_rgba(74,222,128,0.55)]"
+    : paperAccountStatus.tone === "unavailable"
+      ? "bg-red-400"
+      : paperAccountStatus.tone === "pending"
+        ? "animate-pulse bg-amber-300"
+        : "bg-zinc-600";
 
   return (
-    <main className="min-h-screen bg-[#050707] px-3 pb-28 pt-4 text-white sm:px-6 sm:py-7">
-      <div className="mx-auto max-w-[1500px] overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#080a0b] shadow-[0_28px_100px_rgba(0,0,0,0.5)]">
+    <main className="ht-phase25-route ht-customer-route ht-paper-route min-h-screen bg-[#050707] px-3 pb-28 pt-4 text-white sm:px-6 sm:py-7" data-route-audience="customer">
+      <div className="ht-phase25-frame mx-auto max-w-[1500px] overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#080a0b] shadow-[0_28px_100px_rgba(0,0,0,0.5)]">
         <header className="flex min-h-20 flex-wrap items-center justify-between gap-4 border-b border-white/8 px-5 py-4 sm:px-7">
           <div className="flex items-center gap-8">
             <Link href="/" aria-label="HT Labs home"><Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-9 w-auto" priority /></Link>
-            <nav className="hidden items-center gap-6 text-xs font-bold text-zinc-600 md:flex">
-              <Link href="/" className="transition hover:text-white">Top Convictions</Link>
-              <Link href="/scanner" className="transition hover:text-white">Scanner</Link>
-              <Link href="/trade" className="transition hover:text-white">Workspace</Link>
-              <span className="text-orange-300">Paper</span>
-              <Link href="/agent" className="transition hover:text-white">HT Agent</Link>
-            </nav>
           </div>
-          <div className="flex items-center gap-2 text-[10px] font-semibold text-zinc-500"><span className="h-2 w-2 rounded-full bg-green-400 shadow-[0_0_14px_rgba(74,222,128,0.55)]" />Paper account active</div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold text-zinc-500" role="status" aria-live="polite">
+            <span className={`h-2 w-2 rounded-full ${paperAccountStatusDot}`} />
+            {paperAccountStatus.label}
+          </div>
         </header>
 
         {!authReady || loading ? (
-          <div className="min-h-[650px] animate-pulse bg-white/[0.015]" />
+          <section className="grid min-h-[650px] place-items-center p-8">
+            <StatusState
+              title={!authReady ? "Checking your paper session" : "Loading your paper account"}
+              description="Preparing your private simulation account. No live brokerage connection is used."
+              busy
+              className="w-full max-w-xl"
+            />
+          </section>
+        ) : authError ? (
+          <section className="grid min-h-[650px] place-items-center p-8">
+            <StatusState
+              title="Paper session unavailable"
+              description={authError}
+              tone="negative"
+              className="w-full max-w-xl"
+            />
+          </section>
         ) : !session ? (
           <section className="p-10 text-center sm:p-16">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-300">HT Paper</p>
@@ -659,7 +702,7 @@ export default function PaperTradingDashboard() {
         ) : !dashboard ? (
           <section className="p-8 sm:p-12">
             <h1 className="text-2xl font-black">Paper account unavailable</h1>
-            <p className="mt-3 text-sm font-semibold text-zinc-500">{message || "Apply migration 0024, then refresh."}</p>
+            <p className="mt-3 text-sm font-semibold text-zinc-500">We couldn&apos;t load your paper account. Try again. No live brokerage connection is used.</p>
             <button onClick={() => void refresh()} className="mt-5 rounded-xl border border-white/10 px-5 py-3 text-sm font-black">Try again</button>
           </section>
         ) : (
@@ -671,7 +714,7 @@ export default function PaperTradingDashboard() {
               <AccountMetric label="Available cash" value={money(dashboard.account.cashBalance)} />
             </section>
 
-            {(instrumentError || message) && <div className={`border-b px-5 py-3 text-xs font-semibold sm:px-7 ${instrumentError ? "border-red-400/15 bg-red-500/[0.05] text-red-300" : "border-cyan-400/10 bg-cyan-500/[0.03] text-zinc-400"}`} role="status">{instrumentError || message}</div>}
+            {(instrumentError || message) && <div className={`border-b px-5 py-3 text-xs font-semibold sm:px-7 ${instrumentError ? "border-red-400/15 bg-red-500/[0.05] text-red-300" : "border-cyan-400/10 bg-cyan-500/[0.03] text-zinc-400"}`} role={instrumentError ? "alert" : "status"} aria-live={instrumentError ? "assertive" : "polite"}>{instrumentError || message}</div>}
 
             <section className="border-b border-white/8 px-5 py-4 sm:px-7">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -688,7 +731,7 @@ export default function PaperTradingDashboard() {
               {recentSymbols.length > 0 && <div className="mt-3 flex flex-wrap items-center gap-1.5 lg:pl-44"><span className="mr-1 text-[8px] font-black uppercase tracking-wider text-zinc-700">Recent</span>{recentSymbols.map((symbol) => <button key={symbol} onClick={() => void lookupInstrument(symbol)} className={`rounded-lg border px-2.5 py-1.5 font-mono text-[9px] font-black transition ${loadedInstrument?.symbol === symbol ? "border-orange-400/25 bg-orange-500/[0.07] text-orange-300" : "border-white/8 text-zinc-600 hover:border-white/15 hover:text-white"}`}>{symbol}</button>)}</div>}
             </section>
 
-            <section className="grid xl:grid-cols-[minmax(0,1fr)_390px]">
+            <section className="ht-paper-workspace grid xl:grid-cols-[minmax(0,1fr)_390px]" aria-label="Paper research and order review">
               <div className="min-w-0 px-5 py-6 sm:px-7">
                 <div className="min-h-12">
                   {loadedInstrument ? <div className="flex flex-wrap items-end gap-x-4 gap-y-2"><h1 className="font-mono text-4xl font-black tracking-tight">{loadedInstrument.symbol}</h1><p className="pb-0.5 font-mono text-xl font-black text-zinc-300">{priceMoney(displayedPrice)}</p><p className={`pb-1 text-sm font-black ${displayedChange >= 0 ? "text-green-300" : "text-red-300"}`}>{displayedChange >= 0 ? "+" : ""}{displayedChange.toFixed(2)}%</p></div> : <div><h1 className="text-2xl font-black">Market workspace</h1><p className="mt-1 text-xs font-semibold text-zinc-600">Search a ticker to open its verified chart and paper ticket.</p></div>}
@@ -728,7 +771,7 @@ export default function PaperTradingDashboard() {
                 )}
               </div>
 
-              <aside ref={ticketPanelRef} className="scroll-mt-4 border-t border-white/8 bg-[#0a0d0e] px-5 py-6 sm:px-6 xl:border-l xl:border-t-0">
+              <aside ref={ticketPanelRef} className="ht-paper-ticket scroll-mt-4 border-t border-white/8 bg-[#0a0d0e] px-5 py-6 sm:px-6 xl:border-l xl:border-t-0" aria-label="Paper order ticket">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[9px] font-black uppercase tracking-[0.18em] text-orange-300">Paper order</p>
@@ -837,7 +880,8 @@ export default function PaperTradingDashboard() {
               </aside>
             </section>
 
-            <section className="border-t border-white/8">
+            <section className="ht-paper-activity border-t border-white/8" aria-labelledby="paper-activity-heading">
+              <h2 id="paper-activity-heading" className="sr-only">Paper account activity</h2>
               <div className="flex min-w-0 overflow-x-auto border-b border-white/8 px-4 sm:px-6">
                 {([['positions', 'Positions', dashboard.positions.length], ['orders', 'Open orders', openOrders.length], ['fills', 'Fills', dashboard.fills.length], ['history', 'History', dashboard.orders.length]] as const).map(([tab, label, count]) => <button key={tab} onClick={() => setActivityTab(tab)} className={`whitespace-nowrap border-b-2 px-3 py-4 text-[11px] font-bold transition ${activityTab === tab ? "border-orange-400 text-white" : "border-transparent text-zinc-600 hover:text-zinc-300"}`}>{label} <span className="ml-1 font-mono text-zinc-700">{count}</span></button>)}
               </div>

@@ -11,16 +11,17 @@ export default function MobileConvictionsList({
   onOpen,
 }: MobileConvictionsListProps) {
   return (
-    <div className="h-full overflow-y-auto px-4 pb-24 pt-12">
-      <p className="mb-4 text-[11px] font-black uppercase tracking-[0.24em] text-orange-300">Top Convictions</p>
+    <section className="h-full overflow-y-auto px-4 pb-24 pt-12" aria-labelledby="mobile-convictions-title">
+      <h2 id="mobile-convictions-title" className="ht-section-label mb-4">Top convictions</h2>
       {opportunities.length === 0 ? (
         <div className="rounded-2xl border border-white/10 bg-black/20 p-6 text-center">
           <p className="text-sm font-semibold text-zinc-400">No canonical opportunities qualify right now.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <ol className="ht-ranked-list">
           {opportunities.map((opportunity) => (
-              <button key={opportunity.ticker} onClick={() => onOpen(opportunity)} className="w-full rounded-2xl border border-white/10 bg-white/[0.025] p-4 text-left">
+            <li key={opportunity.ticker}>
+              <button onClick={() => onOpen(opportunity)} className="ht-ranked-list__row">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-mono text-2xl font-black text-white">{opportunity.ticker}</p>
@@ -37,9 +38,10 @@ export default function MobileConvictionsList({
                 {opportunity.whatChanged}
               </div>
               </button>
+            </li>
           ))}
-        </div>
+        </ol>
       )}
-    </div>
+    </section>
   );
 }

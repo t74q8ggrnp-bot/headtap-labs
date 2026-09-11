@@ -40,9 +40,9 @@ function freshnessTone(state: WorkspaceReadFreshnessState) {
 
 function Metric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "positive" | "violet" | "neutral" }) {
   return (
-    <div className="rounded-xl border border-white/[0.065] bg-black/25 px-3 py-2.5">
+    <div className="ht-workspace-stat rounded-xl px-3 py-2.5">
       <p className="text-[7px] font-black uppercase tracking-[0.14em] text-zinc-700">{label}</p>
-      <p className={`mt-1 font-mono text-[11px] font-black ${tone === "positive" ? "text-emerald-400" : tone === "violet" ? "text-violet-300" : "text-zinc-300"}`}>{value}</p>
+      <p className={`ht-tabular-numbers mt-1 text-[11px] font-black ${tone === "positive" ? "text-emerald-400" : tone === "violet" ? "text-violet-300" : "text-zinc-300"}`}>{value}</p>
     </div>
   );
 }
@@ -97,7 +97,7 @@ export default function TradeWorkspaceIntelligence({
   if (!opportunity) {
     return (
       <section
-        className="rounded-2xl border border-white/[0.07] bg-white/[0.018] p-4"
+        className="ht-workspace-panel p-4"
         data-ht-read="none"
         data-chart-as-of={chartAsOf ?? ""}
       >
@@ -168,14 +168,14 @@ export default function TradeWorkspaceIntelligence({
         </p>
       )}
 
-      <section className="overflow-hidden rounded-2xl border border-violet-400/[0.12] bg-[linear-gradient(150deg,rgba(139,92,246,0.055),rgba(0,0,0,0)_55%)]">
+      <section className="ht-workspace-panel overflow-hidden border-violet-400/[0.12] bg-[linear-gradient(150deg,rgba(139,92,246,0.055),rgba(0,0,0,0)_55%)]">
         <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-3.5">
           <div>
             <p className="text-[8px] font-black uppercase tracking-[0.18em] text-violet-300">{canonicalLane}</p>
             <h2 className="mt-1.5 text-sm font-black leading-tight text-zinc-100">{opportunity.stageEmoji} {opportunity.stage}</h2>
           </div>
           <div className="text-right">
-            <p className="font-mono text-2xl font-black tracking-[-0.04em] text-emerald-400">{Math.round(opportunity.opportunityScore)}</p>
+            <p className="ht-tabular-numbers text-2xl font-black tracking-[-0.04em] text-emerald-400">{Math.round(opportunity.opportunityScore)}</p>
             <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-700">HT score</p>
           </div>
         </div>
@@ -214,7 +214,7 @@ export default function TradeWorkspaceIntelligence({
         </section>
       )}
 
-      <section className="overflow-hidden rounded-2xl border border-cyan-400/[0.11] bg-cyan-500/[0.025]">
+      <section className="ht-workspace-panel overflow-hidden border-cyan-400/[0.11] bg-cyan-500/[0.025]">
         <div className="flex items-center justify-between gap-3 border-b border-white/[0.055] px-4 py-3.5">
           <div>
             <p className="text-[8px] font-black uppercase tracking-[0.18em] text-cyan-300">ProX Market Pulse</p>

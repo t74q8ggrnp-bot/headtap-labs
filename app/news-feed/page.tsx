@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { PanelHeader, StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 const TOP_TICKERS = [
   "NVDA", "PLTR", "TSLA", "AAPL", "AMD", "MSFT", "MSTR", "HOOD",
@@ -84,6 +85,8 @@ export default function NewsPage() {
   };
 
   const selectedData = newsData.find(n => n.ticker === selectedTicker);
+  const loading = newsData.some(n => n.loading);
+  const failedCount = newsData.filter(n => n.error).length;
   const topStories = newsData
     .flatMap(n => n.articles.slice(0, 2).map(a => ({ ...a, ticker: n.ticker, velocity: n.newsVelocity })))
     .filter(a => a.headline)
@@ -97,88 +100,93 @@ export default function NewsPage() {
     v >= 80 ? "High Velocity" : v >= 60 ? "Active" : v >= 40 ? "Light" : "Quiet";
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(255,106,0,0.08),transparent_40%)]" />
-
-      <div className="relative mx-auto max-w-7xl px-5 py-6">
+    <main className="ht-discovery-route ht-news-route min-h-screen bg-[#050505] text-white">
+      <div className="mx-auto max-w-7xl px-5 py-8">
 
         {/* Header */}
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <Link href="/" className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 transition">← Dashboard</Link>
-            <h1 className="mt-3 text-3xl font-black tracking-tight">News Intel</h1>
-            <p className="mt-1 text-sm text-zinc-500">Live news velocity, catalyst strength, and narrative signals across the market.</p>
-            {lastUpdated && (
-              <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-600">
-                Updated: {lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
+        <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between lg:items-end">
+          <PanelHeader
+            headingLevel={1}
+            eyebrow="Market intelligence"
+            title="News"
+            description="News velocity, catalyst context, and narrative signals across the market."
+          />
+          <form
+            className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 lg:w-auto lg:grid-cols-[12rem_auto_auto]"
+            onSubmit={(event) => { event.preventDefault(); void handleSearch(); }}
+            role="search"
+          >
+            <label htmlFor="news-ticker-search" className="sr-only">Search news by ticker</label>
             <input
+              id="news-ticker-search"
               type="text"
               placeholder="Search ticker..."
               value={searchTicker}
               onChange={e => setSearchTicker(e.target.value.toUpperCase())}
-              onKeyDown={e => e.key === "Enter" && handleSearch()}
-              className="rounded-xl border border-white/10 bg-black/40 px-4 py-2.5 text-sm font-black uppercase text-white outline-none placeholder:normal-case placeholder:font-normal placeholder:text-zinc-600 focus:border-orange-500/50 w-40"
+              className="min-w-0 w-full rounded-xl ht-route-input uppercase placeholder:normal-case"
             />
             <button
-              onClick={handleSearch}
-              className="rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-black text-black hover:bg-orange-400 transition"
+              type="submit"
+              className="ht-filter-control ht-filter-control--active"
             >
               Search
             </button>
-            <a href="/scanner" className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-black text-zinc-300 hover:text-white transition">
-              Scanner →
-            </a>
-          </div>
+            <Link href="/scanner" className="ht-filter-control col-span-2 text-center lg:col-span-1">
+              Open scanner
+            </Link>
+          </form>
         </div>
 
         {/* Top Stories Feed */}
-        <div className="mb-6 rounded-2xl border border-orange-400/15 bg-orange-500/[0.04] p-5">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-300">Top Stories Right Now</p>
-            <span className="flex items-center gap-1.5 rounded-full border border-green-400/20 bg-green-500/[0.06] px-3 py-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-[9px] font-black uppercase tracking-[0.14em] text-green-400">Live</span>
+        <section className="ht-route-panel mb-6" aria-labelledby="top-stories-title">
+          <div className="ht-route-panel__header">
+            <div>
+              <h2 id="top-stories-title">Top stories</h2>
+              {lastUpdated && <p>Updated {lastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p>}
+            </div>
+            <span className="ht-inline-status" data-tone={failedCount > 0 ? "warning" : "positive"} role="status" aria-live="polite">
+              <span aria-hidden="true" />
+              {loading ? "Checking" : failedCount > 0 ? `${failedCount} sources unavailable` : "Current"}
             </span>
           </div>
-          <div className="space-y-2">
+          <ol className="ht-news-story-list">
             {topStories.length > 0 ? topStories.map((story, i) => (
-              <div
+              <li
                 key={`story-${i}`}
-                className="flex items-start gap-4 rounded-xl border border-white/8 bg-black/30 px-4 py-3 hover:border-orange-400/20 transition cursor-pointer"
-                onClick={() => setSelectedTicker(story.ticker)}
               >
-                <span className="rounded-lg border border-orange-400/20 bg-orange-500/10 px-2.5 py-1 text-[10px] font-black text-orange-300 shrink-0 mt-0.5">{story.ticker}</span>
-                <div className="min-w-0">
-                  <p className="text-sm font-black text-white leading-5 truncate">{story.headline}</p>
-                  {story.summary && <p className="mt-1 text-xs text-zinc-500 line-clamp-1">{story.summary}</p>}
-                  <p className="mt-1 text-[10px] text-zinc-700">{story.source} {story.datetime ? `· ${new Date(story.datetime * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</p>
-                </div>
-              </div>
+                <button type="button" onClick={() => setSelectedTicker(story.ticker)} className="ht-news-story-row">
+                  <span className="ht-symbol-label">{story.ticker}</span>
+                  <span className="min-w-0 text-left">
+                    <span className="block truncate text-sm font-bold text-white">{story.headline}</span>
+                    {story.summary && <span className="mt-1 block line-clamp-1 text-xs text-zinc-500">{story.summary}</span>}
+                    <span className="mt-1 block text-xs text-zinc-600">{story.source} {story.datetime ? `· ${new Date(story.datetime * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}</span>
+                  </span>
+                </button>
+              </li>
             )) : (
-              <div className="text-sm text-zinc-600 py-4 text-center">Loading news...</div>
+              <li><StatusState busy={loading} title={loading ? "Loading market news" : "No current stories"} description={loading ? "Checking the tracked ticker set." : "No headlines are available for the tracked ticker set."} /></li>
             )}
-          </div>
-        </div>
+          </ol>
+        </section>
 
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+        <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
 
           {/* Ticker velocity sidebar */}
-          <div className="space-y-2">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-3">News Velocity Ranking</p>
+          <section aria-labelledby="news-velocity-title">
+            <h2 id="news-velocity-title" className="ht-section-label">News velocity</h2>
+            <ol className="ht-ranked-list">
             {newsData.map(n => (
-              <button
-                key={n.ticker}
-                onClick={() => setSelectedTicker(n.ticker === selectedTicker ? null : n.ticker)}
-                className={`w-full text-left rounded-xl border px-4 py-3 transition ${selectedTicker === n.ticker ? "border-orange-400/30 bg-orange-500/[0.06]" : "border-white/8 bg-white/[0.02] hover:border-white/15"}`}
-              >
+              <li key={n.ticker}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTicker(n.ticker === selectedTicker ? null : n.ticker)}
+                  aria-pressed={selectedTicker === n.ticker}
+                  className="ht-ranked-list__row"
+                >
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-mono font-black text-white">{n.ticker}</p>
                   {n.loading ? (
-                    <span className="text-[10px] text-zinc-600">Loading...</span>
+                    <span className="text-xs text-zinc-500" role="status">Loading…</span>
                   ) : (
                     <span className={`text-[10px] font-black ${getVelocityColor(n.newsVelocity)}`}>
                       {n.newsVelocity} · {getVelocityLabel(n.newsVelocity)}
@@ -191,45 +199,48 @@ export default function NewsPage() {
                 {!n.loading && (
                   <div className="mt-2 h-1 rounded-full bg-white/10 overflow-hidden">
                     <div
-                      className={`h-full rounded-full ${n.newsVelocity >= 80 ? "bg-red-400" : n.newsVelocity >= 60 ? "bg-orange-400" : n.newsVelocity >= 40 ? "bg-yellow-400" : "bg-zinc-600"}`}
+                      className={`h-full ${n.newsVelocity >= 80 ? "bg-red-400" : n.newsVelocity >= 60 ? "bg-orange-400" : n.newsVelocity >= 40 ? "bg-yellow-400" : "bg-zinc-600"}`}
                       style={{ width: `${Math.min(100, n.newsVelocity)}%` }}
                     />
                   </div>
                 )}
-              </button>
+                </button>
+              </li>
             ))}
-          </div>
+            </ol>
+          </section>
 
           {/* Article detail panel */}
-          <div>
+          <section aria-live="polite" aria-label="Selected ticker news">
             {selectedData ? (
               <div>
-                <div className="mb-4 flex items-center justify-between">
+                <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="font-mono text-3xl font-black text-white">{selectedData.ticker}</p>
                     <p className={`mt-1 text-sm font-black ${getVelocityColor(selectedData.newsVelocity)}`}>
                       {selectedData.catalystStrength} · {selectedData.sentimentBias}
                     </p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
+                  <dl className="ht-compact-metrics grid grid-cols-3">
                     {[
                       ["Velocity", selectedData.newsVelocity],
                       ["Articles", selectedData.articles.length],
                       ["Signal", selectedData.narrativeSignal.split(" ")[0]],
                     ].map(([label, val]) => (
-                      <div key={String(label)} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
-                        <p className="text-[9px] font-black uppercase text-zinc-600">{label}</p>
-                        <p className="font-mono text-lg font-black text-white mt-0.5">{val}</p>
+                      <div key={String(label)}>
+                        <dt>{label}</dt>
+                        <dd>{val}</dd>
                       </div>
                     ))}
-                  </div>
+                  </dl>
                 </div>
 
                 {selectedData.articles.length > 0 ? (
-                  <div className="space-y-3">
+                  <ul className="ht-article-list">
                     {selectedData.articles.map((article, i) => (
-                      <div key={i} className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-                        <div className="flex items-start justify-between gap-3">
+                      <li key={i}>
+                        <article className="ht-article-row">
+                          <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="font-black text-white leading-5">{article.headline || "No headline"}</p>
                             {article.summary && (
@@ -249,27 +260,23 @@ export default function NewsPage() {
                               )}
                             </div>
                           </div>
-                        </div>
-                      </div>
+                          </div>
+                        </article>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 ) : (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8 text-center">
-                    <p className="text-sm text-zinc-500">No articles found for {selectedData.ticker}.</p>
-                  </div>
+                  <StatusState title={`No articles found for ${selectedData.ticker}`} />
                 )}
               </div>
             ) : (
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-8 text-center">
-                <p className="text-sm font-black text-zinc-400">Select a ticker to see full news feed</p>
-                <p className="mt-2 text-xs text-zinc-600">Click any ticker on the left or search above</p>
-              </div>
+              <StatusState title="Select a ticker" description="Choose a ranked ticker or use search to inspect its full news feed." />
             )}
-          </div>
+          </section>
         </div>
 
         <p className="mt-8 text-center text-[10px] text-zinc-700">HT Labs News Intel · {new Date().toLocaleDateString()} · For informational purposes only</p>
       </div>
-    </div>
+    </main>
   );
 }

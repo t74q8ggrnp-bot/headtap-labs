@@ -14,7 +14,7 @@ function SymbolRow({
   onRemove?: () => void;
 }) {
   return (
-    <div className={`group flex items-center gap-2 rounded-xl border transition ${active ? "border-orange-400/20 bg-orange-500/[0.075]" : "border-transparent hover:border-white/[0.055] hover:bg-white/[0.025]"}`}>
+    <div className={`ht-workspace-list-row group flex items-center gap-2 rounded-xl border ${active ? "border-orange-400/20 bg-orange-500/[0.075]" : "border-transparent"}`}>
       <Link href={`/trade/${encodeURIComponent(symbol)}`} className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2.5">
         <span className={`flex h-7 w-9 shrink-0 items-center justify-center rounded-lg border font-mono text-[9px] font-black ${active ? "border-orange-400/20 bg-orange-500/10 text-orange-200" : "border-white/[0.065] bg-black/35 text-zinc-400"}`}>
           {symbol.slice(0, 5)}
@@ -45,7 +45,7 @@ function SymbolRow({
 
 function EmptyList({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-white/[0.07] bg-white/[0.015] px-3 py-4 text-center text-[9px] font-semibold leading-relaxed text-zinc-600">
+    <div className="ht-workspace-empty rounded-xl border border-dashed px-3 py-4 text-center text-[9px] font-semibold leading-relaxed">
       {children}
     </div>
   );
@@ -67,7 +67,7 @@ export default function TradeWorkspaceLists({
   onRemoveWatchlist: (symbol: string) => void;
 }) {
   return (
-    <aside className="space-y-5" aria-label="Workspace lists">
+    <aside className="ht-workspace-lists space-y-5" aria-label="Workspace lists">
       <section>
         <div className="mb-2 flex items-center justify-between px-1">
           <h2 className="text-[8px] font-black uppercase tracking-[0.18em] text-zinc-600">Quick markets</h2>

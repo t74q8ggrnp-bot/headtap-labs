@@ -46,7 +46,7 @@ export default function MobileSpotMomentumCard({
   const displayLive = marketView.live;
 
   return (
-    <div className="mx-4 mb-3 mt-4 flex-shrink-0 overflow-hidden rounded-2xl border border-violet-400/15 bg-black">
+    <article className="ht-mobile-home-card mx-4 mb-3 mt-4 flex-shrink-0 overflow-hidden" aria-labelledby={`mobile-home-${opportunity.ticker}`}>
       <div className="flex items-center justify-between px-5 pb-3 pt-4">
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
@@ -55,9 +55,9 @@ export default function MobileSpotMomentumCard({
         {dualEngine && <span className="text-[8px] font-black text-amber-400">⚡ Dual Signal</span>}
       </div>
 
-      <div className="border-b border-white/8 px-5 pb-4">
+      <div className="border-b border-white/8 px-5 pb-4" data-home-priority="1-ticker-price">
         <div className="mb-2 flex items-end gap-3">
-          <p className="font-mono text-[3.2rem] font-black leading-none tracking-[-0.06em] text-white">{opportunity.ticker}</p>
+          <h2 id={`mobile-home-${opportunity.ticker}`} className="font-mono text-[2.8rem] font-black leading-none tracking-[-0.06em] text-white">{opportunity.ticker}</h2>
           <div className="pb-1">
             <span className="font-mono text-base font-black text-white">{formatMarketPrice(displayPrice)}</span>
             <span className={`ml-2 font-mono text-xs font-black ${displayChange >= 0 ? "text-green-400" : "text-red-400"}`}>
@@ -81,78 +81,72 @@ export default function MobileSpotMomentumCard({
             {view.positionLabel}
           </span>
           {catalyst && <span className="rounded-full border border-orange-400/25 bg-orange-500/[0.06] px-2.5 py-0.5 text-[9px] font-black text-orange-300">⚡ {catalyst}</span>}
-          {opportunity.riskTags.map((tag) => (
-            <span key={tag} className="rounded-full border border-red-400/25 bg-red-500/[0.06] px-2.5 py-0.5 text-[9px] font-black text-red-300">
-              ⚠ {tag}
-            </span>
-          ))}
         </div>
       </div>
 
-      <div className="border-b border-white/8 px-4 py-4">
-        <HomeTradePlan symbol={opportunity.ticker} compact />
-      </div>
-
-      <div className="border-b border-white/8 px-5 py-4">
-        <p className="text-sm font-bold leading-5 text-zinc-200">{opportunity.whyItMatters}</p>
-      </div>
-
-      <div className="border-b border-white/8 px-4 py-4">
+      <div className="border-b border-white/8 px-4 py-3" data-home-priority="2-chart">
         <HeroPriceChart asset="stock" symbol={opportunity.ticker} accent="violet" compact />
       </div>
 
-      {framework && <OpportunityWindow framework={framework} compact />}
-
-      {opportunity.explosionAssessment?.state === "price_discovery" && (
-        <div className="border-b border-white/8 px-5 py-4">
-          <PriceDiscoveryWindow assessment={opportunity.explosionAssessment} />
-        </div>
-      )}
-
-      {opportunity.signals.length > 0 && (
-        <div className="border-b border-white/8 px-5 py-3">
-          <p className="mb-2 text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700">Evidence</p>
-          <div className="space-y-1.5">
-            {opportunity.signals.slice(0, 4).map((signal, index) => (
-              <div key={`${signal}-${index}`} className="flex gap-2">
-                <span className="shrink-0 text-[10px] font-black text-violet-400/60">▸</span>
-                <p className="text-[11px] font-semibold leading-4 text-zinc-500">{signal}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="border-b border-white/8 px-5 py-3">
+      <div className="border-b border-white/8 px-5 py-4" data-home-priority="3-score-signal">
         <div className="mb-3 flex items-end justify-between">
           <div>
-            <p className="text-[7px] font-black uppercase tracking-[0.18em] text-zinc-700">Opportunity Score</p>
-            <p className="font-mono text-2xl font-black leading-none text-violet-400">{Math.round(opportunity.opportunityScore)}</p>
+            <p className="text-xs font-bold text-zinc-500">HT score</p>
+            <p className="font-mono text-3xl font-black leading-none text-violet-300">{Math.round(opportunity.opportunityScore)}</p>
           </div>
-          <p className="text-[10px] font-black text-violet-400">{view.confidenceLabel} CONFIDENCE</p>
+          <p className="text-xs font-bold text-violet-300">{view.confidenceLabel} confidence</p>
         </div>
         <OpportunityMetrics opportunity={opportunity} />
       </div>
 
-      {opportunity.proxIntelligence &&
-        opportunity.proxIntelligence.status !== "unavailable" && (
+      <div data-home-priority="4-levels-risk">
+        <div className="border-b border-white/8 px-5 py-4">
+          <h3 className="mb-3 text-xs font-bold text-zinc-400">Levels and risk</h3>
+          <HomeTradePlan symbol={opportunity.ticker} compact />
+          {opportunity.riskTags.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs font-semibold text-red-300" aria-label="Risk flags">
+              {opportunity.riskTags.map((tag) => <li key={tag}>Risk flag: {tag}</li>)}
+            </ul>
+          )}
+        </div>
+        {framework && <OpportunityWindow framework={framework} compact />}
+        {opportunity.explosionAssessment?.state === "price_discovery" && (
           <div className="border-b border-white/8 px-5 py-4">
-            <ProxPulse packet={opportunity.proxIntelligence} />
+            <PriceDiscoveryWindow assessment={opportunity.explosionAssessment} />
+          </div>
+        )}
+      </div>
+
+      <div data-home-priority="5-extended-interpretation">
+        <div className="border-b border-white/8 px-5 py-4">
+          <h3 className="mb-1 text-xs font-bold text-zinc-400">Interpretation</h3>
+          <p className="text-sm font-semibold leading-6 text-zinc-300">{opportunity.whyItMatters}</p>
+        </div>
+
+        {opportunity.signals.length > 0 && (
+          <div className="border-b border-white/8 px-5 py-4">
+            <h3 className="mb-2 text-xs font-bold text-zinc-400">Supporting evidence</h3>
+            <ul className="space-y-2">
+              {opportunity.signals.slice(0, 4).map((signal, index) => (
+                <li key={`${signal}-${index}`} className="text-xs font-semibold leading-5 text-zinc-500">{signal}</li>
+              ))}
+            </ul>
           </div>
         )}
 
-      {narrative && (
-        <div className="border-b border-white/8 px-5 py-3">
-          <p className="mb-1.5 text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700">HT Read</p>
-          <p className="text-xs font-semibold italic leading-5 text-zinc-500">“{narrative}”</p>
-        </div>
-      )}
+        {opportunity.proxIntelligence && opportunity.proxIntelligence.status !== "unavailable" && (
+          <div className="border-b border-white/8 px-5 py-4"><ProxPulse packet={opportunity.proxIntelligence} /></div>
+        )}
 
-      {trace && (
-        <div className="border-b border-white/8 px-5 py-3">
-          <DecisionTrace trace={trace} />
-        </div>
-      )}
+        {narrative && (
+          <div className="border-b border-white/8 px-5 py-4">
+            <h3 className="mb-1 text-xs font-bold text-zinc-400">Extended HT read</h3>
+            <p className="text-xs font-semibold italic leading-5 text-zinc-500">“{narrative}”</p>
+          </div>
+        )}
+
+        {trace && <div className="border-b border-white/8 px-5 py-4"><DecisionTrace trace={trace} /></div>}
+      </div>
 
       <div className="px-5 py-4">
         <div className="flex gap-2">
@@ -169,6 +163,6 @@ export default function MobileSpotMomentumCard({
         </Link>
         <p className="mt-2.5 text-center text-[8px] font-semibold text-zinc-700">Signals are for research only, not financial advice.</p>
       </div>
-    </div>
+    </article>
   );
 }

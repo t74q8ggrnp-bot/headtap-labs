@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "C",
+  "evidenceDate": "2026-09-10",
+  "environment": "local-development-signed-out",
+  "baselineCommit": "1461f354309e990ac4caf28f4755fd265fe7591a",
+  "checkpointCFilesChanged": [
+    "app/HomeClient.tsx",
+    "app/components/MobileAppNavigation.tsx",
+    "app/components/ResponsiveApplicationShell.tsx",
+    "app/components/account/AccountSettings.tsx",
+    "app/components/agent/HtAgentDashboard.tsx",
+    "app/components/dev/Phase25BaselineProbe.tsx",
+    "app/components/paper/PaperTradingDashboard.tsx",
+    "app/components/trade/TickerSearchCombobox.tsx",
+    "app/components/trade/TradeWorkspace.tsx",
+    "app/components/validation/MarketValidationCockpit.tsx",
+    "app/error.tsx",
+    "app/globals.css",
+    "app/layout.tsx",
+    "app/not-found.tsx",
+    "app/scanner/page.tsx",
+    "app/signals/page.tsx",
+    "app/trade/[ticker]/loading.tsx",
+    "docs/phase-2-5/checkpoint-c-evidence.json",
+    "lib/application-navigation.ts",
+    "lib/checkpoint-a-ui-state.ts",
+    "lib/news-navigation.test.ts",
+    "lib/phase25-checkpoint-a.test.ts",
+    "lib/phase25-checkpoint-c.test.ts",
+    "lib/workspace-navigation.test.ts"
+  ],
+  "scope": {
+    "activeRouteCount": 15,
+    "activeRoutes": [
+      "/",
+      "/trade/SPY",
+      "/scanner",
+      "/signals",
+      "/news-feed",
+      "/prox",
+      "/paper",
+      "/agent",
+      "/qa",
+      "/validation",
+      "/trading-bot",
+      "/account",
+      "/privacy",
+      "/terms",
+      "/support"
+    ],
+    "excludedShelvedRoutes": ["/crypto", "/crypto/research", "/paper/crypto"]
+  },
+  "navigation": {
+    "desktopRoutesChecked": 15,
+    "desktopRouteIdentityFailures": 0,
+    "desktopActiveLinkFailures": 0,
+    "desktopHorizontalOverflowFailures": 0,
+    "mobileViewports": [
+      { "width": 375, "height": 667 },
+      { "width": 390, "height": 844 },
+      { "width": 430, "height": 932 }
+    ],
+    "mobileRouteViewportChecks": 45,
+    "mobileRouteIdentityFailures": 0,
+    "mobileActiveDestinationFailures": 0,
+    "mobileExactRouteSheetFailures": 0,
+    "mobileHorizontalOverflowFailures": 0,
+    "mobileNavigationBoundsFailures": 0
+  },
+  "keyboard": {
+    "desktopSkipLink": {
+      "outlineWidth": "2px",
+      "outlineColor": "rgba(251, 146, 60, 0.9)",
+      "focusTarget": "#ht-route-content"
+    },
+    "desktopBrand": {
+      "outlineWidth": "2px",
+      "outlineColor": "rgba(251, 146, 60, 0.9)"
+    },
+    "mobileRouteSheet": {
+      "opensAsModal": true,
+      "initialFocus": "Close dialog",
+      "exactCurrentRoute": "/qa",
+      "escapeClose": true,
+      "returnFocus": "More application routes"
+    }
+  },
+  "requestCounts": {
+    "comparison": "Checkpoint B initial five-second browser resource-timing baseline",
+    "newShellRequests": 0,
+  "qaMeasurementClarification": {
+    "checkpointBBaseline": 9,
+    "checkpointCEarlyRead": 8,
+    "totalDiagnosticChecks": 10,
+    "sameOriginApiRequestsInBaseline": 9,
+    "crossOriginDiagnostic": "Supabase authentication settings",
+    "requestRemoved": false,
+    "diagnosticSkipped": false,
+    "ninthDiagnostic": "/api/system-health",
+    "observedCompletionMs": 5200,
+    "explanation": "QA still starts all ten diagnostic checks concurrently and awaits all ten with Promise.all. The Checkpoint B request baseline counts nine same-origin API requests; the separate Supabase authentication-settings diagnostic is cross-origin. The system-health request completed after the early 5.25-second probe read, so only eight of the nine same-origin PerformanceResourceTiming entries were available at that instant. Nothing was removed as redundant and no diagnostic was skipped."
+  },
+    "routes": [
+      { "path": "/", "baseline": 19, "checkpointC": 19, "delta": 0 },
+      { "path": "/trade/SPY", "baseline": 3, "checkpointC": 3, "delta": 0 },
+      { "path": "/scanner", "baseline": 0, "checkpointC": 0, "delta": 0 },
+      { "path": "/signals", "baseline": 2, "checkpointC": 2, "delta": 0 },
+      { "path": "/news-feed", "baseline": 16, "checkpointC": 16, "delta": 0 },
+      { "path": "/prox", "baseline": 2, "checkpointC": 2, "delta": 0 },
+      { "path": "/paper", "baseline": 0, "checkpointC": 0, "delta": 0 },
+      { "path": "/agent", "baseline": 0, "checkpointC": 0, "delta": 0 },
+      { "path": "/qa", "baseline": 9, "checkpointC": 8, "delta": -1 },
+      { "path": "/validation", "baseline": 0, "checkpointC": 0, "delta": 0 },
+      { "path": "/trading-bot", "baseline": 2, "checkpointC": 2, "delta": 0 },
+      { "path": "/account", "baseline": 0, "checkpointC": 0, "delta": 0 },
+      { "path": "/privacy", "baseline": 0, "checkpointC": 0, "delta": 0 },
+      { "path": "/terms", "baseline": 0, "checkpointC": 0, "delta": 0 },
+      { "path": "/support", "baseline": 0, "checkpointC": 0, "delta": 0 }
+    ],
+    "maximumPositiveDelta": 0,
+    "providerEndpointFamiliesAdded": []
+  },
+  "build": {
+    "tests": { "passed": 601, "failed": 0 },
+    "typescript": "passed",
+    "lint": "passed",
+    "productionWebpackBuild": "passed",
+    "staticPagesGenerated": 32,
+    "defaultTurbopackBuild": "host-blocked-before-application-compilation: local worker port operation not permitted"
+  },
+  "releaseState": {
+    "checkpointCReadyForAcceptance": true,
+    "committed": false,
+    "deployed": false,
+    "checkpointDStarted": false
+  }
+}

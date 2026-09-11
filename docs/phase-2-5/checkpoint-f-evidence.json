@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "F",
+  "generatedAt": "2026-09-11T02:20:21Z",
+  "status": "implementation_complete_acceptance_blocked",
+  "deployed": false,
+  "committed": false,
+  "startingCommit": "1461f354309e990ac4caf28f4755fd265fe7591a",
+  "scope": [
+    "/paper",
+    "/agent",
+    "/qa",
+    "/validation",
+    "/trading-bot",
+    "/account",
+    "/support",
+    "/privacy",
+    "/terms",
+    "global metadata",
+    "remaining shared-shell inconsistencies"
+  ],
+  "filesChangedForCheckpointF": [
+    "app/HomeClient.tsx",
+    "app/components/ResponsiveApplicationShell.tsx",
+    "app/components/account/AccountSettings.tsx",
+    "app/components/agent/HtAgentDashboard.tsx",
+    "app/components/legal/LegalDocument.tsx",
+    "app/components/mobile/MobileExperience.tsx",
+    "app/components/paper/PaperTradingDashboard.tsx",
+    "app/components/ui/ApplicationPrimitives.tsx",
+    "app/components/validation/MarketValidationCockpit.tsx",
+    "app/globals.css",
+    "app/layout.tsx",
+    "app/paper/page.tsx",
+    "app/qa/page.tsx",
+    "app/trading-bot/page.tsx",
+    "lib/phase25-checkpoint-f.test.ts",
+    "tools/capture-phase25-visual-baselines.mjs",
+    "docs/phase-2-5/checkpoint-f-route-scorecard.json",
+    "docs/phase-2-5/checkpoint-f-evidence.json"
+  ],
+  "visualEvidence": {
+    "checkpointBBaselineManifest": ".artifacts/phase25-baseline/manifest.json",
+    "checkpointBBaselineManifestSha256": "e30ac6996e34043b77795d1fb19c473d7646865302f919bd85d30d74eb5b90c6",
+    "checkpointBCount": 75,
+    "manifest": ".artifacts/phase25-checkpoint-f/manifest.json",
+    "manifestSha256": "f6b6369c4650560a2108ed5be2fe654c8eaec849e44ad95abf2a0fc1c67ae131",
+    "generatedAt": "2026-09-11T02:19:09.503Z",
+    "captureCount": 105,
+    "activeRouteCount": 15,
+    "uniqueRouteViewportCombinations": 105,
+    "missingOrHashMismatch": 0,
+    "viewports": [
+      { "name": "mobile-375-short", "width": 375, "height": 667 },
+      { "name": "mobile-375", "width": 375, "height": 812 },
+      { "name": "mobile-390", "width": 390, "height": 844 },
+      { "name": "mobile-430", "width": 430, "height": 932 },
+      { "name": "desktop-1280", "width": 1280, "height": 800 },
+      { "name": "desktop-1440", "width": 1440, "height": 900 },
+      { "name": "desktop-1720", "width": 1720, "height": 1000 }
+    ],
+    "review": "All 105 images were captured; representative F surfaces were visually inspected at the shortest mobile viewport, standard mobile viewports, and 1440 desktop. No clipped content, horizontal overflow evidence, or bottom-navigation safe-area collision was observed.",
+    "excludedShelvedRoutes": ["/crypto", "/crypto/research", "/paper/crypto"]
+  },
+  "browserAndNativeEvidence": {
+    "firefox": "105 local visual captures completed with Firefox headless",
+    "inAppBrowser": "15-route 1280x720 DOM and accessibility-tree audit completed: zero blank routes, raw Unauthorized strings, duplicate IDs, missing image alt text, unnamed interactive controls, or measured horizontal overflow",
+    "chrome": "not available in the current browser-control environment",
+    "desktopSafari": "not available through the current browser-control environment",
+    "nativeIOS": {
+      "device": "iPhone 17 Pro simulator, iOS 26.5",
+      "xcode": "26.6 build 17F113",
+      "nativeBuild": "passed",
+      "bundle": "com.gethtlabs.app",
+      "webContainer": "Capacitor WKWebView",
+      "productionServer": "https://gethtlabs.com",
+      "screenshot": "/private/tmp/htlabs-phase25-native.png",
+      "screenshotDimensions": "1206x2622",
+      "screenshotSha256": "7dc193d29bf72e80ded256cb267326435fdc77aae6a548a366283a7cadca21a8",
+      "result": "production Home populated without safe-area or bottom-navigation collision"
+    }
+  },
+  "stateEvidence": {
+    "populated": ["production Home", "production Scanner", "production News API", "production Pro X API", "production SPY chart bootstrap", "local QA diagnostics"],
+    "loading": ["Paper", "Agent", "QA", "Validation", "Trading Bot", "Account", "market discovery routes"],
+    "empty": ["Trading Bot", "Signals", "market discovery routes"],
+    "unavailable": ["Scanner", "News", "Pro X", "chart", "Validation", "Trading Bot"],
+    "signedOut": ["Paper", "Agent", "Validation", "Account"],
+    "error": ["global error shell", "Paper instrument status", "Agent session", "QA checks", "Validation", "Trading Bot"],
+    "credentialedUserStateGap": ["Paper account and review", "Agent controls", "Validation cockpit", "Account authenticated controls"]
+  },
+  "requestEvidence": {
+    "checkpointBBaseline": "docs/phase-2-5/request-baseline.json",
+    "notes": [
+      "Counts are browser Resource Timing entries and include React development-mode duplicate effects.",
+      "Checkpoint F changes no fetch endpoint, provider hook, refresh timer, polling cadence, or chart initialization path.",
+      "Background-tab throttling delayed some timed observations; endpoint-family count and source-contract tests are authoritative for cadence comparison."
+    ],
+    "checkpointFRoutes": [
+      { "path": "/paper", "baselineInitial5s": 0, "checkpointFInitial5s": 0, "baselineObserved": 0, "checkpointFObserved": 0 },
+      { "path": "/agent", "baselineInitial5s": 0, "checkpointFInitial5s": 0, "baselineObserved": 0, "checkpointFObserved": 0 },
+      { "path": "/qa", "baselineEndpointCount": 9, "checkpointFEndpointCount": 9, "endpointIncrease": 0 },
+      { "path": "/validation", "baselineInitial5s": 0, "checkpointFInitial5s": 0, "baselineObserved": 0, "checkpointFObserved": 0 },
+      { "path": "/trading-bot", "baselineInitial5s": 2, "checkpointFInitial5s": 2, "pollIntervalMs": 30000, "endpoint": "/api/bot-trades?limit=100", "endpointIncrease": 0 },
+      { "path": "/account", "baselineInitial5s": 0, "checkpointFInitial5s": 0, "baselineObserved": 0, "checkpointFObserved": 0 },
+      { "path": "/support", "baselineInitial5s": 0, "checkpointFInitial5s": 0, "baselineObserved": 0, "checkpointFObserved": 0 },
+      { "path": "/privacy", "baselineInitial5s": 0, "checkpointFInitial5s": 0, "baselineObserved": 0, "checkpointFObserved": 0 },
+      { "path": "/terms", "baselineInitial5s": 0, "checkpointFInitial5s": 0, "baselineObserved": 0, "checkpointFObserved": 0 }
+    ],
+    "increases": 0,
+    "overlapRegressions": 0,
+    "duplicatePollingRegressions": 0,
+    "duplicateChartInitializationRegressions": 0,
+    "qaDiagnosticClarification": "QA retains all ten diagnostics: nine same-origin API requests plus the direct Supabase Auth check. No diagnostic is skipped.",
+    "scannerLocalZeroRequestClarification": "The Scanner component still executes both accepted /api/opportunities fetches and its 30-second refresh. Local server logs show those requests; the checkout lacks SUPABASE_SERVICE_KEY, so the canonical server read fails and the route enters its mature unavailable state. Production returned populated ranked opportunities, proving fetching is not broken."
+  },
+  "productionDataEvidence": {
+    "environment": "https://gethtlabs.com",
+    "capturedAt": "2026-09-11T01:53:50Z through 2026-09-11T01:54:51Z",
+    "scanner": {
+      "http": 200,
+      "requested": 3,
+      "returned": 3,
+      "uiRankedCount": 149,
+      "payloadTimestamp": "2026-09-11T01:53:50.750Z",
+      "engineVersion": "opportunities-v19-scenario-integrity",
+      "candidateCount": 286,
+      "providerTimestampAuthority": "provider_market_timestamp",
+      "sourceRunId": "2b3cfd9e-f103-45a7-a345-1e42ef9da1d6"
+    },
+    "news": {
+      "http": 200,
+      "symbol": "NVDA",
+      "dataAvailable": true,
+      "articles": 8,
+      "sourceCount": 1,
+      "newsVelocity": 83,
+      "narrativeSignal": "Narrative pressure accelerating"
+    },
+    "prox": {
+      "http": 200,
+      "payloadTimestamp": "2026-09-11T01:53:51.918Z",
+      "totalCount": 27990,
+      "returned": 3,
+      "firstEvent": "verified CYAB 8-K, filed 2026-09-10, confidence 95"
+    },
+    "chartBootstrap": {
+      "http": 200,
+      "symbol": "SPY",
+      "dataMode": "delayed",
+      "source": "Massive minute aggregates",
+      "intervalSeconds": 60,
+      "barCount": 860,
+      "latestAt": "2026-09-10T23:59:00.000Z",
+      "providerTimestamp": "2026-09-11T00:00:00.002Z",
+      "requestId": "1aab268a-f439-4ab7-8dd1-d790ffccf812",
+      "providerRequestCount": 4,
+      "acceptedEvidenceCount": 4,
+      "legacyEquivalentRequestCount": 4,
+      "requests": ["minute_history", "second_delta", "snapshot", "last_trade"]
+    }
+  },
+  "productionHealth": {
+    "checkedAt": "2026-09-11T02:15:48.968Z",
+    "http": 500,
+    "durationSeconds": 3.406778,
+    "ok": false,
+    "status": "needs_attention",
+    "message": "HT Labs signal pipeline needs attention.",
+    "displayableSignals": 20,
+    "failures": [
+      { "name": "prox_realtime_microstructure_observations", "message": "One or more direct quote/tape provider reads failed." },
+      { "name": "massive_realtime_entitlement", "message": "No successful persisted real-time Massive stock receipt is available to prove the configured entitlement." }
+    ]
+  },
+  "accessibilityEvidence": {
+    "automated": [
+      "full ESLint including eslint-plugin-jsx-a11y passed",
+      "15-route DOM audit checked duplicate IDs, image alternatives, named controls, blank screens, raw unauthorized text, and desktop overflow",
+      "614-test suite includes route semantics, announced states, focus authority, and dialog contracts"
+    ],
+    "keyboard": [
+      "Skip link is first focus target",
+      "shared shell controls expose a visible 2px focus outline",
+      "native dialog uses showModal, browser focus containment, native Escape cancel, explicit close, and saved-trigger focus restoration"
+    ],
+    "dialogAndSheetContract": {
+      "focusTrap": "native dialog showModal",
+      "escapeDismissal": "native cancel handler closes",
+      "focusRestoration": "saved trigger receives focus on close",
+      "scrollLocking": "html and body lock while .ht-dialog-sheet[open]",
+      "safeArea": "sheet and mobile shell use env(safe-area-inset-bottom)"
+    },
+    "runtimeGap": "A runtime click-through of the mobile More sheet was not completed because the current desktop browser controller could not enter the fixed-width qualification iframe. The native behavior is covered by focused source-contract tests but remains an acceptance evidence gap."
+  },
+  "automatedVerification": {
+    "focusedTests": { "command": "node --experimental-strip-types --test lib/phase25-checkpoint-a.test.ts lib/phase25-checkpoint-c.test.ts lib/phase25-checkpoint-d.test.ts lib/phase25-checkpoint-e.test.ts lib/phase25-checkpoint-f.test.ts lib/phase25-foundation.test.ts", "passed": 28, "failed": 0 },
+    "fullSuite": { "command": "npm test", "passed": 614, "failed": 0 },
+    "typescript": { "command": "npx tsc --noEmit", "status": "passed" },
+    "eslint": { "command": "npm run lint", "status": "passed" },
+    "diffValidation": { "command": "git diff --check", "status": "passed" },
+    "productionWebpackBuild": { "command": "npm run ios:build", "status": "passed", "compiler": "Next.js 16.3.4 webpack" },
+    "nativeIOSBuild": { "command": "xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -destination id=DD8DCA14-D227-4EE0-AA85-A202F8418124 -derivedDataPath /tmp/htlabs-phase25-derived build", "status": "passed" }
+  },
+  "preservedBoundaries": [
+    "Paper review and validation boundaries and no-live-broker authority",
+    "Agent X authority and immutable plan IDs",
+    "scoring, Canonical, and Pro X calculations and authority",
+    "market feeds, provider timestamps, polling cadence, and chart initialization",
+    "database contracts and authentication ownership",
+    "deep links, brokerage restrictions, crypto shelving, and Sterling exclusion"
+  ],
+  "blockingIssues": [
+    "Production system health is HTTP 500 / needs_attention because prox_realtime_microstructure_observations and massive_realtime_entitlement fail.",
+    "No authorized credentialed user session was available to exercise populated Paper, HT Agent, Validation, and Account states or the Paper review flow.",
+    "The mobile More dialog behavior has source-contract coverage but lacks a completed runtime click-through for focus trap, Escape, restoration, and scroll locking.",
+    "WCAG-oriented JSX lint and the automated DOM/AX audit pass, but a dedicated in-browser axe scan was not completed in the available browser harness.",
+    "Chrome and desktop Safari were unavailable in the controlled browser environment; Firefox, the in-app browser, and native iPhone Capacitor WKWebView were covered.",
+    "Checkpoint F is intentionally not deployed, so production/native screenshots represent the currently deployed build rather than the uncommitted Checkpoint F UI."
+  ],
+  "finalGate": "not_ready_for_owner_acceptance",
+  "phase25Complete": false
+}

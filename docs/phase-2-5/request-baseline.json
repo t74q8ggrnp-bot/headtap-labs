@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "baselineDate": "2026-09-10",
+  "checkpoint": "B",
+  "environment": "local-development-signed-out",
+  "viewport": { "width": 1280, "height": 720 },
+  "notes": [
+    "Counts are raw browser resource-timing entries and include React development-mode duplicate effects.",
+    "These values are regression baselines, not performance approval or production traffic estimates.",
+    "Endpoint payloads, refresh contracts, and provider behavior were not changed while measuring."
+  ],
+  "routes": [
+    {
+      "path": "/",
+      "initial5s": 19,
+      "observedAtMs": 72474,
+      "observed": 24,
+      "endpointFamilies": {
+        "/api/market-context": 3,
+        "/api/scanner_expansion": 1,
+        "/api/market-movers": 4,
+        "/api/ht-signals-feed": 4,
+        "/api/news-intel": 12
+      },
+      "horizontalOverflowPx": 0
+    },
+    {
+      "path": "/trade/SPY",
+      "initial5s": 3,
+      "observedAtMs": 69455,
+      "observed": 4,
+      "endpointFamilies": { "/api/instruments/SPY": 2, "/api/opportunity-ticker": 2 },
+      "horizontalOverflowPx": 0
+    },
+    { "path": "/scanner", "initial5s": 0, "observedAtMs": 68381, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 },
+    { "path": "/signals", "initial5s": 2, "observedAtMs": 67493, "observed": 2, "endpointFamilies": { "/api/signals-history": 2 }, "horizontalOverflowPx": 0 },
+    { "path": "/news-feed", "initial5s": 16, "observedAtMs": 67282, "observed": 16, "endpointFamilies": { "/api/news-intel": 16 }, "horizontalOverflowPx": 0 },
+    { "path": "/prox", "initial5s": 2, "observedAtMs": 66294, "observed": 4, "endpointFamilies": { "/api/prox-events": 4 }, "horizontalOverflowPx": 0 },
+    { "path": "/paper", "initial5s": 0, "observedAtMs": 66389, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 },
+    { "path": "/agent", "initial5s": 0, "observedAtMs": 65350, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 },
+    {
+      "path": "/qa",
+      "initial5s": 9,
+      "observedAtMs": 64338,
+      "observed": 9,
+      "endpointFamilies": {
+        "/api/bulk-quote": 1,
+        "/api/quote": 1,
+        "/api/opportunities": 1,
+        "/api/ai": 1,
+        "/api/system-health": 1,
+        "/api/news-intel": 1,
+        "/api/social-intel": 1,
+        "/api/market-behavior": 1,
+        "/api/premarket": 1
+      },
+      "horizontalOverflowPx": 0
+    },
+    { "path": "/validation", "initial5s": 0, "observedAtMs": 63808, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 },
+    { "path": "/trading-bot", "initial5s": 2, "observedAtMs": 63395, "observed": 4, "endpointFamilies": { "/api/bot-trades": 4 }, "horizontalOverflowPx": 0 },
+    { "path": "/account", "initial5s": 0, "observedAtMs": 62567, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 },
+    { "path": "/privacy", "initial5s": 0, "observedAtMs": 61414, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 },
+    { "path": "/terms", "initial5s": 0, "observedAtMs": 60349, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 },
+    { "path": "/support", "initial5s": 0, "observedAtMs": 60352, "observed": 0, "endpointFamilies": {}, "horizontalOverflowPx": 0 }
+  ],
+  "excludedRoutes": ["/crypto", "/crypto/research", "/paper/crypto"]
+}

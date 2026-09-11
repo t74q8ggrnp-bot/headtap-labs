@@ -69,7 +69,7 @@ export default function TickerSearchCombobox({
         const payload = (await response.json()) as SearchPayload;
         if (controller.signal.aborted) return;
         if (!response.ok || payload.ok !== true) {
-          throw new Error(payload.error || "Search is temporarily unavailable.");
+          throw new Error("Ticker search is temporarily unavailable. Enter a supported symbol directly or try again.");
         }
         setResults(payload.results ?? []);
         setResultsQuery(trimmed);
@@ -121,7 +121,7 @@ export default function TickerSearchCombobox({
 
   return (
     <div className="relative min-w-0 flex-1" data-testid="workspace-ticker-search">
-      <div className={`flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-black/35 transition focus-within:border-orange-400/45 focus-within:bg-black/55 ${compact ? "px-3 py-1.5" : "px-3.5 py-2.5"}`}>
+      <div className={`ht-workspace-search flex min-h-11 items-center gap-2 ${compact ? "px-3 py-1.5" : "px-3.5 py-2.5"}`}>
         <svg
           aria-hidden="true"
           className="h-4 w-4 shrink-0 text-zinc-600"
@@ -194,7 +194,9 @@ export default function TickerSearchCombobox({
             type="button"
             onMouseDown={(event) => event.preventDefault()}
             onClick={submit}
-            className="min-h-9 rounded-md bg-orange-500/15 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-orange-300 transition hover:bg-orange-500/25"
+            className="ht-control min-h-9 px-2 py-1 text-[9px] uppercase tracking-[0.12em]"
+            data-variant="quiet"
+            data-size="small"
           >
             Open
           </button>

@@ -86,6 +86,7 @@ export default function HtAgentDashboard() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [signedIn, setSignedIn] = useState(false);
 
   const request = useCallback(async (init?: RequestInit) => {
@@ -101,7 +102,13 @@ export default function HtAgentDashboard() {
       },
     });
     const body = await response.json() as { ok: boolean; dashboard?: AgentDashboard; error?: string };
-    if (!response.ok || !body.ok) throw new Error(body.error ?? "HT Agent request failed.");
+    if (!response.ok || !body.ok) {
+      throw new Error(
+        response.status === 401 || response.status === 403
+          ? "Your HT Agent session has expired. Sign in again to continue."
+          : "HT Agent is temporarily unavailable. No paper action was taken.",
+      );
+    }
     if (body.dashboard) setDashboard(body.dashboard);
     return body;
   }, []);
@@ -122,12 +129,18 @@ export default function HtAgentDashboard() {
     let mounted = true;
     void supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
+      setAuthError("");
       setSignedIn(Boolean(data.session));
       setAuthReady(true);
       if (data.session) void request().catch((error) => setMessage(error.message));
+    }).catch(() => {
+      if (!mounted) return;
+      setAuthError("Your secure session could not be verified. Reload the page to try again. No paper action was taken.");
+      setAuthReady(true);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
+      setAuthError("");
       setSignedIn(Boolean(session));
       setAuthReady(true);
       if (session) void request().catch((error) => setMessage(error.message));
@@ -142,18 +155,27 @@ export default function HtAgentDashboard() {
     return () => window.clearInterval(timer);
   }, [request, signedIn]);
 
-  if (!authReady) return <div className="min-h-screen bg-[#050505]" />;
+  if (!authReady) return (
+    <main
+      className="grid min-h-screen place-items-center bg-[#050505] px-6 text-center text-white"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div>
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-300">HT Agent</p>
+        <h1 className="mt-3 text-2xl font-black">Opening your secure workspace</h1>
+        <p className="mt-2 text-sm text-zinc-500">Checking your paper-only session…</p>
+      </div>
+    </main>
+  );
 
   return (
-    <main className="min-h-screen bg-[#050505] px-3 py-4 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1680px] overflow-hidden rounded-[28px] border border-white/10 bg-[#080b0d] shadow-2xl shadow-black/60">
+    <main className="ht-phase25-route ht-operator-route ht-agent-route min-h-screen bg-[#050505] px-3 py-4 text-white sm:px-6 lg:px-8" data-route-audience="operator">
+      <div className="ht-phase25-frame mx-auto max-w-[1680px] overflow-hidden rounded-[28px] border border-white/10 bg-[#080b0d] shadow-2xl shadow-black/60">
         <header className="flex flex-wrap items-center justify-between gap-5 border-b border-white/8 px-5 py-4 lg:px-8">
           <div className="flex items-center gap-8">
             <Link href="/" aria-label="HT Labs home"><Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-10 w-auto" priority /></Link>
-            <nav className="hidden gap-6 text-sm font-bold text-zinc-500 md:flex">
-              <Link href="/">Top Convictions</Link><Link href="/scanner">Scanner</Link><Link href="/trade">Workspace</Link><Link href="/paper">Paper</Link>
-              <span className="text-orange-300">HT Agent</span>
-            </nav>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em]">
             <span className={`h-2 w-2 rounded-full ${dashboard && !dashboard.control.globalKillSwitch && !dashboard.control.profileKillSwitch ? "bg-emerald-400 shadow-[0_0_16px_#34d399]" : "bg-red-400"}`} />
@@ -162,17 +184,21 @@ export default function HtAgentDashboard() {
         </header>
 
         {!signedIn ? (
-          <section className="grid min-h-[620px] place-items-center px-6 text-center">
-            <div><p className="text-3xl font-black">Sign in to open HT Agent</p><p className="mt-3 text-zinc-500">Your Agent is isolated to your HT Labs paper account.</p><Link href="/" className="mt-6 inline-block rounded-xl bg-orange-500 px-6 py-3 font-black text-black">Go to sign in</Link></div>
+          authError ? (
+            <section className="grid min-h-[620px] place-items-center px-6 text-center" role="alert">
+              <div><h1 className="text-2xl font-black">HT Agent session unavailable</h1><p className="mt-3 max-w-xl text-zinc-500">{authError}</p></div>
+            </section>
+          ) : <section className="grid min-h-[620px] place-items-center px-6 text-center">
+            <div><h1 className="text-3xl font-black">Sign in to open HT Agent</h1><p className="mt-3 text-zinc-500">Your Agent is isolated to your HT Labs paper account.</p><Link href="/" className="mt-6 inline-block rounded-xl bg-orange-500 px-6 py-3 font-black text-black">Go to sign in</Link></div>
           </section>
         ) : !dashboard ? (
           <section className="grid min-h-[620px] place-items-center px-6 text-center"><div><p className="text-xl font-black">HT Agent is unavailable</p><p className="mt-3 max-w-xl text-sm text-zinc-500">{message || "Loading the paper-only control plane…"}</p></div></section>
         ) : (
           <>
-            <section className="grid border-b border-white/8 lg:grid-cols-[1.35fr_.65fr]">
+            <section className="ht-operator-control-grid grid border-b border-white/8 lg:grid-cols-[1.35fr_.65fr]" aria-labelledby="agent-control-heading">
               <div className="px-5 py-7 lg:px-8">
                 <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-300">HT Agent · Phase 1</p>
-                <div className="mt-3 flex flex-wrap items-end gap-4"><h1 className="text-4xl font-black tracking-tight sm:text-6xl">Decision control</h1><span className="mb-2 rounded-full border border-orange-400/25 bg-orange-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-orange-300">{dashboard.control.mode.replaceAll("_", " ")}</span></div>
+                <div className="mt-3 flex flex-wrap items-end gap-4"><h1 id="agent-control-heading" className="text-4xl font-black tracking-tight sm:text-6xl">Decision control</h1><span className="mb-2 rounded-full border border-orange-400/25 bg-orange-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-orange-300">{dashboard.control.mode.replaceAll("_", " ")}</span></div>
                 <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-500">Canonical detects and ranks. Independent ProX supports, warns, vetoes, or abstains. A deterministic risk gate owns every paper action.</p>
                 <div className="mt-7 grid grid-cols-3 gap-3">
                   {[['Equity', money(dashboard.paper.account.equity)], ['Buying power', money(dashboard.paper.account.buyingPower)], ['Realized P&L', money(dashboard.paper.account.realizedPnl)]].map(([label, value]) => <div key={label} className="rounded-2xl border border-white/8 bg-black/20 p-4"><p className="text-[9px] font-bold uppercase tracking-wider text-zinc-600">{label}</p><p className="mt-2 truncate font-mono text-sm font-black sm:text-lg">{value}</p></div>)}
@@ -186,7 +212,7 @@ export default function HtAgentDashboard() {
                 <button disabled={busy} onClick={() => void act({ action: "configure", killSwitch: !dashboard.control.profileKillSwitch })} className={`mt-4 w-full rounded-xl border px-4 py-3 text-xs font-black uppercase tracking-wider ${dashboard.control.profileKillSwitch ? "border-red-400/30 bg-red-500/10 text-red-300" : "border-emerald-400/25 bg-emerald-500/10 text-emerald-300"}`}>{dashboard.control.profileKillSwitch ? "Profile locked · unlock paper Agent" : "Profile active · engage kill switch"}</button>
                 <button disabled={busy || dashboard.control.globalKillSwitch} onClick={() => void act({ action: "run" })} className="mt-3 w-full rounded-xl bg-orange-500 px-4 py-3 text-xs font-black uppercase tracking-wider text-black disabled:cursor-not-allowed disabled:opacity-30">{busy ? "Processing…" : "Run aligned decision cycle"}</button>
                 {dashboard.control.globalKillSwitch && <p className="mt-3 text-xs text-red-300">Global kill switch: {dashboard.control.globalReason}</p>}
-                {message && <p className="mt-3 text-xs text-red-300">{message}</p>}
+                {message && <p className="mt-3 text-xs text-red-300" role="alert">{message}</p>}
               </aside>
             </section>
 
@@ -214,8 +240,8 @@ export default function HtAgentDashboard() {
             <section className="p-5 lg:p-8">
               <div>
                 <div className="flex items-center justify-between"><h2 className="text-lg font-black">Decision stream</h2><span className="text-[9px] font-bold uppercase tracking-wider text-zinc-600">Includes no-trades</span></div>
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  {dashboard.decisions.slice(0, 16).map((decision) => <article key={decision.id} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="ht-operator-record-list mt-4 grid gap-3 lg:grid-cols-2" role="list">
+                  {dashboard.decisions.slice(0, 16).map((decision) => <article key={decision.id} className="rounded-2xl border border-white/8 bg-black/20 p-4" role="listitem">
                     <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><strong className="text-xl">{decision.symbol}</strong><span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase ${badgeTone(decision.action)}`}>{publicActionLabel(decision.action)}</span><span className="text-[9px] uppercase text-zinc-600">{decision.state}</span></div><time className="text-[10px] text-zinc-600">{new Date(decision.decided_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time></div>
                     <p className="mt-3 text-xs leading-5 text-zinc-500">{decision.explanation}</p>
                     {hasEntryProposal(decision) ? (

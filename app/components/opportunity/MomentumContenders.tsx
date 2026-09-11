@@ -13,11 +13,11 @@ export default function MomentumContenders({
   onSelect,
 }: MomentumContendersProps) {
   return (
-    <div className="flex h-full min-h-full flex-col bg-white/[0.01] p-5">
+    <section className="flex h-full min-h-full flex-col bg-white/[0.01] p-5" aria-labelledby="momentum-contenders-title">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-[8px] font-black uppercase tracking-[0.22em] text-zinc-700">
+        <h3 id="momentum-contenders-title" className="text-xs font-bold text-zinc-500">
           Overall Contenders
-        </p>
+        </h3>
         {candidates.length > 0 && (
           <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-zinc-800">
             Canonical rank
@@ -31,10 +31,10 @@ export default function MomentumContenders({
           </p>
         </div>
       ) : (
-        <div className="ht-momentum-contender-rows grid flex-1 auto-rows-fr content-stretch gap-2">
+        <ol className="ht-momentum-contender-rows grid flex-1 auto-rows-fr content-stretch gap-2">
           {candidates.map((opportunity, index) => (
+            <li key={opportunity.ticker}>
               <button
-                key={opportunity.ticker}
                 onClick={() => onSelect(opportunity)}
                 className="flex h-full min-h-[5.5rem] items-center justify-between gap-3 rounded-xl border border-white/8 bg-black/30 px-4 py-3 text-left transition hover:border-violet-400/25 hover:bg-violet-500/[0.04]"
               >
@@ -72,8 +72,9 @@ export default function MomentumContenders({
                 <p className="text-[7px] font-black uppercase tracking-[0.14em] text-orange-400">HT Score</p>
               </div>
               </button>
+            </li>
           ))}
-        </div>
+        </ol>
       )}
       {radarCandidates.length > 0 && (
         <MomentumRadar
@@ -82,7 +83,7 @@ export default function MomentumContenders({
           embedded
         />
       )}
-    </div>
+    </section>
   );
 }
 

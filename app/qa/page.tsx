@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { resolveQaHealth } from "@/lib/checkpoint-a-ui-state";
 import { getErrorMessage } from "@/lib/error-message";
+import { Control, PanelHeader } from "@/app/components/ui/ApplicationPrimitives";
 
 type SystemStatus = "operational" | "degraded" | "offline" | "checking";
 
@@ -176,7 +178,7 @@ export default function QAPage() {
             latency,
             message: res.ok && data.analysis
               ? `Analysis generated · ${data.analysis.length} chars · ${latency}ms`
-              : `HTTP ${res.status}: ${data.error || "No analysis returned"}`,
+              : `AI analysis unavailable · HTTP ${res.status}`,
           });
         } catch (error: unknown) {
           updateSystem("AI Analysis", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "AI analysis check failed") });
@@ -328,53 +330,63 @@ export default function QAPage() {
   const degraded = systems.filter(s => s.status === "degraded").length;
   const offline = systems.filter(s => s.status === "offline").length;
   const total = systems.filter(s => s.status !== "checking").length;
-  const healthScore = total === 0 ? 100 : Math.round(((operational + degraded * 0.5) / systems.length) * 100);
-
-  const scoreColor = healthScore >= 90 ? "text-green-300" : healthScore >= 70 ? "text-yellow-300" : "text-red-300";
-  const scoreLabel = healthScore >= 90 ? "All Systems Go" : healthScore >= 70 ? "Degraded" : "Critical Issues";
+  const health = resolveQaHealth({
+    totalSystems: systems.length,
+    resolvedSystems: total,
+    operational,
+    degraded,
+    running,
+    hasCompletedRun: lastRun !== null,
+  });
+  const scoreColor = health.score === null
+    ? "text-zinc-500"
+    : health.score >= 90
+      ? "text-green-300"
+      : health.score >= 70
+        ? "text-yellow-300"
+        : "text-red-300";
 
   const categories = ["Data", "Intelligence", "Database", "Content", "Analytics"];
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(255,106,0,0.08),transparent_40%)]" />
-
-      <div className="relative mx-auto max-w-4xl px-5 py-10">
+    <main className="ht-phase25-route ht-operator-route ht-qa-route min-h-screen bg-[#050505] text-white" data-route-audience="operator">
+      <div className="relative mx-auto max-w-5xl px-5 py-10">
 
         {/* Header */}
-        <div className="mb-8 flex items-start justify-between">
-          <div>
-            <Link href="/" className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600 hover:text-zinc-400 transition">← Dashboard</Link>
-            <h1 className="mt-3 text-3xl font-black tracking-tight">HT Labs System Health</h1>
-            <p className="mt-1 text-sm text-zinc-500">Real-time status for every API, service, and data source.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
+        <PanelHeader
+          headingLevel={1}
+          eyebrow={<Link href="/">Internal operations · Return home</Link>}
+          title="HT Labs System Health"
+          description="On-demand diagnostics for application APIs, services, and data sources. Results remain unresolved until every check completes."
+          className="mb-8 px-0 pt-0"
+          actions={<div className="flex items-center gap-3">
+            <Control
               onClick={() => setAutoRefresh(a => !a)}
-              className={`rounded-xl border px-4 py-2 text-xs font-black transition ${autoRefresh ? "border-green-400/30 bg-green-500/10 text-green-300" : "border-white/10 bg-white/[0.04] text-zinc-400"}`}
+              aria-pressed={autoRefresh}
+              className={autoRefresh ? "border-green-400/30 bg-green-500/10 text-green-300" : ""}
             >
               {autoRefresh ? "⟳ Auto ON" : "⟳ Auto OFF"}
-            </button>
-            <button
+            </Control>
+            <Control
               onClick={runChecks}
               disabled={running}
-              className="rounded-xl bg-orange-500 px-5 py-2 text-xs font-black uppercase tracking-[0.1em] text-black disabled:opacity-50 hover:bg-orange-400 transition"
+              variant="primary"
             >
               {running ? "Checking..." : "Run Now"}
-            </button>
-          </div>
-        </div>
+            </Control>
+          </div>}
+        />
 
         {/* Health Score */}
-        <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.025] p-6">
-          <div className="flex items-center justify-between">
+        <section className="ht-operator-summary mb-6 rounded-2xl border border-white/10 bg-white/[0.025] p-6" aria-labelledby="qa-score-heading">
+          <div className="flex items-center justify-between gap-6">
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">Production Health Score</p>
+              <h2 id="qa-score-heading" className="text-[10px] font-black uppercase tracking-[0.24em] text-zinc-500">Production Health Score</h2>
               <div className="mt-2 flex items-baseline gap-3">
-                <span className={`font-mono text-6xl font-black ${scoreColor}`}>{running ? "--" : healthScore}</span>
+                <span className={`font-mono text-6xl font-black ${scoreColor}`}>{health.score ?? "--"}</span>
                 <span className="text-xl font-black text-zinc-600">/100</span>
               </div>
-              <p className={`mt-1 text-sm font-black ${scoreColor}`}>{running ? "Checking systems..." : scoreLabel}</p>
+              <p className={`mt-1 text-sm font-black ${scoreColor}`} role="status" aria-live="polite">{health.label}</p>
             </div>
             <div className="grid grid-cols-3 gap-3 text-center">
               <div className="rounded-xl border border-green-400/20 bg-green-500/[0.06] px-4 py-3">
@@ -397,19 +409,20 @@ export default function QAPage() {
               {autoRefresh && " · Auto-refreshing every 30s"}
             </p>
           )}
-        </div>
+        </section>
 
         {/* Systems by category */}
         {categories.map(category => {
           const categorySystems = systems.filter(s => s.category === category);
           if (!categorySystems.length) return null;
           return (
-            <div key={category} className="mb-4">
-              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">{category}</p>
-              <div className="space-y-2">
+            <section key={category} className="mb-4" aria-labelledby={`qa-category-${category.toLowerCase()}`}>
+              <h2 id={`qa-category-${category.toLowerCase()}`} className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">{category}</h2>
+              <div className="ht-operator-record-list space-y-2" role="list">
                 {categorySystems.map(system => (
                   <div
                     key={system.name}
+                    role="listitem"
                     className={`rounded-2xl border p-4 transition ${
                       system.status === "operational" ? "border-green-400/15 bg-green-500/[0.03]" :
                       system.status === "degraded" ? "border-yellow-400/15 bg-yellow-500/[0.03]" :
@@ -441,14 +454,14 @@ export default function QAPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           );
         })}
 
         {/* Architecture notes */}
-        <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.025] p-5">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-300 mb-4">Data Architecture</p>
-          <div className="space-y-2">
+        <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.025] p-5" aria-labelledby="qa-architecture-heading">
+          <h2 id="qa-architecture-heading" className="mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300">Data Architecture</h2>
+          <dl className="space-y-2">
             {[
               ["Primary Data", "Polygon.io Stocks Basic — real-time prices, volume, grouped daily bars"],
               ["Fallback Chain", "Polygon → Finnhub → Yahoo Finance for all quote endpoints"],
@@ -459,17 +472,17 @@ export default function QAPage() {
               ["Premarket", "Active pre/after market hours only · returns empty during weekend"],
             ].map(([label, note]) => (
               <div key={String(label)} className="flex gap-4 text-xs">
-                <span className="font-black text-orange-300 shrink-0 w-32">{label}</span>
-                <span className="text-zinc-400 font-semibold">{note}</span>
+                <dt className="w-32 shrink-0 font-black text-cyan-300">{label}</dt>
+                <dd className="font-semibold text-zinc-400">{note}</dd>
               </div>
             ))}
-          </div>
-        </div>
+          </dl>
+        </section>
 
         <p className="mt-6 text-center text-[10px] font-semibold text-zinc-700">
           HT Labs QA · Internal · {new Date().toLocaleDateString()}
         </p>
       </div>
-    </div>
+    </main>
   );
 }

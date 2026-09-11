@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "E",
+  "generatedAt": "2026-09-11T01:35:53Z",
+  "status": "ready_for_owner_acceptance",
+  "deployed": false,
+  "committed": false,
+  "startingCommit": "1461f354309e990ac4caf28f4755fd265fe7591a",
+  "scope": [
+    "/",
+    "/scanner",
+    "/signals",
+    "/news-feed",
+    "/prox"
+  ],
+  "filesChangedForCheckpointE": [
+    "app/HomeClient.tsx",
+    "app/components/desktop/ScannerGrid.tsx",
+    "app/components/mobile/MobileExperience.tsx",
+    "app/components/opportunity/MobileBeforeCrowdCard.tsx",
+    "app/components/opportunity/MobileCardDetail.tsx",
+    "app/components/opportunity/MobileConvictionsList.tsx",
+    "app/components/opportunity/MobileSpotMomentumCard.tsx",
+    "app/components/opportunity/MomentumContenders.tsx",
+    "app/globals.css",
+    "app/news-feed/page.tsx",
+    "app/prox/page.tsx",
+    "app/scanner/page.tsx",
+    "app/signals/page.tsx",
+    "lib/phase25-checkpoint-e.test.ts",
+    "docs/phase-2-5/checkpoint-e-evidence.json"
+  ],
+  "visualEvidence": {
+    "manifest": ".artifacts/phase25-checkpoint-e/manifest.json",
+    "manifestSha256": "a1e7335eb656978f4577fb18c14c5563cab49400608e283250970a88c53a2a73",
+    "captureCount": 25,
+    "generatedAt": "2026-09-11T01:34:15.283Z",
+    "surfaces": ["home", "scanner", "signals", "news", "prox"],
+    "viewports": [
+      { "name": "mobile-375", "width": 375, "height": 812 },
+      { "name": "mobile-390", "width": 390, "height": 844 },
+      { "name": "mobile-430", "width": 430, "height": 932 },
+      { "name": "desktop-1280", "width": 1280, "height": 800 },
+      { "name": "desktop-1720", "width": 1720, "height": 1000 }
+    ],
+    "horizontalOverflowChecks": 25,
+    "horizontalOverflowFailures": 0,
+    "mobileNavigationBounds": {
+      "mobile-375": { "left": 0, "right": 375, "top": 751, "bottom": 812 },
+      "mobile-390": { "left": 0, "right": 390, "top": 783, "bottom": 844 },
+      "mobile-430": { "left": 0, "right": 430, "top": 871, "bottom": 932 }
+    }
+  },
+  "requestEvidence": {
+    "environment": "local-development-signed-out",
+    "notes": [
+      "Counts are browser Resource Timing entries and include React development-mode duplicate effects.",
+      "No request endpoint, timer, polling cadence, or provider-facing hook was changed in Checkpoint E."
+    ],
+    "routes": [
+      { "path": "/", "baselineInitial5s": 19, "checkpointEInitial5s": 19, "baselineObserved": 24, "checkpointEObserved": 24, "checkpointEObservedAtMs": 76225 },
+      { "path": "/scanner", "baselineInitial5s": 0, "checkpointEInitial5s": 0, "baselineObserved": 0, "checkpointEObserved": 0, "checkpointEObservedAtMs": 83201 },
+      { "path": "/signals", "baselineInitial5s": 2, "checkpointEInitial5s": 2, "baselineObserved": 2, "checkpointEObserved": 2, "checkpointEObservedAtMs": 83188 },
+      { "path": "/news-feed", "baselineInitial5s": 16, "checkpointEInitial5s": 16, "baselineObserved": 16, "checkpointEObserved": 16, "checkpointEObservedAtMs": 82180 },
+      { "path": "/prox", "baselineInitial5s": 2, "checkpointEInitial5s": 2, "baselineObserved": 4, "checkpointEObserved": 4, "checkpointEObservedAtMs": 82184 }
+    ],
+    "increases": 0,
+    "duplicatePollingRegressions": 0
+  },
+  "accessibilityEvidence": {
+    "semanticCollections": ["definition lists", "ordered lists", "article lists", "data table"],
+    "announcedStates": ["loading", "empty", "unavailable", "market closed"],
+    "keyboardChecks": [
+      "Scanner filter to next filter",
+      "Signals filter to next filter",
+      "News search field to submit control"
+    ],
+    "visibleFocusAuthority": ".ht-responsive-shell :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible",
+    "mobileHomeDomOrder": [
+      "ticker and price",
+      "chart",
+      "HT score and signal",
+      "levels and risk",
+      "extended interpretation"
+    ]
+  },
+  "automatedVerification": {
+    "focusedTests": { "command": "node --experimental-strip-types --test lib/phase25-checkpoint-a.test.ts lib/phase25-checkpoint-e.test.ts", "passed": 10, "failed": 0 },
+    "fullSuite": { "command": "npm test", "passed": 609, "failed": 0 },
+    "typescript": { "command": "npx tsc --noEmit", "status": "passed" },
+    "eslint": { "command": "npm run lint", "status": "passed" },
+    "diffValidation": { "command": "git diff --check", "status": "passed" },
+    "productionWebpackBuild": { "command": "npm run ios:build", "status": "passed", "compiler": "Next.js 16.3.4 webpack" }
+  },
+  "preservedBoundaries": [
+    "Canonical and Pro X calculations, ranking, eligibility, and authority",
+    "provider timestamps, polling cadence, and request behavior",
+    "Trading Workspace and Agent X behavior",
+    "Paper validation and brokerage authority",
+    "database contracts, crypto shelving, Sterling, and deep links"
+  ],
+  "remainingIssues": [
+    "The local signed-out verification environment has no server-side Supabase service credentials and no news-provider keys, so visual captures exercise mature loading, empty, and unavailable states rather than populated production market records.",
+    "Checkpoint F has not begun."
+  ]
+}

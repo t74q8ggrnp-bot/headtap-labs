@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMobileAppNavigation } from "./MobileAppNavigationContext";
-
-type AppTab = "home" | "convictions" | "scanner" | "workspace" | "watchlist" | "profile" | "paper";
+import { Fragment, useState } from "react";
+import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
+import { resolveMobileActiveTab, type MobileAppTab as AppTab } from "@/lib/checkpoint-a-ui-state";
+import { AccessibleDialogSheet } from "./ui/ApplicationPrimitives";
+import { useMobileAppNavigation, type MobileHomeTab } from "./MobileAppNavigationContext";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "home", label: "Home", href: "/" },
@@ -14,6 +16,7 @@ const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "watchlist", label: "Saved", href: "/?tab=watchlist" },
   { tab: "profile", label: "Profile", href: "/?tab=profile" },
   { tab: "paper", label: "Paper", href: "/paper" },
+  { tab: "more", label: "More", href: "#application-routes" },
 ];
 
 function TabIcon({ tab }: { tab: AppTab }) {
@@ -50,27 +53,26 @@ function TabIcon({ tab }: { tab: AppTab }) {
   if (tab === "paper") return (
     <svg {...common}><path d="M4 5.5h16v13H4z"/><path d="M7 9h10M7 13h5M15.5 13v3M14 14.5h3"/></svg>
   );
+  if (tab === "more") return (
+    <svg {...common}><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+  );
   return null;
 }
 
 export default function MobileAppNavigation() {
   const pathname = usePathname();
   const { homeTab, setHomeTab } = useMobileAppNavigation();
-  const isTradeWorkspace = pathname === "/trade" || pathname.startsWith("/trade/");
-  const activeTab: AppTab =
-    pathname === "/paper" ? "paper" :
-    pathname === "/scanner" ? "scanner" :
-    isTradeWorkspace ? "workspace" :
-    pathname === "/" ? homeTab : "home";
+  const activeTab = resolveMobileActiveTab(pathname, homeTab);
+  const currentRoute = resolveApplicationRoute(pathname);
+  const [moreOpen, setMoreOpen] = useState(false);
 
-  const activateHomeTab = (tab: AppTab) => {
-    if (tab !== "paper" && tab !== "workspace") setHomeTab(tab);
-  };
+  const activateHomeTab = (tab: MobileHomeTab) => setHomeTab(tab);
 
   return (
-    <nav className="ht-mobile-global-nav" aria-label="Primary app navigation">
-      <div className="w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="grid min-w-[308px] grid-cols-7 px-1 pt-1">
+    <Fragment>
+      <nav className="ht-mobile-global-nav" aria-label="Primary app navigation">
+        <div className="w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="grid min-w-[352px] grid-cols-8 px-1 pt-1">
           {items.map(({ tab, label, href }) => {
             const active = activeTab === tab;
             const className = `relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition active:scale-95 ${active ? "text-orange-400" : "text-zinc-600"}`;
@@ -83,6 +85,22 @@ export default function MobileAppNavigation() {
                 </span>
               </>
             );
+
+            if (tab === "more") {
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setMoreOpen(true)}
+                  aria-label="More application routes"
+                  aria-current={active ? "page" : undefined}
+                  aria-haspopup="dialog"
+                  className={className}
+                >
+                  {content}
+                </button>
+              );
+            }
 
             if (pathname === "/" && tab !== "paper" && tab !== "workspace") {
               return (
@@ -112,8 +130,35 @@ export default function MobileAppNavigation() {
               </Link>
             );
           })}
+          </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+      <AccessibleDialogSheet
+        open={moreOpen}
+        onOpenChange={setMoreOpen}
+        title="HT Labs navigation"
+        description="Open a market, operator, account, or support surface."
+        presentation="sheet"
+      >
+        <nav id="application-routes" className="ht-mobile-route-list" aria-label="All application routes">
+          {APPLICATION_ROUTES.map((route) => {
+            const active = currentRoute?.id === route.id;
+            return (
+              <Link
+                key={route.id}
+                href={route.href}
+                onClick={() => setMoreOpen(false)}
+                className="ht-mobile-route-link"
+                data-audience={route.audience}
+                aria-current={active ? "page" : undefined}
+              >
+                <span>{route.label}</span>
+                {active ? <span className="ht-mobile-route-current">Current</span> : null}
+              </Link>
+            );
+          })}
+        </nav>
+      </AccessibleDialogSheet>
+    </Fragment>
   );
 }

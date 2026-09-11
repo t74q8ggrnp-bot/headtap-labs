@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import MarketChartCanvas, {
+  type ChartLayerSlots,
   type MarketChartIndicatorOverlays,
   type MarketChartMode,
 } from "@/app/components/market/MarketChartCanvas";
@@ -16,6 +17,7 @@ import { formatMarketPrice } from "@/lib/market-price-format";
 import { resolveTradeWorkspaceChartHeight } from "@/lib/trade-workspace-layout";
 import type { HtChartObject } from "@/lib/chart-objects";
 import type { ChartLayerPreferences } from "@/app/hooks/useChartLayerPreferences";
+import { StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 export type WorkspaceIndicatorVisibility = {
   vwap: boolean;
@@ -28,6 +30,8 @@ const indicatorStyles = {
   ema9: "border-orange-400/25 bg-orange-500/10 text-orange-300",
   ema20: "border-violet-400/25 bg-violet-500/10 text-violet-300",
 } as const;
+
+const EMPTY_CHART_LAYER_HOST: ChartLayerSlots = Object.freeze({});
 
 export default function TradeWorkspaceChart({
   symbol,
@@ -101,8 +105,8 @@ export default function TradeWorkspaceChart({
   ), [chartObjects, layerVisibility.agent, layerVisibility.prox]);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.075] bg-[#06090b]" aria-label={`${symbol} market chart`}>
-      <div className="flex flex-col gap-1 border-b border-white/[0.065] px-3 py-1.5 sm:gap-3 sm:py-3 md:flex-row md:items-center md:justify-between md:px-4">
+    <section className="ht-workspace-panel ht-workspace-chart overflow-hidden" aria-label={`${symbol} market chart`}>
+      <div className="ht-workspace-panel-header flex flex-col gap-1 px-3 py-1.5 sm:gap-3 sm:py-3 md:flex-row md:items-center md:justify-between md:px-4">
         <div className="hidden sm:block">
           <div className="flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.55)]" />
@@ -111,27 +115,27 @@ export default function TradeWorkspaceChart({
           <p className="mt-1 text-[8px] font-semibold text-zinc-600">One 1-minute provider frame · timeframes derived locally</p>
         </div>
         <div className="flex w-full items-center gap-2 md:w-auto">
-          <div className="grid min-w-0 flex-[3] grid-cols-3 rounded-lg border border-white/[0.075] bg-black/40 p-0.5 md:flex-none" role="group" aria-label="Chart timeframe">
+          <div className="ht-workspace-segmented grid min-w-0 flex-[3] grid-cols-3 p-0.5 md:flex-none" role="group" aria-label="Chart timeframe">
             {PHASE_ONE_MARKET_CHART_TIMEFRAMES.map((option) => (
               <button
                 key={option.id}
                 type="button"
                 aria-pressed={timeframe === option.id}
                 onClick={() => onTimeframeChange(option.id)}
-                className={`min-h-11 rounded-md px-1 py-1.5 font-mono text-[9px] font-black transition sm:px-3 md:min-h-0 ${timeframe === option.id ? "bg-white/[0.085] text-white" : "text-zinc-600 hover:text-zinc-400"}`}
+                className="ht-workspace-segment ht-tabular-numbers min-h-11 px-1 py-1.5 text-[9px] font-black sm:px-3 md:min-h-0"
               >
                 {option.label}
               </button>
             ))}
           </div>
-          <div className="grid min-w-0 flex-[2] grid-cols-2 rounded-lg border border-white/[0.075] bg-black/40 p-0.5 md:flex-none" role="group" aria-label="Chart style">
+          <div className="ht-workspace-segmented grid min-w-0 flex-[2] grid-cols-2 p-0.5 md:flex-none" role="group" aria-label="Chart style">
             {(["graph", "candles"] as const).map((option) => (
               <button
                 key={option}
                 type="button"
                 aria-pressed={mode === option}
                 onClick={() => onModeChange(option)}
-                className={`min-h-11 rounded-md px-1.5 py-1.5 text-[8px] font-black uppercase tracking-[0.08em] transition sm:px-2.5 md:min-h-0 ${mode === option ? "bg-orange-500/15 text-orange-300" : "text-zinc-600 hover:text-zinc-400"}`}
+                className="ht-workspace-segment ht-workspace-segment--accent min-h-11 px-1.5 py-1.5 text-[8px] font-black uppercase tracking-[0.08em] sm:px-2.5 md:min-h-0"
               >
                 {option === "candles" ? "Candle" : "Line"}
               </button>
@@ -140,7 +144,7 @@ export default function TradeWorkspaceChart({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 items-center gap-1.5 border-b border-white/[0.055] px-3 py-1 sm:flex sm:flex-wrap sm:py-2 md:px-4" role="group" aria-label="Chart layers">
+      <div className="ht-workspace-layer-bar grid grid-cols-3 items-center gap-1.5 px-3 py-1 sm:flex sm:flex-wrap sm:py-2 md:px-4" role="group" aria-label="Chart layers">
         <span className="mr-1 hidden text-[7px] font-black uppercase tracking-[0.15em] text-zinc-600 sm:inline">Layers</span>
         {([
           ...(intelligenceLayersEnabled ? ["agent", "prox"] as const : []),
@@ -151,7 +155,7 @@ export default function TradeWorkspaceChart({
             type="button"
             aria-pressed={layerVisibility[indicator]}
             onClick={() => onToggleLayer(indicator)}
-            className={`min-h-11 rounded-full border px-1.5 py-1 font-mono text-[8px] font-black uppercase transition sm:min-h-0 sm:px-2.5 ${layerVisibility[indicator] ? (indicator in indicatorStyles ? indicatorStyles[indicator as keyof typeof indicatorStyles] : indicator === "agent" ? "border-orange-400/25 bg-orange-500/10 text-orange-300" : "border-violet-400/25 bg-violet-500/10 text-violet-300") : "border-white/[0.07] bg-white/[0.025] text-zinc-600 hover:text-zinc-400"}`}
+            className={`ht-workspace-layer-toggle min-h-11 rounded-full border px-1.5 py-1 font-mono text-[8px] font-black uppercase sm:min-h-0 sm:px-2.5 ${layerVisibility[indicator] ? (indicator in indicatorStyles ? indicatorStyles[indicator as keyof typeof indicatorStyles] : indicator === "agent" ? "border-orange-400/25 bg-orange-500/10 text-orange-300" : "border-violet-400/25 bg-violet-500/10 text-violet-300") : "border-white/[0.07] bg-white/[0.025] text-zinc-600 hover:text-zinc-400"}`}
           >
             {indicator === "ema9" ? "EMA 9" : indicator === "ema20" ? "EMA 20" : indicator === "agent" ? "Agent X" : indicator === "prox" ? "ProX" : indicator === "volume" ? "Volume" : "VWAP"}
           </button>
@@ -160,16 +164,12 @@ export default function TradeWorkspaceChart({
       </div>
 
       {loading && bars.length === 0 ? (
-        <div className="flex animate-pulse flex-col items-center justify-center gap-3" style={{ height: chartHeight }}>
-          <div className="h-1.5 w-2/3 rounded-full bg-white/[0.06]" />
-          <p className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-700">Loading one verified market frame</p>
+        <div className="flex items-center px-4" style={{ height: chartHeight }}>
+          <StatusState className="w-full" title="Loading verified chart" description="Connecting to one provider-backed market frame." busy />
         </div>
       ) : bars.length === 0 ? (
-        <div className="flex items-center justify-center px-6 text-center" style={{ height: chartHeight }}>
-          <div>
-            <p className="text-sm font-black text-zinc-300">Verified chart unavailable</p>
-            <p className="mx-auto mt-2 max-w-sm text-[10px] font-semibold leading-relaxed text-zinc-600">{error || "No estimated candles are shown when the provider frame is unavailable."}</p>
-          </div>
+        <div className="flex items-center px-4" style={{ height: chartHeight }}>
+          <StatusState className="w-full" title="Verified chart unavailable" description={error || "No estimated candles are shown when the provider frame is unavailable."} tone="negative" />
         </div>
       ) : (
         <>
@@ -186,19 +186,20 @@ export default function TradeWorkspaceChart({
               indicators={chartIndicators}
               chartObjects={visibleChartObjects}
               showVolume={layerVisibility.volume}
-              layerHost={{}}
+              layerHost={EMPTY_CHART_LAYER_HOST}
+              preserveEngineOnLocalControls
             />
           </div>
-          <div className="grid grid-cols-4 border-t border-white/[0.06]">
+          <div className="ht-workspace-stat-grid grid grid-cols-4">
             {[
               ["Open", formatMarketPrice(summary?.open)],
               ["High", formatMarketPrice(summary?.high)],
               ["Low", formatMarketPrice(summary?.low)],
               ["Close", formatMarketPrice(summary?.close)],
             ].map(([label, value]) => (
-              <div key={label} className="min-w-0 border-r border-white/[0.06] px-2.5 py-2.5 last:border-r-0 md:px-3">
+              <div key={label} className="ht-workspace-stat min-w-0 px-2.5 py-2.5 md:px-3">
                 <p className="text-[7px] font-black uppercase tracking-[0.12em] text-zinc-700">{label}</p>
-                <p className="mt-1 truncate font-mono text-[9px] font-black text-zinc-300 md:text-[10px]">{value}</p>
+                <p className="ht-tabular-numbers mt-1 truncate text-[9px] font-black text-zinc-300 md:text-[10px]">{value}</p>
               </div>
             ))}
           </div>

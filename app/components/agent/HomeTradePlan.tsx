@@ -38,7 +38,11 @@ export default function HomeTradePlan({
     });
     const body = await response.json() as { ok?: boolean; tradePlans?: TradePlanFeed; error?: string };
     if (!response.ok || !body.ok || !body.tradePlans) {
-      throw new Error(body.error ?? "HT Trade Plan is unavailable.");
+      throw new Error(
+        response.status === 401 || response.status === 403
+          ? "Your HT Agent session has expired. Sign in again to continue."
+          : "The paper-only HT Trade Plan is temporarily unavailable.",
+      );
     }
     setFeed(body.tradePlans);
     setError("");

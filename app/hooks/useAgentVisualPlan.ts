@@ -22,7 +22,13 @@ export function useAgentVisualPlan(symbol: string, enabled: boolean) {
       headers: { Authorization: `Bearer ${token}` },
     });
     const body = await response.json() as AgentXVisualPlanRead & { error?: string; ok?: boolean };
-    if (!response.ok || body.ok !== true) throw new Error(body.error ?? "Agent X plan unavailable.");
+    if (!response.ok || body.ok !== true) {
+      throw new Error(
+        response.status === 401 || response.status === 403
+          ? "Your Agent X session has expired. Sign in again to continue."
+          : "The Agent X visual plan is temporarily unavailable.",
+      );
+    }
     if (generation !== request.current || signal?.aborted) return;
     setRead(body);
     setError(null);

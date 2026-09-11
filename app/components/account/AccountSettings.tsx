@@ -10,6 +10,7 @@ import {
   ACCOUNT_LOCAL_STORAGE_KEYS,
 } from "@/lib/account-deletion";
 import { supabase } from "@/lib/supabaseClient";
+import { StatusState } from "@/app/components/ui/ApplicationPrimitives";
 
 type DeleteResponse = {
   ok?: boolean;
@@ -74,7 +75,7 @@ export default function AccountSettings() {
     setMessage("");
     try {
       const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) { setMessage(error.message); return; }
+      if (error) { setMessage("The password update could not be completed. Request a new reset link or try again."); return; }
       setNewPassword("");
       setRepeatPassword("");
       setPasswordSaved(true);
@@ -117,7 +118,7 @@ export default function AccountSettings() {
           password,
         });
       if (signInError || !data.session?.access_token) {
-        setMessage(signInError?.message ?? "Password verification failed.");
+        setMessage("Password verification failed. Re-enter your current password and try again.");
         return;
       }
 
@@ -132,7 +133,9 @@ export default function AccountSettings() {
       });
       const result = (await deleteResponse.json()) as DeleteResponse;
       if (!deleteResponse.ok || !result.ok) {
-        setMessage(result.error ?? "Account deletion failed. Please try again.");
+        setMessage(deleteResponse.status === 401 || deleteResponse.status === 403
+          ? "Your account session expired. Sign in again before retrying deletion."
+          : "Account deletion is temporarily unavailable. Your account was not changed.");
         return;
       }
 
@@ -150,7 +153,7 @@ export default function AccountSettings() {
   };
 
   return (
-    <main className="min-h-screen bg-[#050505] px-5 pb-28 pt-8 text-white sm:px-8 sm:py-12">
+    <main className="ht-phase25-route ht-account-route min-h-screen bg-[#050505] px-5 pb-28 pt-8 text-white sm:px-8 sm:py-12" data-route-audience="account">
       <div className="mx-auto max-w-3xl">
         <nav className="mb-10 flex flex-wrap items-center justify-between gap-4" aria-label="Account navigation">
           <Link href="/" className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400">
@@ -169,9 +172,14 @@ export default function AccountSettings() {
         </header>
 
         {loadingSession ? (
-          <div className="rounded-3xl border border-white/10 bg-zinc-950 p-8 text-sm font-semibold text-zinc-400" role="status">Checking your account...</div>
+          <StatusState
+            title="Checking your account"
+            description="Verifying your secure HT Labs session…"
+            busy
+            className="p-8"
+          />
         ) : recovering ? (
-          <section className="rounded-3xl border border-orange-400/25 bg-zinc-950 p-7">
+          <section className="ht-account-panel rounded-3xl border border-orange-400/25 bg-zinc-950 p-7">
             <h2 className="text-2xl font-black">{passwordSaved ? "Password updated" : "Choose a new password"}</h2>
             {passwordSaved ? <p className="mt-4 text-sm leading-6 text-zinc-300" role="status">Return to the HT Labs app and sign in with your new password. You can close this page.</p> : !session ? <p className="mt-4 text-sm leading-6 text-zinc-300" role="status">This reset link is expired or invalid. In HT Labs, open Paper → Forgot password and request a new email.</p> : <form className="mt-6 space-y-4" onSubmit={(event) => void handlePasswordRecovery(event)}>
               <label className="block"><span className="mb-2 block text-sm text-zinc-300">New password (at least 8 characters)</span><input type="password" autoComplete="new-password" minLength={8} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} disabled={savingPassword} className="w-full rounded-xl border border-white/15 bg-black px-4 py-3 text-base text-white" /></label>
@@ -181,20 +189,21 @@ export default function AccountSettings() {
             {message && <p className="mt-4 text-sm text-orange-200" role="status">{message}</p>}
           </section>
         ) : !session ? (
-          <section className="rounded-3xl border border-white/10 bg-zinc-950 p-7">
-            <h2 className="text-xl font-black">You are not signed in</h2>
+          <section className="ht-account-panel rounded-3xl border border-white/10 bg-zinc-950 p-7" aria-labelledby="account-signed-out-heading">
+            <h2 id="account-signed-out-heading" className="text-xl font-black">You are not signed in</h2>
             <p className="mt-3 text-sm leading-6 text-zinc-400">Open Profile in HT Labs to sign in or create an account. Privacy and Terms remain available without an account.</p>
+            {message ? <p className="mt-3 text-sm text-amber-200" role="alert">{message}</p> : null}
             <Link href="/?tab=profile" className="mt-6 inline-flex rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black">Open HT Labs Profile</Link>
           </section>
         ) : (
           <div className="space-y-6">
-            <section className="rounded-3xl border border-green-400/20 bg-green-500/[0.05] p-7">
+            <section className="ht-account-panel rounded-3xl border border-green-400/20 bg-green-500/[0.05] p-7">
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-green-400">Signed in</p>
               <p className="mt-2 break-all text-lg font-black">{session.user.email}</p>
               <button type="button" onClick={handleSignOut} className="mt-5 rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-black text-zinc-200">Sign out</button>
             </section>
 
-            <section className="rounded-3xl border border-red-400/25 bg-red-500/[0.04] p-7">
+            <section className="ht-account-panel ht-account-danger rounded-3xl border border-red-400/25 bg-red-500/[0.04] p-7">
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-300">Permanent deletion</p>
               <h2 className="mt-2 text-2xl font-black">Delete account</h2>
               <p className="mt-3 text-sm leading-6 text-zinc-400">This permanently removes your Supabase login, cloud watchlist, user-linked signal memory, user-linked market behavior, and this device&apos;s saved HT Labs preferences. Global market observations and non-user-linked ProX research are not personal account records and are not affected.</p>
