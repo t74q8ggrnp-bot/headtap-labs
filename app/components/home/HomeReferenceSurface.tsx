@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import HomeTradePlan from "@/app/components/agent/HomeTradePlan";
 import DesktopTerminalFrame from "@/app/components/terminal/DesktopTerminalFrame";
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
@@ -65,6 +66,20 @@ export default function HomeReferenceSurface({
   onSelect,
   onToggleWatchlist,
 }: Props) {
+  const [compactIntelligenceOpen, setCompactIntelligenceOpen] = useState(false);
+  const compactIntelligenceTouched = useRef(false);
+
+  useEffect(() => {
+    const apply = () => {
+      if (compactIntelligenceTouched.current) return;
+      const portrait = window.innerWidth < 768;
+      setCompactIntelligenceOpen(!portrait);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
+
   if (!opportunity) {
     return (
       <main className="htb-home htb-home--state" aria-label="HT Labs Home">
@@ -141,13 +156,32 @@ export default function HomeReferenceSurface({
   );
 
   const intelligence = (
-    <div className="htb-intelligence" data-home-priority="4-intelligence">
+    <section
+      className="htb-intelligence-shell"
+      data-open={compactIntelligenceOpen ? "true" : "false"}
+      data-home-priority="4-intelligence"
+    >
+      <button
+        type="button"
+        className="htb-intelligence-toggle"
+        aria-expanded={compactIntelligenceOpen}
+        aria-controls="htb-intelligence-content"
+        onClick={() => {
+          compactIntelligenceTouched.current = true;
+          setCompactIntelligenceOpen((open) => !open);
+        }}
+      >
+        <span>HT Intelligence</span>
+        <strong className="ht-tabular-numbers">{Math.round(opportunity.opportunityScore)}</strong>
+        <span aria-hidden="true">{compactIntelligenceOpen ? "−" : "+"}</span>
+      </button>
+      <div id="htb-intelligence-content" className="htb-intelligence">
       <h2 className="sr-only">HT Intelligence</h2>
       <section className="htb-score-block">
         <strong className="htb-score ht-tabular-numbers">{Math.round(opportunity.opportunityScore)}</strong>
         <div><h3>{view.momentumLabel}</h3><p>{opportunity.whyItMatters}</p></div>
       </section>
-      <section className="htb-intel-section">
+      <section className="htb-intel-section htb-intel-section--primary">
         <h3>Decision</h3>
         <dl className="htb-facts">
           <div><dt>Status</dt><dd>{eligible ? "Eligible" : "Monitoring only"}</dd></div>
@@ -157,32 +191,40 @@ export default function HomeReferenceSurface({
         </dl>
         <p className="htb-risk-copy">{opportunity.riskNote}</p>
       </section>
-      <section className="htb-intel-section">
-        <h3>Levels and risk</h3>
-        {framework ? (
-          <dl className="htb-facts">
-            <div><dt>Upside</dt><dd className="ht-tabular-numbers">{formatMarketPrice(framework.uptideMin)}–{formatMarketPrice(framework.uptideMax)}</dd></div>
-            <div><dt>Risk zone</dt><dd className="ht-tabular-numbers">{formatMarketPrice(framework.riskZone)}</dd></div>
-            <div><dt>Risk / reward</dt><dd className="ht-tabular-numbers">{framework.rr.toFixed(2)}R</dd></div>
-          </dl>
-        ) : <p>No structured plan available.</p>}
-      </section>
-      <section className="htb-intel-section">
-        <h3>Pro X evidence</h3>
-        {prox && prox.status !== "unavailable" ? (
-          <><strong>{readable(prox.pulse?.state ?? prox.status)}</strong><p>{prox.event?.headline ?? "Bounded market evidence is attached to the canonical decision."}</p></>
-        ) : <p>No fresh Pro X evidence is attached.</p>}
-      </section>
-      <section className="htb-intel-section htb-agent-plan"><h3>Agent X</h3><HomeTradePlan symbol={opportunity.ticker} compact /></section>
-      <details className="htb-evidence">
-        <summary>Open full evidence</summary>
+      <details className="htb-intel-disclosure">
+        <summary>Levels and risk</summary>
+        <div className="htb-intel-disclosure__body">
+          {framework ? (
+            <dl className="htb-facts">
+              <div><dt>Upside</dt><dd className="ht-tabular-numbers">{formatMarketPrice(framework.uptideMin)}–{formatMarketPrice(framework.uptideMax)}</dd></div>
+              <div><dt>Risk zone</dt><dd className="ht-tabular-numbers">{formatMarketPrice(framework.riskZone)}</dd></div>
+              <div><dt>Risk / reward</dt><dd className="ht-tabular-numbers">{framework.rr.toFixed(2)}R</dd></div>
+            </dl>
+          ) : <p>No structured plan available.</p>}
+        </div>
+      </details>
+      <details className="htb-intel-disclosure">
+        <summary>Pro X evidence</summary>
+        <div className="htb-intel-disclosure__body">
+          {prox && prox.status !== "unavailable" ? (
+            <><strong>{readable(prox.pulse?.state ?? prox.status)}</strong><p>{prox.event?.headline ?? "Bounded market evidence is attached to the canonical decision."}</p></>
+          ) : <p>No fresh Pro X evidence is attached.</p>}
+        </div>
+      </details>
+      <details className="htb-intel-disclosure htb-agent-plan">
+        <summary>Agent X</summary>
+        <div className="htb-intel-disclosure__body"><HomeTradePlan symbol={opportunity.ticker} compact /></div>
+      </details>
+      <details className="htb-intel-disclosure htb-evidence">
+        <summary>Full evidence</summary>
         <div>
           {visibleEvidence.length > 0 ? <ul>{visibleEvidence.map((signal, index) => <li key={`${signal}-${index}`}>{signal}</li>)}</ul> : <p>No additional evidence is available.</p>}
           <p>{opportunity.whatChanged}</p>
           <p>Engine: {opportunity.engineVersion ?? "canonical"}</p>
         </div>
       </details>
-    </div>
+      </div>
+    </section>
   );
 
   return (

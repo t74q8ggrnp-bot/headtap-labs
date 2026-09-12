@@ -48,10 +48,15 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   useEffect(() => {
     const mobileQuery = window.matchMedia("(max-width: 767px)");
     const terminalQuery = window.matchMedia("(min-width: 1180px)");
+    const landscapeQuery = window.matchMedia("(min-width: 768px) and (max-width: 1179px) and (orientation: landscape)");
     const apply = () => {
       setHeight(
-        mobileQuery.matches
-          ? 300
+        landscapeQuery.matches
+          ? Math.max(220, window.innerHeight - 150)
+          : mobileQuery.matches
+          ? window.innerHeight < 720
+            ? Math.max(290, Math.round(window.innerHeight * 0.46))
+            : Math.max(300, Math.min(420, Math.round(window.innerHeight * 0.48)))
           : terminalQuery.matches
             ? Math.max(620, window.innerHeight - 125)
             : 500,
@@ -63,10 +68,12 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     apply();
     mobileQuery.addEventListener("change", apply);
     terminalQuery.addEventListener("change", apply);
+    landscapeQuery.addEventListener("change", apply);
     window.addEventListener("resize", apply);
     return () => {
       mobileQuery.removeEventListener("change", apply);
       terminalQuery.removeEventListener("change", apply);
+      landscapeQuery.removeEventListener("change", apply);
       window.removeEventListener("resize", apply);
     };
   }, []);
@@ -138,42 +145,48 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
             </button>
           ))}
         </div>
-        <div className="htb-chart__controls htb-chart__controls--mode" role="group" aria-label="Chart style">
-          {(["candles", "graph"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={mode === option}
-              onClick={() => setMode(option)}
-            >
-              {option === "candles" ? "Candles" : "Line"}
-            </button>
-          ))}
-        </div>
-        <div className="htb-chart__range">
-          <div className="htb-chart__range-desktop" role="group" aria-label="Visible chart range">
-            {visibleRanges.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                aria-pressed={visibleRange === option.id}
-                onClick={() => selectVisibleRange(option.id)}
-              >
-                {option.label}
-              </button>
-            ))}
+        <span className="htb-chart__toolbar-separator" aria-hidden="true" />
+        <label className="htb-chart__range">
+          <span>Range</span>
+          <select
+            aria-label="Visible chart range"
+            value={visibleRange}
+            onChange={(event) => selectVisibleRange(event.target.value as MarketChartVisibleRange)}
+          >
+            {visibleRanges.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+        </label>
+        <details className="htb-chart__layers-menu">
+          <summary>Layers</summary>
+          <div className="htb-chart__layers-panel">
+            <div className="htb-chart__layers-mode" role="group" aria-label="Chart style">
+              {(["candles", "graph"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={mode === option}
+                  onClick={() => setMode(option)}
+                >
+                  {option === "candles" ? "Candles" : "Line"}
+                </button>
+              ))}
+            </div>
+            <div className="htb-chart__layers" role="group" aria-label="Chart layers">
+              {(Object.keys(layerLabels) as Layer[]).map((layer) => (
+                <button
+                  key={layer}
+                  type="button"
+                  aria-pressed={layers[layer]}
+                  data-layer={layer}
+                  onClick={() => chartLayers.toggle(layer)}
+                >
+                  {layer !== "volume" ? <span className={`ht-chart-layer-key ht-chart-layer-key--${layer}`} aria-hidden="true" /> : null}
+                  {layerLabels[layer]}
+                </button>
+              ))}
+            </div>
           </div>
-          <label className="htb-chart__range-mobile">
-            <span>Range</span>
-            <select
-              aria-label="Visible chart range"
-              value={visibleRange}
-              onChange={(event) => selectVisibleRange(event.target.value as MarketChartVisibleRange)}
-            >
-              {visibleRanges.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select>
-          </label>
-        </div>
+        </details>
         <button
           type="button"
           className="htb-chart__latest"
@@ -182,20 +195,6 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
         >
           Latest
         </button>
-        <div className="htb-chart__layers" role="group" aria-label="Chart layers">
-          {(Object.keys(layerLabels) as Layer[]).map((layer) => (
-            <button
-              key={layer}
-              type="button"
-              aria-pressed={layers[layer]}
-              data-layer={layer}
-              onClick={() => chartLayers.toggle(layer)}
-            >
-              {layer !== "volume" ? <span className={`ht-chart-layer-key ht-chart-layer-key--${layer}`} aria-hidden="true" /> : null}
-              {layerLabels[layer]}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="htb-chart__caption">

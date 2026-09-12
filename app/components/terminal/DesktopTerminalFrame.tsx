@@ -88,7 +88,7 @@ export default function DesktopTerminalFrame({
   marketsTitle?: string;
   intelligenceTitle?: string;
 }) {
-  const { preferences, setPane, setPaneWidth } = useDesktopTerminalLayout();
+  const { preferences, resetLayout, setPane, setPaneWidth } = useDesktopTerminalLayout();
   const frameRef = useRef<HTMLDivElement>(null);
   const marketsPaneRef = useRef<HTMLElement>(null);
   const intelligencePaneRef = useRef<HTMLElement>(null);
@@ -145,7 +145,7 @@ export default function DesktopTerminalFrame({
       data-markets-open={layout.marketsOpen ? "true" : "false"}
       data-intelligence-open={layout.intelligenceOpen ? "true" : "false"}
     >
-      <DesktopTerminalNavigation />
+      <DesktopTerminalNavigation onResetLayout={resetLayout} />
       <aside
         ref={marketsPaneRef}
         id={`${prefix}-markets-pane`}

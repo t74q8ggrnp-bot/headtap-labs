@@ -18,12 +18,13 @@ test("Home uses one persistent chart tree across responsive terminal composition
   assert.match(chart, /data-chart-provider-requests-on-switch="0"/);
 });
 
-test("desktop terminal activates independently without replacing portrait or landscape composition", () => {
+test("Home uses distinct portrait, landscape-touch, and desktop-terminal compositions", () => {
   const css = source("app/globals.css");
 
   assert.match(css, /\.ht-terminal-pane,[\s\S]*\.ht-terminal-chart \{ display: contents; \}/);
   assert.match(css, /@media \(min-width: 1180px\)[\s\S]*\.ht-terminal \{[\s\S]*display: grid;/);
   assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.htb-opportunities \{ display: none; \}/);
+  assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1179px\) and \(orientation: landscape\)/);
   assert.match(css, /data-application-route="home"[\s\S]*\.ht-desktop-global-header \{ display: none; \}/);
   assert.doesNotMatch(css, /data-application-route="workspace"[\s\S]*\.ht-desktop-global-header \{ display: none; \}/);
 });
@@ -52,11 +53,14 @@ test("desktop chart controls render below the chart without exposing a dead Draw
 
   assert.ok(canvasIndex > -1);
   assert.ok(toolbarIndex > canvasIndex);
-  assert.match(css, /\.ht-terminal-chart \.htb-chart__toolbar \{[\s\S]*order: 2;/);
-  assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.htb-chart__toolbar \{ order: 1; \}/);
+  assert.doesNotMatch(css, /\border\s*:/);
   assert.doesNotMatch(chart, />\s*Draw\s*</);
   assert.match(chart, /mobileQuery\.matches \? "1h" : "2h"/);
   assert.match(chart, /terminalQuery\.matches[\s\S]*window\.innerHeight - 125/);
+  assert.equal(chart.match(/aria-label="Visible chart range"/g)?.length, 1);
+  assert.equal(chart.match(/<summary>Layers<\/summary>/g)?.length, 1);
+  assert.match(chart, /Candles/);
+  assert.match(chart, /EMA 20/);
 });
 
 test("pane controls are persistent, keyboard usable, and clean up global listeners", () => {
@@ -70,6 +74,8 @@ test("pane controls are persistent, keyboard usable, and clean up global listene
   assert.match(frame, /aria-label="Expand Markets pane"/);
   assert.match(frame, /aria-label="Expand HT Intelligence pane"/);
   assert.match(hook, /localStorage/);
+  assert.match(hook, /resetLayout/);
+  assert.match(navigation, />\s*Reset layout\s*</);
   assert.match(navigation, /event\.metaKey \|\| event\.ctrlKey/);
   assert.match(navigation, /window\.removeEventListener\("keydown", onKeyDown\)/);
   assert.match(navigation, /APPLICATION_ROUTES/);

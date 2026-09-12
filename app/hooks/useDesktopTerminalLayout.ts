@@ -66,11 +66,15 @@ export function useDesktopTerminalLayout() {
     }));
   }, []);
 
+  const resetLayout = useCallback(() => {
+    setPreferences(DEFAULT_DESKTOP_TERMINAL_PREFERENCES);
+  }, []);
+
   return useMemo(() => ({
     preferences,
     ready,
     setPane,
     setPaneWidth,
-  }), [preferences, ready, setPane, setPaneWidth]);
+    resetLayout,
+  }), [preferences, ready, resetLayout, setPane, setPaneWidth]);
 }
-

@@ -47,23 +47,25 @@ test("Home reference composition is chart-led and keeps mobile information order
 
 test("Phase 2.5B styles retain flat surfaces and exact reference proportions", () => {
   const css = source("app/globals.css");
-  assert.match(css, /height: 58px/);
-  assert.match(css, /grid-template-columns: 232px minmax\(0, 1fr\) 300px/);
+  const layout = source("lib/desktop-terminal-layout.ts");
+  assert.match(css, /grid-template-columns: 56px var\(--ht-terminal-markets-width\) minmax\(0, 1fr\) var\(--ht-terminal-intelligence-width\)/);
+  assert.match(layout, /marketsWidth: 220/);
+  assert.match(layout, /intelligenceWidth: 296/);
   const chart = source("app/components/home/HomeReferenceChart.tsx");
-  assert.match(chart, /mobileQuery\.matches[\s\S]*\? 300[\s\S]*terminalQuery\.matches[\s\S]*window\.innerHeight - 125[\s\S]*: 500/);
-  assert.match(css, /\.htb-opportunities \{ border-right: 1px solid/);
-  assert.match(css, /\.htb-intelligence \{ border-left: 1px solid/);
+  assert.match(chart, /landscapeQuery\.matches[\s\S]*window\.innerHeight - 150[\s\S]*mobileQuery\.matches[\s\S]*window\.innerHeight < 720[\s\S]*terminalQuery\.matches[\s\S]*window\.innerHeight - 125[\s\S]*: 500/);
+  assert.match(css, /\.ht-home-terminal-surface \.htb-intelligence \{ border: 0; background: transparent; \}/);
+  assert.match(css, /\.ht-home-terminal-surface \.htb-symbol-header \{[\s\S]*border: 0;/);
 });
 
-test("Phase 2.5B keeps the mobile market tape keyboard reachable", () => {
+test("Phase 2.5B keeps essential mobile market context keyboard reachable", () => {
   const homeSurface = source("app/components/home/HomeReferenceSurface.tsx");
   const css = source("app/globals.css");
 
   assert.match(homeSurface, /className="htb-tape" aria-label="Market context" tabIndex=\{0\}/);
-  assert.match(homeSurface, /className="htb-tape__mobile-more"/);
-  assert.match(homeSurface, /aria-label="Additional market context"/);
-  assert.match(css, /\.htb-tape__desktop-only \{ display: none !important; \}/);
-  assert.match(css, /\.htb-tape__mobile-more \{ display: block; margin-left: auto; \}/);
+  assert.match(homeSurface, /\[\["SPY", marketContext\.spy\.change\], \["QQQ", marketContext\.qqq\.change\]\]/);
+  assert.match(homeSurface, /className="htb-tape__session"/);
+  assert.match(css, /\.ht-home-terminal-surface \.htb-tape__desktop-only \{ display: none; \}/);
+  assert.match(css, /\.ht-home-terminal-surface \.htb-tape__mobile-more \{ display: none; \}/);
 });
 
 test("visible-range controls remain local and cannot remount or refetch the Home chart", () => {
@@ -84,16 +86,15 @@ test("visible-range controls remain local and cannot remount or refetch the Home
   assert.match(canvas, /handleScroll:\s*\{[\s\S]*mouseWheel: true,[\s\S]*pressedMouseMove: true,[\s\S]*horzTouchDrag: true/);
   assert.match(canvas, /handleScale:\s*\{[\s\S]*mouseWheel: true,[\s\S]*pinch: true/);
   assert.doesNotMatch(chart, /(?:baseBars|bars)\.slice\(/);
-  assert.match(css, /grid-template-columns: auto auto minmax\(0, 1fr\) auto/);
-  assert.match(css, /\.htb-chart__latest \{ grid-column: 4; grid-row: 1/);
-  assert.match(css, /\.htb-chart__layers \{ grid-column: 2 \/ 5; grid-row: 2/);
+  assert.match(css, /\.htb-chart__toolbar-separator/);
+  assert.match(css, /\.htb-chart__layers-panel \{[\s\S]*position: absolute/);
+  assert.match(css, /\.ht-home-terminal-surface \.htb-chart__toolbar \{[\s\S]*display: flex/);
 });
 
 test("visible-range semantics avoid a redundant roleless wrapper announcement", () => {
   const chart = source("app/components/home/HomeReferenceChart.tsx");
 
-  assert.match(chart, /<div className="htb-chart__range">/);
+  assert.match(chart, /<label className="htb-chart__range">/);
   assert.doesNotMatch(chart, /className="htb-chart__range" aria-label=/);
-  assert.match(chart, /className="htb-chart__range-desktop" role="group" aria-label="Visible chart range"/);
   assert.match(chart, /<select\s+aria-label="Visible chart range"/);
 });

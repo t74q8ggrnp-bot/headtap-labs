@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
 
 const primaryRouteIds = new Set(["home", "scanner", "workspace", "paper"]);
@@ -15,7 +15,10 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
   const router = useRouter();
   const currentRoute = resolveApplicationRoute(pathname);
   const [ticker, setTicker] = useState("");
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchToggleRef = useRef<HTMLButtonElement>(null);
   const primaryRoutes = APPLICATION_ROUTES.filter((route) => primaryRouteIds.has(route.id));
   const secondaryRoutes = APPLICATION_ROUTES.filter((route) => secondaryRouteIds.has(route.id));
   const operatorRoutes = APPLICATION_ROUTES.filter((route) => operatorRouteIds.has(route.id));
@@ -26,7 +29,19 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
     const symbol = ticker.trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return;
     setTicker("");
+    setMobileSearchOpen(false);
     router.push(`/trade/${encodeURIComponent(symbol)}`);
+  };
+
+  useEffect(() => {
+    if (mobileSearchOpen) searchInputRef.current?.focus();
+  }, [mobileSearchOpen]);
+
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== "Escape" || !mobileSearchOpen) return;
+    event.preventDefault();
+    setMobileSearchOpen(false);
+    searchToggleRef.current?.focus();
   };
 
   const closeMenu = () => menuRef.current?.removeAttribute("open");
@@ -54,9 +69,19 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
           })}
         </nav>
 
-        <form className="ht-shell-search" role="search" onSubmit={openTicker}>
-          <span aria-hidden="true">⌕</span>
+        <form className="ht-shell-search" role="search" data-mobile-open={mobileSearchOpen ? "true" : "false"} onSubmit={openTicker} onKeyDown={handleSearchKeyDown}>
+          <button
+            ref={searchToggleRef}
+            type="button"
+            className="ht-shell-search__toggle"
+            aria-label="Search ticker"
+            aria-expanded={mobileSearchOpen}
+            onClick={() => setMobileSearchOpen((open) => !open)}
+          >
+            <span aria-hidden="true">⌕</span>
+          </button>
           <input
+            ref={searchInputRef}
             value={ticker}
             onChange={(event) => setTicker(event.target.value.toUpperCase())}
             aria-label="Search ticker"

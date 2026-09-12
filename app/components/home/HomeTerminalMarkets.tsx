@@ -75,6 +75,13 @@ export default function HomeTerminalMarkets({
       <div id={`${prefix}-market-panel`} role="tabpanel" aria-labelledby={`${prefix}-market-tab-${tab}`}>
         {rows.length > 0 ? (
           <table className="ht-terminal-market-table">
+            <colgroup>
+              <col className="ht-terminal-market-col--symbol" />
+              <col className="ht-terminal-market-col--last" />
+              <col className="ht-terminal-market-col--change" />
+              <col className="ht-terminal-market-col--rvol" />
+              <col className="ht-terminal-market-col--score" />
+            </colgroup>
             <thead>
               <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>RVOL</th><th>HT</th></tr>
             </thead>

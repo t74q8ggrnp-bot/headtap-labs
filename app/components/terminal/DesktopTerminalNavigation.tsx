@@ -14,7 +14,7 @@ const routes = [
 ] as const;
 const primaryRouteIds = new Set(["home", "scanner", "workspace", "paper"]);
 
-export default function DesktopTerminalNavigation() {
+export default function DesktopTerminalNavigation({ onResetLayout }: { onResetLayout: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -81,6 +81,16 @@ export default function DesktopTerminalNavigation() {
               {route.label}
             </Link>
           ))}
+          <button
+            type="button"
+            className="ht-terminal-nav__reset"
+            onClick={() => {
+              onResetLayout();
+              moreRef.current?.removeAttribute("open");
+            }}
+          >
+            Reset layout
+          </button>
         </nav>
       </details>
       {searchOpen ? (
