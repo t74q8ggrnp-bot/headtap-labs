@@ -1448,6 +1448,19 @@ body:has(.ht-dialog-sheet[open]) {
 .htb-symbol-line > strong { font: 850 1.05rem/1 var(--ht-font-number); }
 .htb-symbol-line > span { font: 820 0.79rem/1 var(--ht-font-number); }
 .htb-symbol-header p { margin-top: 0.5rem; color: #8f929a; font-size: 0.68rem; font-weight: 650; text-transform: capitalize; }
+.ht-terminal-home-actions { display: flex; align-items: center; gap: 0.35rem; }
+.ht-terminal-action {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 1px solid #2a2e35;
+  border-radius: 5px;
+  padding: 0.45rem 0.62rem;
+  background: transparent;
+  color: #c9cbd0;
+  font-size: 0.68rem;
+  font-weight: 780;
+}
+.ht-terminal-action[aria-pressed="true"] { color: #fb923c; }
 .htb-workspace-link { flex: 0 0 auto; border: 1px solid #2a2e35; border-radius: 6px; padding: 0.6rem 0.75rem; color: #c9cbd0; font-size: 0.7rem; font-weight: 780; }
 .htb-workspace-link:hover { border-color: rgba(251, 146, 60, 0.5); color: #fdba74; }
 .htb-decision-line {
@@ -1567,7 +1580,9 @@ body:has(.ht-dialog-sheet[open]) {
   .htb-symbol-line { flex-wrap: wrap; gap: 0.5rem 0.7rem; }
   .htb-symbol-line h1 { width: 100%; font-size: 2rem; }
   .htb-symbol-header p { margin-top: 0.35rem; font-size: 0.64rem; }
-  .htb-workspace-link { padding: 0.55rem 0.62rem; font-size: 0.65rem; }
+  .ht-terminal-home-actions { align-self: center; gap: 0.25rem; }
+  .ht-terminal-action,
+  .htb-workspace-link { min-height: 30px; padding: 0.42rem 0.5rem; font-size: 0.61rem; line-height: 1.15; text-align: center; }
   .htb-decision-line { display: block; min-height: 58px; padding: 0.65rem 0.85rem; }
   .htb-decision-line strong { display: block; }
   .htb-decision-line span { display: block; margin-top: 0.35rem; overflow: visible; font-size: 0.75rem; line-height: 1.35; white-space: normal; }
@@ -1618,6 +1633,10 @@ body:has(.ht-dialog-sheet[open]) {
 
 @media (max-width: 1179px) {
   .ht-home-terminal-surface .htb-opportunities { display: none; }
+  .ht-home-terminal-surface .htb-chart { display: flex; flex-direction: column; }
+  .ht-home-terminal-surface .htb-chart__toolbar { order: 1; }
+  .ht-home-terminal-surface .htb-chart > :is([data-chart-timeframe], .htb-chart__state) { order: 2; }
+  .ht-home-terminal-surface .htb-chart__caption { order: 3; }
 }
 
 @media (min-width: 1180px) {

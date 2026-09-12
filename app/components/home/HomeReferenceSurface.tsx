@@ -142,6 +142,7 @@ export default function HomeReferenceSurface({
 
   const intelligence = (
     <div className="htb-intelligence" data-home-priority="4-intelligence">
+      <h2 className="sr-only">HT Intelligence</h2>
       <section className="htb-score-block">
         <strong className="htb-score ht-tabular-numbers">{Math.round(opportunity.opportunityScore)}</strong>
         <div><h3>{view.momentumLabel}</h3><p>{opportunity.whyItMatters}</p></div>

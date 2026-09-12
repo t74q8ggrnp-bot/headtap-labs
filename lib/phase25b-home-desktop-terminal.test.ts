@@ -44,13 +44,16 @@ test("Home terminal wires real Canonical lists and keeps required actions explic
   assert.doesNotMatch(markets, /mock|fixture|hardcoded/i);
 });
 
-test("chart controls remain below the chart and do not expose a dead Draw control", () => {
+test("desktop chart controls render below the chart without exposing a dead Draw control", () => {
   const chart = source("app/components/home/HomeReferenceChart.tsx");
+  const css = source("app/globals.css");
   const canvasIndex = chart.indexOf("<MarketChartCanvas");
   const toolbarIndex = chart.indexOf('<div className="htb-chart__toolbar">');
 
   assert.ok(canvasIndex > -1);
   assert.ok(toolbarIndex > canvasIndex);
+  assert.match(css, /\.ht-terminal-chart \.htb-chart__toolbar \{[\s\S]*order: 2;/);
+  assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.htb-chart__toolbar \{ order: 1; \}/);
   assert.doesNotMatch(chart, />\s*Draw\s*</);
   assert.match(chart, /mobileQuery\.matches \? "1h" : "2h"/);
   assert.match(chart, /terminalQuery\.matches[\s\S]*window\.innerHeight - 125/);
