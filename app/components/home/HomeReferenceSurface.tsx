@@ -136,8 +136,27 @@ export default function HomeReferenceSurface({
           <p>{readable(opportunity.scanSession)} · {providerTime(opportunity)}</p>
         </div>
         <div className="ht-terminal-home-actions">
-          <button type="button" className="ht-terminal-action" aria-pressed={watched} disabled={watchlistBusy} onClick={onToggleWatchlist}>{watched ? "Watching" : "Watch"}</button>
-          <Link href={`/trade/${encodeURIComponent(opportunity.ticker)}`} className="htb-workspace-link">Open workspace</Link>
+          <button
+            type="button"
+            className="ht-terminal-action"
+            aria-label={watched ? `Remove ${opportunity.ticker} from watchlist` : `Add ${opportunity.ticker} to watchlist`}
+            aria-pressed={watched}
+            disabled={watchlistBusy}
+            onClick={onToggleWatchlist}
+          >
+            <span className="ht-home-action-icon" aria-hidden="true">{watched ? "★" : "☆"}</span>
+            <span className="ht-home-action-label ht-home-action-label--mobile">{watched ? "Saved" : "Watch"}</span>
+            <span className="ht-home-action-label ht-home-action-label--desktop">{watched ? "Watching" : "Watch"}</span>
+          </button>
+          <Link
+            href={`/trade/${encodeURIComponent(opportunity.ticker)}`}
+            className="htb-workspace-link"
+            aria-label={`Open ${opportunity.ticker} workspace`}
+          >
+            <span className="ht-home-action-icon" aria-hidden="true">↗</span>
+            <span className="ht-home-action-label ht-home-action-label--mobile">Trade</span>
+            <span className="ht-home-action-label ht-home-action-label--desktop">Open workspace</span>
+          </Link>
         </div>
       </header>
     </>

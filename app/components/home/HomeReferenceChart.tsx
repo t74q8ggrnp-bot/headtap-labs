@@ -56,7 +56,7 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
           : mobileQuery.matches
           ? window.innerHeight < 720
             ? Math.max(290, Math.round(window.innerHeight * 0.46))
-            : Math.max(300, Math.min(420, Math.round(window.innerHeight * 0.48)))
+            : Math.min(560, Math.max(300, window.innerHeight - 386))
           : terminalQuery.matches
             ? Math.max(620, window.innerHeight - 125)
             : 500,

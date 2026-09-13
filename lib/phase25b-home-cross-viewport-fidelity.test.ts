@@ -85,3 +85,17 @@ test("compact portrait and landscape keep content inside the visual viewport", (
   assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1179px\) and \(orientation: landscape\)[\s\S]*\.ht-home-terminal-surface \{ height: 100dvh; min-height: 0; overflow: hidden; \}/);
   assert.match(css, /\.ht-home-terminal-surface \.ht-terminal-pane--intelligence \{[\s\S]*height: 100dvh;[\s\S]*overflow-y: auto;/);
 });
+
+test("portrait actions stay compact and accessible while collapsed Intelligence releases its gap", () => {
+  const surface = source("app/components/home/HomeReferenceSurface.tsx");
+  const chart = source("app/components/home/HomeReferenceChart.tsx");
+  const css = source("app/globals.css");
+
+  assert.match(surface, /aria-label=\{watched \? `Remove \$\{opportunity\.ticker\} from watchlist` : `Add \$\{opportunity\.ticker\} to watchlist`\}/);
+  assert.match(surface, /aria-label=\{`Open \$\{opportunity\.ticker\} workspace`\}/);
+  assert.match(surface, /ht-home-action-label--mobile">Trade/);
+  assert.match(surface, /ht-home-action-label--desktop">Open workspace/);
+  assert.match(chart, /Math\.min\(560, Math\.max\(300, window\.innerHeight - 386\)\)/);
+  assert.match(css, /\.ht-home-terminal-surface \.ht-home-action-label--desktop \{ display: none; \}/);
+  assert.match(css, /\.htb-home \{ padding-bottom: calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\); \}/);
+});

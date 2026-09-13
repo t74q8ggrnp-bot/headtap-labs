@@ -355,6 +355,8 @@ body {
 .htb-chart__layers { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; }
 .htb-chart__layers-mode { padding-bottom: 0.5rem; border-bottom: 1px solid rgba(164, 170, 180, 0.1); }
 .htb-chart__layers-panel button { justify-content: flex-start; text-align: left; }
+.ht-home-action-icon,
+.ht-home-action-label--mobile { display: none; }
 
 @media (max-width: 767px) {
   .ht-responsive-shell[data-application-route="home"] > .ht-desktop-global-header {
@@ -430,17 +432,32 @@ body {
   .ht-home-terminal-surface .htb-symbol-line > strong { font: 760 1.18rem/1 var(--font-ht-terminal), sans-serif; }
   .ht-home-terminal-surface .htb-symbol-line > span { font: 760 0.83rem/1 var(--font-ht-terminal), sans-serif; }
   .ht-home-terminal-surface .htb-symbol-header p { margin-top: 0.42rem; font-size: 0.7rem; }
-  .ht-home-terminal-surface .ht-terminal-home-actions { align-self: flex-start; gap: 0.1rem; }
+  .ht-home-terminal-surface .ht-terminal-home-actions {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    gap: 0.08rem;
+  }
   .ht-home-terminal-surface :is(.ht-terminal-action, .htb-workspace-link) {
     min-height: 34px;
     border: 0;
     border-radius: 0;
-    padding: 0 0.38rem;
+    gap: 0.18rem;
+    padding: 0 0.22rem;
     background: transparent;
     color: #aeb2ba;
     font-size: 0.69rem;
     font-weight: 700;
   }
+  .ht-home-terminal-surface .ht-home-action-icon,
+  .ht-home-terminal-surface .ht-home-action-label--mobile { display: inline-flex; }
+  .ht-home-terminal-surface .ht-home-action-icon {
+    align-items: center;
+    color: #d5d7dc;
+    font-size: 0.78rem;
+    line-height: 1;
+  }
+  .ht-home-terminal-surface .ht-home-action-label--desktop { display: none; }
+  .ht-home-terminal-surface .ht-terminal-action[aria-pressed="true"] .ht-home-action-icon { color: #f59a3c; }
   .ht-home-terminal-surface .htb-decision-line {
     min-height: 38px;
     border: 0;
