@@ -165,6 +165,7 @@ export default function HeroPriceChart({
             height={resolvedHeight}
             timeZone={timeZone}
             viewportKey={viewportKey}
+            tightPriceScale={feature}
             visibleRange={visibleRange}
           />
           <div className={`${feature ? "px-1 py-2" : "border-t border-white/7 px-3 py-1.5"} flex flex-wrap items-center justify-between gap-1`}>

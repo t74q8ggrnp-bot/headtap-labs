@@ -119,6 +119,9 @@ test("mobile Home presents Spot Momentum, a full-width 90-minute chart, then Pro
   assert.match(forming, /if \(!showCard\) return null/);
   assert.match(forming, /onPlanChange\?\.\(selected\?\.plan \?\? null\)/);
   assert.match(chart, /visibleRange=\{visibleRange\}/);
+  assert.match(chart, /tightPriceScale=\{feature\}/);
+  assert.match(card, /text-blue-400">HT Agent X targets/);
+  assert.equal(card.match(/text-\[#ff7a18\]/g)?.length, 2);
   assert.match(chart, /Top Opportunity chart display/);
   assert.match(chart, /mode === "graph" \? "Chart" : "Candles"/);
   assert.match(chart, /Drag to inspect · verified provider intervals/);

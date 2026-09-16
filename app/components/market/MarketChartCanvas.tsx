@@ -88,6 +88,7 @@ export type MarketChartCanvasProps = {
   showVolume?: boolean;
   layerHost?: ChartLayerSlots;
   preserveEngineOnLocalControls?: boolean;
+  tightPriceScale?: boolean;
   visibleRange?: MarketChartVisibleRange;
   latestResetToken?: number;
   onVisibleCoverageChange?: (coverage: MarketChartVisibleCoverage | null) => void;
@@ -353,6 +354,11 @@ function formatChartTick(
   }).format(date);
 }
 
+function formatChartPrice(value: number, tightPriceScale: boolean) {
+  const formatted = formatMarketPrice(value);
+  return tightPriceScale ? formatted.replace(/^\$/, "") : formatted;
+}
+
 function candlestickDatum(
   slot: MarketChartTimeSlot,
 ): CandlestickData<UTCTimestamp> | WhitespaceData<UTCTimestamp> {
@@ -427,6 +433,7 @@ export function MarketChartCanvas({
   layerHost,
   layerSlots,
   preserveEngineOnLocalControls = false,
+  tightPriceScale = false,
   visibleRange,
   latestResetToken = 0,
   onVisibleCoverageChange,
@@ -491,6 +498,7 @@ export function MarketChartCanvas({
         resolvedIntervalSeconds,
         resolvedTimeZone,
         resolvedViewportKey,
+        tightPriceScale,
         showEma20,
         showEma9,
         showVolume,
@@ -527,7 +535,7 @@ export function MarketChartCanvas({
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#71717a",
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        fontSize: 10,
+        fontSize: tightPriceScale ? 9 : 10,
         attributionLogo: false,
       },
       grid: {
@@ -536,6 +544,7 @@ export function MarketChartCanvas({
       },
       rightPriceScale: {
         borderColor: "rgba(255,255,255,0.08)",
+        minimumWidth: 0,
         scaleMargins: { top: 0.08, bottom: 0.28 },
       },
       timeScale: {
@@ -569,7 +578,7 @@ export function MarketChartCanvas({
       },
       localization: {
         locale,
-        priceFormatter: (price: number) => formatMarketPrice(price),
+        priceFormatter: (price: number) => formatChartPrice(price, tightPriceScale),
         timeFormatter: (chartTime: Time) =>
           chartTimeFormatter.format(chartTimeToDate(chartTime)),
       },
@@ -577,7 +586,7 @@ export function MarketChartCanvas({
 
     const priceFormat = {
       type: "custom" as const,
-      formatter: (price: number) => formatMarketPrice(price),
+      formatter: (price: number) => formatChartPrice(price, tightPriceScale),
       minMove: priceResolution.minMove,
     };
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -748,7 +757,7 @@ export function MarketChartCanvas({
   useEffect(() => {
     const priceFormat = {
       type: "custom" as const,
-      formatter: (price: number) => formatMarketPrice(price),
+      formatter: (price: number) => formatChartPrice(price, tightPriceScale),
       minMove: priceResolution.minMove,
     };
     priceSeriesRef.current?.graph.applyOptions({
@@ -774,7 +783,7 @@ export function MarketChartCanvas({
       series.applyOptions({ priceFormat });
     }
     return () => window.cancelAnimationFrame(drawingModeFrame);
-  }, [mode, palette.line, priceResolution.minMove]);
+  }, [mode, palette.line, priceResolution.minMove, tightPriceScale]);
 
   useEffect(() => {
     const locale = navigator.language || "en-US";
@@ -790,12 +799,12 @@ export function MarketChartCanvas({
       },
       localization: {
         locale,
-        priceFormatter: (price: number) => formatMarketPrice(price),
+        priceFormatter: (price: number) => formatChartPrice(price, tightPriceScale),
         timeFormatter: (chartTime: Time) =>
           chartTimeFormatter.format(chartTimeToDate(chartTime)),
       },
     });
-  }, [resolvedTimeZone]);
+  }, [resolvedTimeZone, tightPriceScale]);
 
   useEffect(() => {
     indicatorSeriesRef.current.get("vwap")?.applyOptions({ visible: showVwap, lastValueVisible: showVwap });
