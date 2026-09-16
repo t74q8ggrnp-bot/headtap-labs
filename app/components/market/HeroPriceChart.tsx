@@ -67,23 +67,21 @@ export default function HeroPriceChart({
   return (
     <section
       className={feature
-        ? "overflow-hidden bg-black"
+        ? "relative overflow-hidden bg-black"
         : `overflow-hidden rounded-2xl border ${palette.border} bg-black/35`}
       aria-label={`${symbol} ${title.toLowerCase()} chart`}
       data-market-symbol={symbol}
       data-market-as-of={marketView.quote?.asOf ?? ""}
       data-market-price={marketView.quote?.price ?? ""}
     >
-      <div className={`${feature ? "flex items-center justify-between gap-3 px-1 pb-2 pt-1" : `border-b border-white/7 px-3 py-2.5 ${compact ? "space-y-2.5 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0" : "flex flex-wrap items-center justify-between gap-2"}`}`}>
+      {!feature ? <div className={`border-b border-white/7 px-3 py-2.5 ${compact ? "space-y-2.5 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0" : "flex flex-wrap items-center justify-between gap-2"}`}>
         <div className={compact ? "flex items-start justify-between gap-3" : ""}>
           <div>
             <p className={`text-[8px] font-black uppercase tracking-[0.2em] ${palette.text}`}>
               {title}
             </p>
             <p className="mt-0.5 text-[8px] font-semibold text-zinc-700">
-              {feature
-                ? `${symbol} · verified provider candles`
-                : data
+              {data
                 ? `${data.windowLabel} · ${data.sourceLabel} · ${chartMode === "candles" ? "OHLC" : "close graph"}`
                 : "Provider-backed market history"}
             </p>
@@ -91,27 +89,13 @@ export default function HeroPriceChart({
               {marketView.label}{marketView.quote ? ` · ${new Date(marketView.quote.asOf).toLocaleTimeString("en-US", { timeZone, timeZoneName: "short" })}` : ""}
             </p>
           </div>
-          {compact && latestTime && !feature && (
+          {compact && latestTime && (
             <p className="shrink-0 font-mono text-[8px] font-bold text-zinc-600">
               Candle interval {latestTime}
             </p>
           )}
         </div>
-        {feature ? (
-          <div className="grid shrink-0 grid-cols-2 gap-1" role="group" aria-label="Top Opportunity chart display">
-            {(["graph", "candles"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                aria-pressed={chartMode === mode}
-                onClick={() => setChartMode(mode)}
-                className={`px-2 py-1 text-[8px] font-black transition ${chartMode === mode ? palette.text : "text-zinc-600"}`}
-              >
-                {mode === "graph" ? "Chart" : "Candles"}
-              </button>
-            ))}
-          </div>
-        ) : <div className={`flex items-center gap-2 ${compact ? "w-full sm:w-auto" : ""}`}>
+        <div className={`flex items-center gap-2 ${compact ? "w-full sm:w-auto" : ""}`}>
           <div
             className={`grid grid-cols-2 rounded-lg border border-white/8 bg-white/[0.025] p-0.5 ${compact ? "w-full sm:w-auto" : ""}`}
             role="group"
@@ -138,8 +122,26 @@ export default function HeroPriceChart({
               Candle interval {latestTime}
             </p>
           )}
-        </div>}
-      </div>
+        </div>
+      </div> : (
+        <div
+          className="absolute right-12 top-2 z-10 grid grid-cols-2 gap-1 bg-black/75 px-1 py-0.5 backdrop-blur-sm"
+          role="group"
+          aria-label="Top Opportunity chart display"
+        >
+          {(["graph", "candles"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={chartMode === mode}
+              onClick={() => setChartMode(mode)}
+              className={`px-2 py-1 text-[8px] font-black transition ${chartMode === mode ? palette.text : "text-zinc-500"}`}
+            >
+              {mode === "graph" ? "Chart" : "Candles"}
+            </button>
+          ))}
+        </div>
+      )}
 
       {failed ? (
         <div className="flex items-center justify-center px-4 text-center" style={{ height: resolvedHeight }}>
@@ -168,18 +170,16 @@ export default function HeroPriceChart({
             tightPriceScale={feature}
             visibleRange={visibleRange}
           />
-          <div className={`${feature ? "px-1 py-2" : "border-t border-white/7 px-3 py-1.5"} flex flex-wrap items-center justify-between gap-1`}>
+          {!feature ? <div className="flex flex-wrap items-center justify-between gap-1 border-t border-white/7 px-3 py-1.5">
             <p className="text-[7px] font-semibold text-zinc-700">
-              {feature
-                ? "Drag to inspect · verified provider intervals"
-                : chartMode === "candles"
+              {chartMode === "candles"
                 ? "Candles show open, high, low + close · drag to inspect"
                 : "Graph connects verified closes · drag to inspect"}
             </p>
             <p className="font-mono text-[7px] font-bold uppercase text-zinc-700">
               Times shown {timeZoneLabel}
             </p>
-          </div>
+          </div> : null}
           {!feature && <div className="grid grid-cols-4 border-t border-white/7">
             {[
               ["Open", formatPrice(data.summary.open)],

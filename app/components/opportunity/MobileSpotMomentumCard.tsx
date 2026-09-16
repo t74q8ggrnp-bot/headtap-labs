@@ -121,7 +121,7 @@ export default function MobileSpotMomentumCard({
           symbol={opportunity.ticker}
           accent="violet"
           compact
-          height={300}
+          height={390}
           presentation="feature"
           title="Top Opportunity"
           visibleRange="90m"

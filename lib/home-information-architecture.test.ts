@@ -103,7 +103,7 @@ test("mobile Home presents Spot Momentum, a full-width 90-minute chart, then Pro
   assert.deepEqual([...order].sort((left, right) => left - right), order);
   assert.match(card, /presentation="feature"/);
   assert.match(card, /visibleRange="90m"/);
-  assert.match(card, /height=\{300\}/);
+  assert.match(card, /height=\{390\}/);
   assert.match(card, /ht-mobile-home-card--edge/);
   assert.match(card, /HT Agent X targets/);
   assert.match(card, /agentPlan\.targetOne/);
@@ -124,7 +124,9 @@ test("mobile Home presents Spot Momentum, a full-width 90-minute chart, then Pro
   assert.equal(card.match(/text-\[#ff7a18\]/g)?.length, 2);
   assert.match(chart, /Top Opportunity chart display/);
   assert.match(chart, /mode === "graph" \? "Chart" : "Candles"/);
-  assert.match(chart, /Drag to inspect · verified provider intervals/);
+  assert.match(chart, /absolute right-12 top-2 z-10/);
+  assert.doesNotMatch(chart, /Drag to inspect · verified provider intervals/);
+  assert.match(chart, /\{!feature \? <div className="flex flex-wrap items-center justify-between gap-1 border-t/);
   assert.match(forming, /HT Agent X Setup Forming/);
   assert.match(populated, /HT Agent X Setup Forming/);
   assert.doesNotMatch(`${forming}\n${populated}`, /Paper Research/);
