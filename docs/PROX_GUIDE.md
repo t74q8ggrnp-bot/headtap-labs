@@ -354,7 +354,9 @@ The internal `/api/prox-paired-scorecard` route reads existing append-only
 records and makes zero provider requests. It also reports the existing
 versioned Agent X `canonical_only`, `canonical_prox`, and `ht_agent_full`
 cohorts and verifies that their immutable evidence-frame clocks remain within
-the 120-second alignment contract. Its 30-session, 500-pair, and 500
+the 120-second alignment contract. Agent cohort reporting uses the existing
+bounded latest-100-decision metric contract; it does not truncate or restrict
+the requested historical Canonical/ProX window. Its 30-session, 500-pair, and 500
 measured one-hour outcome floors indicate only that evidence may be brought to
 the owner for review. Crossing those floors cannot change Canonical ranking,
 ProX weights, Agent authority, Paper behavior, or execution. Any such change

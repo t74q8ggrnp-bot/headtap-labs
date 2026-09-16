@@ -6,7 +6,10 @@ import {
   type CanonicalPairCandidate,
   type ProxPairCandidate,
 } from "@/lib/prox/paired-scorecard";
-import { buildHtAgentCohortMetrics } from "@/lib/ht-agent/cohort-metrics";
+import {
+  buildHtAgentCohortMetrics,
+  HT_AGENT_METRIC_DECISION_LIMIT,
+} from "@/lib/ht-agent/cohort-metrics";
 import { HT_AGENT_COHORT_VERSION } from "@/lib/ht-agent/contracts";
 import { summarizeAgentTargetCalibration } from "@/lib/ht-agent/target-calibration";
 
@@ -19,7 +22,6 @@ const MAX_WINDOW_DAYS = 90;
 const READ_BATCH_SIZE = 200;
 const READ_PAGE_SIZE = 1_000;
 const MAX_READ_ROWS = 100_000;
-
 function isAuthorized(request: Request) {
   return Boolean(CRON_SECRET) &&
     request.headers.get("authorization") === `Bearer ${CRON_SECRET}`;
@@ -186,27 +188,16 @@ export async function GET(request: Request) {
       return (data ?? []) as Array<Record<string, unknown>>;
     });
 
-    const agentCohortRows: Array<Record<string, unknown>> = [];
-    let agentCohortReadCapped = false;
-    for (let offset = 0; offset < MAX_READ_ROWS; offset += READ_PAGE_SIZE) {
-      const { data, error } = await supabase
-        .from("ht_agent_cohort_observations")
-        .select("id,decision_id,frame_id,cohort,cohort_version,would_enter,observed_at")
-        .eq("cohort_version", HT_AGENT_COHORT_VERSION)
-        .gte("observed_at", windowStart)
-        .order("observed_at", { ascending: true })
-        .range(offset, offset + READ_PAGE_SIZE - 1);
-      if (error) throw error;
-      const page = (data ?? []) as Array<Record<string, unknown>>;
-      agentCohortRows.push(...page);
-      if (page.length < READ_PAGE_SIZE) break;
-      if (offset + READ_PAGE_SIZE >= MAX_READ_ROWS) agentCohortReadCapped = true;
-    }
-    if (agentCohortReadCapped) {
-      throw new Error(
-        "Agent-cohort source rows exceeded the bounded research window; request fewer days.",
-      );
-    }
+    const agentObservationReadLimit = HT_AGENT_METRIC_DECISION_LIMIT * 3;
+    const { data: agentCohortData, error: agentCohortError } = await supabase
+      .from("ht_agent_cohort_observations")
+      .select("id,decision_id,frame_id,cohort,cohort_version,would_enter,observed_at")
+      .eq("cohort_version", HT_AGENT_COHORT_VERSION)
+      .gte("observed_at", windowStart)
+      .order("observed_at", { ascending: false })
+      .limit(agentObservationReadLimit);
+    if (agentCohortError) throw agentCohortError;
+    const agentCohortRows = (agentCohortData ?? []) as Array<Record<string, unknown>>;
     const agentCohortIds = agentCohortRows.map((row) => String(row.id));
     const agentOutcomeRows = await readInBatches(agentCohortIds, async (batch) => {
       const { data, error } = await supabase
@@ -381,6 +372,12 @@ export async function GET(request: Request) {
       agentResearch: {
         authority: "paper_only_research",
         cohortVersion: HT_AGENT_COHORT_VERSION,
+        boundedObservationWindow: {
+          latestDecisionLimit: HT_AGENT_METRIC_DECISION_LIMIT,
+          observationReadLimit: agentObservationReadLimit,
+          observationsRead: agentCohortRows.length,
+          note: "Agent cohort metrics intentionally use the latest bounded complete three-way decision groups; the broader Canonical/ProX comparison retains the requested historical window.",
+        },
         synchronization: {
           completeFrameCount: agentFrameRows.length,
           alignedFrameCount: alignedAgentFrames.length,
