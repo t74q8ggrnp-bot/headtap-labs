@@ -103,9 +103,14 @@ test("mobile Home presents Spot Momentum, Top Opportunity chart, then Agent X se
   assert.deepEqual([...order].sort((left, right) => left - right), order);
   assert.match(card, /presentation="feature"/);
   assert.match(card, /HT Agent X targets/);
-  assert.match(card, /framework\.uptideMin/);
-  assert.match(card, /framework\.uptideMax/);
-  assert.match(card, /Modeled from the current Canonical framework/);
+  assert.match(card, /agentPlan\.targetOne/);
+  assert.match(card, /agentPlan\.targetTwo/);
+  assert.match(card, /onPlanChange=\{setAgentPlan\}/);
+  assert.match(card, /Targets forming with the verified plan/);
+  assert.match(card, /Verified Agent X plan levels only/);
+  assert.doesNotMatch(card, /framework\.uptideMin|framework\.uptideMax/);
+  assert.match(forming, /onPlanChange\?: \(plan: HtTradePlan \| null\) => void/);
+  assert.match(forming, /onPlanChange\?\.\(selected\?\.plan \?\? null\)/);
   assert.match(chart, /feature \? 220/);
   assert.match(chart, /Top Opportunity chart display/);
   assert.match(chart, /mode === "graph" \? "Chart" : "Candles"/);

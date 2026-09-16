@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
+import type { HtTradePlan } from "@/lib/ht-agent/contracts";
 import type { DecisionTraceDisplay, TradeFrameworkDisplay } from "@/lib/contracts/market";
 import {
   getOpportunityPresentation,
@@ -44,12 +46,7 @@ export default function MobileSpotMomentumCard({
   const displayPrice = displayQuote?.price ?? opportunity.price;
   const displayChange = displayQuote?.changePercent ?? opportunity.change;
   const displayLive = marketView.live;
-  const targetOne = framework && opportunity.price > 0
-    ? opportunity.price * (1 + framework.uptideMin / 100)
-    : null;
-  const targetTwo = framework && opportunity.price > 0
-    ? opportunity.price * (1 + framework.uptideMax / 100)
-    : null;
+  const [agentPlan, setAgentPlan] = useState<HtTradePlan | null>(null);
 
   return (
     <article className="ht-mobile-home-card mx-4 mb-3 mt-4 flex-shrink-0 overflow-hidden" aria-labelledby={`mobile-home-${opportunity.ticker}`}>
@@ -77,21 +74,25 @@ export default function MobileSpotMomentumCard({
           </div>
           <div className="min-w-0 border-l border-white/8 pl-4" aria-label="HT Agent X modeled targets">
             <p className="text-[8px] font-black uppercase tracking-[0.15em] text-zinc-500">HT Agent X targets</p>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <div className="min-w-0">
-                <span className="block text-[7px] font-bold uppercase text-zinc-600">T1</span>
-                <strong className="mt-1 block truncate font-mono text-xs text-orange-300">
-                  {targetOne === null ? "—" : formatMarketPrice(targetOne)}
-                </strong>
+            {agentPlan?.targetOne !== null && agentPlan?.targetOne !== undefined ? (
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                <div className="min-w-0">
+                  <span className="block text-[7px] font-bold uppercase text-zinc-600">Target 1</span>
+                  <strong className="mt-1 block truncate font-mono text-xs text-orange-300">
+                    {formatMarketPrice(agentPlan.targetOne)}
+                  </strong>
+                </div>
+                <div className="min-w-0">
+                  <span className="block text-[7px] font-bold uppercase text-zinc-600">Target 2</span>
+                  <strong className="mt-1 block truncate font-mono text-xs text-orange-300">
+                    {agentPlan.targetTwo === null ? "Forming" : formatMarketPrice(agentPlan.targetTwo)}
+                  </strong>
+                </div>
               </div>
-              <div className="min-w-0">
-                <span className="block text-[7px] font-bold uppercase text-zinc-600">T2</span>
-                <strong className="mt-1 block truncate font-mono text-xs text-orange-300">
-                  {targetTwo === null ? "—" : formatMarketPrice(targetTwo)}
-                </strong>
-              </div>
-            </div>
-            <p className="mt-1.5 text-[7px] leading-3 text-zinc-700">Modeled from the current Canonical framework.</p>
+            ) : (
+              <p className="mt-2 text-[10px] font-bold leading-4 text-zinc-500">Targets forming with the verified plan</p>
+            )}
+            <p className="mt-1.5 text-[7px] leading-3 text-zinc-700">Verified Agent X plan levels only.</p>
           </div>
         </div>
         {!displayLive && (
@@ -120,7 +121,7 @@ export default function MobileSpotMomentumCard({
       </div>
 
       <div className="border-b border-white/8 px-5 py-4" data-home-priority="3-agent-setup">
-        <HomeTradePlan symbol={opportunity.ticker} compact />
+        <HomeTradePlan symbol={opportunity.ticker} compact onPlanChange={setAgentPlan} />
       </div>
 
       <div className="border-b border-white/8 px-5 py-4" data-home-priority="4-score-signal">
