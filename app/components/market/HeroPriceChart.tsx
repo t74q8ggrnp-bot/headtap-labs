@@ -71,7 +71,7 @@ export default function HeroPriceChart({
       data-market-as-of={marketView.quote?.asOf ?? ""}
       data-market-price={marketView.quote?.price ?? ""}
     >
-      <div className={`${feature ? "px-1 pb-2 pt-1" : "border-b border-white/7 px-3 py-2.5"} ${compact ? "space-y-2.5 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0" : "flex flex-wrap items-center justify-between gap-2"}`}>
+      <div className={`${feature ? "flex items-center justify-between gap-3 px-1 pb-2 pt-1" : `border-b border-white/7 px-3 py-2.5 ${compact ? "space-y-2.5 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0" : "flex flex-wrap items-center justify-between gap-2"}`}`}>
         <div className={compact ? "flex items-start justify-between gap-3" : ""}>
           <div>
             <p className={`text-[8px] font-black uppercase tracking-[0.2em] ${palette.text}`}>
@@ -94,7 +94,21 @@ export default function HeroPriceChart({
             </p>
           )}
         </div>
-        {!feature && <div className={`flex items-center gap-2 ${compact ? "w-full sm:w-auto" : ""}`}>
+        {feature ? (
+          <div className="grid shrink-0 grid-cols-2 gap-1" role="group" aria-label="Top Opportunity chart display">
+            {(["graph", "candles"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={chartMode === mode}
+                onClick={() => setChartMode(mode)}
+                className={`px-2 py-1 text-[8px] font-black transition ${chartMode === mode ? palette.text : "text-zinc-600"}`}
+              >
+                {mode === "graph" ? "Chart" : "Candles"}
+              </button>
+            ))}
+          </div>
+        ) : <div className={`flex items-center gap-2 ${compact ? "w-full sm:w-auto" : ""}`}>
           <div
             className={`grid grid-cols-2 rounded-lg border border-white/8 bg-white/[0.025] p-0.5 ${compact ? "w-full sm:w-auto" : ""}`}
             role="group"

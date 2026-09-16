@@ -102,7 +102,13 @@ test("mobile Home presents Spot Momentum, Top Opportunity chart, then Agent X se
   assert.ok(order.every((position) => position >= 0));
   assert.deepEqual([...order].sort((left, right) => left - right), order);
   assert.match(card, /presentation="feature"/);
+  assert.match(card, /HT Agent X targets/);
+  assert.match(card, /framework\.uptideMin/);
+  assert.match(card, /framework\.uptideMax/);
+  assert.match(card, /Modeled from the current Canonical framework/);
   assert.match(chart, /feature \? 220/);
+  assert.match(chart, /Top Opportunity chart display/);
+  assert.match(chart, /mode === "graph" \? "Chart" : "Candles"/);
   assert.match(chart, /Drag to inspect · verified provider intervals/);
   assert.match(forming, /HT Agent X Setup Forming/);
   assert.match(populated, /HT Agent X Setup Forming/);
