@@ -36,6 +36,7 @@ const prox = (overrides: Partial<ProxPairCandidate> = {}): ProxPairCandidate => 
   rank: 1,
   engineVersion: "prox-board-v1",
   edgeScoreVersion: "prox-edge-v1",
+  outcomeComplete: true,
   maxGainPercent: 8,
   maxDrawdownPercent: -2,
   sampledHighAt: "2026-09-16T14:45:00.000Z",
@@ -77,6 +78,24 @@ test("missing and misaligned evidence is excluded instead of scored as zero", ()
     ],
   );
   assert.equal(report.comparisons.allPairs.medianMaxGainPercent, null);
+});
+
+test("pending episode paths remain paired but are excluded from completed outcome rates", () => {
+  const report = buildProxCanonicalPairedScorecard(
+    [canonical()],
+    [prox({
+      outcomeComplete: false,
+      maxGainPercent: 0,
+      maxDrawdownPercent: 0,
+      horizons: {},
+    })],
+  );
+  assert.equal(report.coverage.pairedEpisodeCount, 1);
+  assert.equal(report.comparisons.allPairs.completedOutcomeCount, 0);
+  assert.equal(report.comparisons.allPairs.pendingOutcomeCount, 1);
+  assert.equal(report.comparisons.allPairs.medianMaxGainPercent, null);
+  assert.equal(report.comparisons.allPairs.plusFiveBeforeMinusFiveHitRatePercent, null);
+  assert.equal(report.pairs[0].outcomes.plusFiveBeforeMinusFive, null);
 });
 
 test("one canonical observation cannot inflate multiple ProX episodes", () => {

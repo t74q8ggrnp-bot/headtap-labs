@@ -349,6 +349,12 @@ their provider clocks align within 120 seconds, and their decision clocks
 align within 180 seconds. A Canonical observation may be paired only once.
 Missing, stale, misaligned, duplicate, or incomplete evidence is excluded with
 an explicit reason and is never converted into a zero return.
+Pairing coverage is reported independently from outcome coverage: an aligned
+episode may remain paired for synchronization diagnostics while its MFE, MAE,
+and threshold-hit fields stay excluded until the parent outcome is complete.
+The route accepts bounded, non-overlapping historical chunks of at most seven
+days within the latest 90 days so read-only research does not require a broad
+database scan.
 
 The internal `/api/prox-paired-scorecard` route reads existing append-only
 records and makes zero provider requests. It also reports the existing

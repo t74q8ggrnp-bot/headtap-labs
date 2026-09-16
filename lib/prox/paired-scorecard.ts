@@ -36,6 +36,7 @@ export type ProxPairCandidate = {
   rank: number | null;
   engineVersion: string | null;
   edgeScoreVersion: string | null;
+  outcomeComplete: boolean;
   maxGainPercent: number;
   maxDrawdownPercent: number;
   sampledHighAt: string;
@@ -61,11 +62,12 @@ export type PairedDecision = {
     agreement: "both_selected" | "canonical_only" | "prox_only" | "both_withheld";
   };
   outcomes: {
+    complete: boolean;
     horizons: Record<string, number>;
     maxGainPercent: number;
     maxDrawdownPercent: number;
-    plusFiveBeforeMinusFive: boolean;
-    plusTenBeforeMinusFive: boolean;
+    plusFiveBeforeMinusFive: boolean | null;
+    plusTenBeforeMinusFive: boolean | null;
   };
 };
 
@@ -139,6 +141,7 @@ function rate(hitCount: number, total: number) {
 }
 
 function summarizePairs(pairs: PairedDecision[]) {
+  const completed = pairs.filter((pair) => pair.outcomes.complete);
   const horizons = new Set(
     pairs.flatMap((pair) => Object.keys(pair.outcomes.horizons)),
   );
@@ -158,15 +161,17 @@ function summarizePairs(pairs: PairedDecision[]) {
   });
   return {
     pairCount: pairs.length,
-    medianMaxGainPercent: median(pairs.map((pair) => pair.outcomes.maxGainPercent)),
-    medianMaxDrawdownPercent: median(pairs.map((pair) => pair.outcomes.maxDrawdownPercent)),
+    completedOutcomeCount: completed.length,
+    pendingOutcomeCount: pairs.length - completed.length,
+    medianMaxGainPercent: median(completed.map((pair) => pair.outcomes.maxGainPercent)),
+    medianMaxDrawdownPercent: median(completed.map((pair) => pair.outcomes.maxDrawdownPercent)),
     plusFiveBeforeMinusFiveHitRatePercent: rate(
-      pairs.filter((pair) => pair.outcomes.plusFiveBeforeMinusFive).length,
-      pairs.length,
+      completed.filter((pair) => pair.outcomes.plusFiveBeforeMinusFive === true).length,
+      completed.length,
     ),
     plusTenBeforeMinusFiveHitRatePercent: rate(
-      pairs.filter((pair) => pair.outcomes.plusTenBeforeMinusFive).length,
-      pairs.length,
+      completed.filter((pair) => pair.outcomes.plusTenBeforeMinusFive === true).length,
+      completed.length,
     ),
     byHorizon,
   };
@@ -187,6 +192,7 @@ function sampleLabel(measuredCount: number) {
 }
 
 function summarizePatternGroup(label: string, pairs: PairedDecision[]) {
+  const completed = pairs.filter((pair) => pair.outcomes.complete);
   const measuredOneHour = pairs.flatMap((pair) => {
     const value = pair.outcomes.horizons["1h"];
     return Number.isFinite(value) ? [value] : [];
@@ -195,6 +201,7 @@ function summarizePatternGroup(label: string, pairs: PairedDecision[]) {
   return {
     label,
     pairCount: pairs.length,
+    completedOutcomeCount: completed.length,
     measuredOneHourCount: measuredOneHour.length,
     sampleLabel: sampleLabel(measuredOneHour.length),
     positiveOneHourRatePercent: rate(
@@ -204,14 +211,14 @@ function summarizePatternGroup(label: string, pairs: PairedDecision[]) {
     nonPositiveOneHourRatePercent: rate(oneHourMisses.length, measuredOneHour.length),
     medianOneHourReturnPercent: median(measuredOneHour),
     plusFiveBeforeMinusFiveHitRatePercent: rate(
-      pairs.filter((pair) => pair.outcomes.plusFiveBeforeMinusFive).length,
-      pairs.length,
+      completed.filter((pair) => pair.outcomes.plusFiveBeforeMinusFive === true).length,
+      completed.length,
     ),
-    medianMaxGainPercent: median(pairs.map((pair) => pair.outcomes.maxGainPercent)),
-    medianMaxDrawdownPercent: median(pairs.map((pair) => pair.outcomes.maxDrawdownPercent)),
+    medianMaxGainPercent: median(completed.map((pair) => pair.outcomes.maxGainPercent)),
+    medianMaxDrawdownPercent: median(completed.map((pair) => pair.outcomes.maxDrawdownPercent)),
     fivePercentDrawdownRatePercent: rate(
-      pairs.filter((pair) => pair.outcomes.maxDrawdownPercent <= -5).length,
-      pairs.length,
+      completed.filter((pair) => pair.outcomes.maxDrawdownPercent <= -5).length,
+      completed.length,
     ),
   };
 }
@@ -239,6 +246,7 @@ function buildMissPatternAnalysis(pairs: PairedDecision[]) {
     Number.isFinite(pair.outcomes.horizons["1h"]));
   const missedPairs = measuredOneHourPairs.filter((pair) =>
     pair.outcomes.horizons["1h"] <= 0);
+  const completedMissedPairs = missedPairs.filter((pair) => pair.outcomes.complete);
   return {
     version: "prox-canonical-miss-patterns-v1" as const,
     authority: "read_only_research" as const,
@@ -258,12 +266,13 @@ function buildMissPatternAnalysis(pairs: PairedDecision[]) {
         missedPairs.map((pair) => pair.outcomes.horizons["1h"]),
       ),
       medianMaxGainPercent: median(
-        missedPairs.map((pair) => pair.outcomes.maxGainPercent),
+        completedMissedPairs.map((pair) => pair.outcomes.maxGainPercent),
       ),
       medianMaxDrawdownPercent: median(
-        missedPairs.map((pair) => pair.outcomes.maxDrawdownPercent),
+        completedMissedPairs.map((pair) => pair.outcomes.maxDrawdownPercent),
       ),
-      fivePercentDrawdownMissCount: missedPairs.filter(
+      completedOutcomeMissCount: completedMissedPairs.length,
+      fivePercentDrawdownMissCount: completedMissedPairs.filter(
         (pair) => pair.outcomes.maxDrawdownPercent <= -5,
       ).length,
     },
@@ -418,11 +427,16 @@ export function buildProxCanonicalPairedScorecard(
       },
       selection: { canonicalSelected, proxSelected, agreement },
       outcomes: {
+        complete: prox.outcomeComplete,
         horizons: prox.horizons,
         maxGainPercent: prox.maxGainPercent,
         maxDrawdownPercent: prox.maxDrawdownPercent,
-        plusFiveBeforeMinusFive: reachedGainBeforeDrawdown(prox, 5),
-        plusTenBeforeMinusFive: reachedGainBeforeDrawdown(prox, 10),
+        plusFiveBeforeMinusFive: prox.outcomeComplete
+          ? reachedGainBeforeDrawdown(prox, 5)
+          : null,
+        plusTenBeforeMinusFive: prox.outcomeComplete
+          ? reachedGainBeforeDrawdown(prox, 10)
+          : null,
       },
     });
   }

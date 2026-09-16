@@ -19,6 +19,7 @@ export const maxDuration = 300;
 const CRON_SECRET = process.env.CRON_SECRET;
 const DEFAULT_WINDOW_DAYS = 30;
 const MAX_WINDOW_DAYS = 90;
+const MAX_EXPLICIT_WINDOW_DAYS = 7;
 const READ_BATCH_SIZE = 200;
 const READ_PAGE_SIZE = 1_000;
 const MAX_READ_ROWS = 100_000;
@@ -48,6 +49,52 @@ function number(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveResearchWindow(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const from = params.get("from");
+  const to = params.get("to");
+  if ((from && !to) || (!from && to)) {
+    throw new Error("Historical research windows require both from and to.");
+  }
+  if (from && to) {
+    const startMs = new Date(from).getTime();
+    const endMs = new Date(to).getTime();
+    const nowMs = Date.now();
+    const maximumLookbackMs = MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const maximumSpanMs = MAX_EXPLICIT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+      throw new Error("Historical research window timestamps are invalid.");
+    }
+    if (endMs > nowMs || startMs < nowMs - maximumLookbackMs) {
+      throw new Error("Historical research windows must remain within the latest 90 days.");
+    }
+    if (endMs - startMs > maximumSpanMs) {
+      throw new Error("Historical research chunks cannot exceed seven days.");
+    }
+    return {
+      mode: "explicit_chunk" as const,
+      windowStart: new Date(startMs).toISOString(),
+      windowEnd: new Date(endMs).toISOString(),
+      windowDays: Number(((endMs - startMs) / 86_400_000).toFixed(3)),
+    };
+  }
+  const requestedDays = Number.parseInt(
+    params.get("days") ?? String(DEFAULT_WINDOW_DAYS),
+    10,
+  );
+  const windowDays = Math.min(
+    MAX_WINDOW_DAYS,
+    Math.max(1, Number.isFinite(requestedDays) ? requestedDays : DEFAULT_WINDOW_DAYS),
+  );
+  const endMs = Date.now();
+  return {
+    mode: "rolling" as const,
+    windowStart: new Date(endMs - windowDays * 86_400_000).toISOString(),
+    windowEnd: new Date(endMs).toISOString(),
+    windowDays,
+  };
 }
 
 function canonicalRole(value: unknown): CanonicalPairCandidate["role"] | null {
@@ -106,17 +153,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const requestedDays = Number.parseInt(
-      new URL(request.url).searchParams.get("days") ?? String(DEFAULT_WINDOW_DAYS),
-      10,
-    );
-    const windowDays = Math.min(
-      MAX_WINDOW_DAYS,
-      Math.max(1, Number.isFinite(requestedDays) ? requestedDays : DEFAULT_WINDOW_DAYS),
-    );
-    const windowStart = new Date(
-      Date.now() - windowDays * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const { mode: windowMode, windowDays, windowStart, windowEnd } =
+      resolveResearchWindow(request);
     const supabase = getSupabase();
 
     const canonicalRows: Array<Record<string, unknown>> = [];
@@ -126,6 +164,7 @@ export async function GET(request: Request) {
         .from("ht_opportunity_observations")
         .select("id,ticker,strategy,observed_at,price,score,role,rank,source_run_id,engine_version,decision_snapshot")
         .gte("observed_at", windowStart)
+        .lt("observed_at", windowEnd)
         .order("observed_at", { ascending: true })
         .range(offset, offset + READ_PAGE_SIZE - 1);
       if (error) throw error;
@@ -141,6 +180,7 @@ export async function GET(request: Request) {
         .from("prox_shadow_board_episode_representatives")
         .select("member_outcome_id,member_id,ticker,trading_date,market_session,decision_at,entry_price,max_gain_percent,max_drawdown_percent,sampled_high_at,sampled_low_at,disposition,role")
         .gte("decision_at", windowStart)
+        .lt("decision_at", windowEnd)
         .order("decision_at", { ascending: true })
         .range(offset, offset + READ_PAGE_SIZE - 1);
       if (error) throw error;
@@ -158,6 +198,14 @@ export async function GET(request: Request) {
 
     const memberIds = episodeRows.map((row) => String(row.member_id));
     const outcomeIds = episodeRows.map((row) => String(row.member_outcome_id));
+    const outcomeRows = await readInBatches(outcomeIds, async (batch) => {
+      const { data, error } = await supabase
+        .from("prox_shadow_board_member_outcomes")
+        .select("id,status,completed_at")
+        .in("id", batch);
+      if (error) throw error;
+      return (data ?? []) as Array<Record<string, unknown>>;
+    });
     const memberRows = await readInBatches(memberIds, async (batch) => {
       const { data, error } = await supabase
         .from("prox_shadow_board_members")
@@ -194,6 +242,7 @@ export async function GET(request: Request) {
       .select("id,decision_id,frame_id,cohort,cohort_version,would_enter,observed_at")
       .eq("cohort_version", HT_AGENT_COHORT_VERSION)
       .gte("observed_at", windowStart)
+      .lt("observed_at", windowEnd)
       .order("observed_at", { ascending: false })
       .limit(agentObservationReadLimit);
     if (agentCohortError) throw agentCohortError;
@@ -250,8 +299,9 @@ export async function GET(request: Request) {
     for (let offset = 0; offset < MAX_READ_ROWS; offset += READ_PAGE_SIZE) {
       const { data, error } = await supabase
         .from("ht_agent_visual_plan_versions")
-        .select("id,canonical_lane,target_one,target_two,target_one_risk_reward,target_two_risk_reward,provider_timestamp,created_at")
+        .select("id,plan_id,target_one,target_two,target_one_risk_reward,target_two_risk_reward,provider_timestamp,created_at")
         .gte("provider_timestamp", windowStart)
+        .lt("provider_timestamp", windowEnd)
         .order("provider_timestamp", { ascending: true })
         .range(offset, offset + READ_PAGE_SIZE - 1);
       if (error) throw error;
@@ -266,6 +316,23 @@ export async function GET(request: Request) {
       );
     }
     const visualPlanIds = visualPlanRows.map((row) => String(row.id));
+    const visualPlanParentIds = [...new Set(
+      visualPlanRows.map((row) => String(row.plan_id)),
+    )];
+    const visualPlanParentRows = await readInBatches(
+      visualPlanParentIds,
+      async (batch) => {
+        const { data, error } = await supabase
+          .from("ht_agent_visual_plans")
+          .select("id,canonical_lane")
+          .in("id", batch);
+        if (error) throw error;
+        return (data ?? []) as Array<Record<string, unknown>>;
+      },
+    );
+    const visualPlanParentById = new Map(
+      visualPlanParentRows.map((row) => [String(row.id), row]),
+    );
     const visualPlanEventRows = await readInBatches(visualPlanIds, async (batch) => {
       const { data, error } = await supabase
         .from("ht_agent_visual_plan_events")
@@ -300,6 +367,7 @@ export async function GET(request: Request) {
     });
 
     const memberById = new Map(memberRows.map((row) => [String(row.id), row]));
+    const outcomeById = new Map(outcomeRows.map((row) => [String(row.id), row]));
     const runById = new Map(runRows.map((row) => [String(row.id), row]));
     const horizonsByOutcomeId = new Map<string, Record<string, number>>();
     for (const row of horizonRows) {
@@ -314,6 +382,7 @@ export async function GET(request: Request) {
 
     const proxCandidates = episodeRows.flatMap((episode) => {
       const member = memberById.get(String(episode.member_id));
+      const outcome = outcomeById.get(String(episode.member_outcome_id));
       const run = member ? runById.get(String(member.run_id)) : null;
       const provenance = record(member?.input_provenance);
       const session = marketSession(episode.market_session);
@@ -327,7 +396,7 @@ export async function GET(request: Request) {
       const maxGainPercent = number(episode.max_gain_percent);
       const maxDrawdownPercent = number(episode.max_drawdown_percent);
       if (
-        !member || !run || !session || !disposition || !role || !state ||
+        !member || !run || !outcome || !session || !disposition || !role || !state ||
         price === null || edgeScore === null || continuationProbability === null ||
         evidenceConfidence === null || maxGainPercent === null || maxDrawdownPercent === null
       ) return [];
@@ -349,6 +418,8 @@ export async function GET(request: Request) {
         rank: number(member.rank),
         engineVersion: string(run.engine_version),
         edgeScoreVersion: string(run.edge_score_version),
+        outcomeComplete: outcome.status === "complete" &&
+          string(outcome.completed_at) !== null,
         maxGainPercent,
         maxDrawdownPercent,
         sampledHighAt: String(episode.sampled_high_at),
@@ -363,8 +434,10 @@ export async function GET(request: Request) {
     );
     return NextResponse.json({
       ok: true,
+      windowMode,
       windowDays,
       windowStart,
+      windowEnd,
       ...report,
       pairs: report.pairs.slice(-250),
       pairRowsReturned: Math.min(250, report.pairs.length),
@@ -390,7 +463,10 @@ export async function GET(request: Request) {
       agentTargetCalibration: summarizeAgentTargetCalibration(
         visualPlanRows.map((row) => ({
           id: String(row.id),
-          canonicalLane: String(row.canonical_lane),
+          canonicalLane: String(
+            visualPlanParentById.get(String(row.plan_id))?.canonical_lane ??
+              "unavailable",
+          ),
           targetTwo: number(row.target_two),
         })),
         visualPlanEventRows.map((row) => ({
