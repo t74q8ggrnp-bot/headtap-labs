@@ -172,6 +172,137 @@ function summarizePairs(pairs: PairedDecision[]) {
   };
 }
 
+function scoreBand(value: number) {
+  if (value >= 90) return "90-100";
+  if (value >= 80) return "80-89";
+  if (value >= 70) return "70-79";
+  if (value >= 60) return "60-69";
+  return "below-60";
+}
+
+function sampleLabel(measuredCount: number) {
+  if (measuredCount >= 100) return "stronger_sample" as const;
+  if (measuredCount >= 30) return "reviewable_sample" as const;
+  return "exploratory_only" as const;
+}
+
+function summarizePatternGroup(label: string, pairs: PairedDecision[]) {
+  const measuredOneHour = pairs.flatMap((pair) => {
+    const value = pair.outcomes.horizons["1h"];
+    return Number.isFinite(value) ? [value] : [];
+  });
+  const oneHourMisses = measuredOneHour.filter((value) => value <= 0);
+  return {
+    label,
+    pairCount: pairs.length,
+    measuredOneHourCount: measuredOneHour.length,
+    sampleLabel: sampleLabel(measuredOneHour.length),
+    positiveOneHourRatePercent: rate(
+      measuredOneHour.filter((value) => value > 0).length,
+      measuredOneHour.length,
+    ),
+    nonPositiveOneHourRatePercent: rate(oneHourMisses.length, measuredOneHour.length),
+    medianOneHourReturnPercent: median(measuredOneHour),
+    plusFiveBeforeMinusFiveHitRatePercent: rate(
+      pairs.filter((pair) => pair.outcomes.plusFiveBeforeMinusFive).length,
+      pairs.length,
+    ),
+    medianMaxGainPercent: median(pairs.map((pair) => pair.outcomes.maxGainPercent)),
+    medianMaxDrawdownPercent: median(pairs.map((pair) => pair.outcomes.maxDrawdownPercent)),
+    fivePercentDrawdownRatePercent: rate(
+      pairs.filter((pair) => pair.outcomes.maxDrawdownPercent <= -5).length,
+      pairs.length,
+    ),
+  };
+}
+
+function groupPatterns(
+  pairs: PairedDecision[],
+  selector: (pair: PairedDecision) => string,
+) {
+  const groups = new Map<string, PairedDecision[]>();
+  for (const pair of pairs) {
+    const label = selector(pair);
+    const group = groups.get(label) ?? [];
+    group.push(pair);
+    groups.set(label, group);
+  }
+  return [...groups.entries()]
+    .map(([label, rows]) => summarizePatternGroup(label, rows))
+    .sort((left, right) =>
+      right.measuredOneHourCount - left.measuredOneHourCount ||
+      left.label.localeCompare(right.label));
+}
+
+function buildMissPatternAnalysis(pairs: PairedDecision[]) {
+  const measuredOneHourPairs = pairs.filter((pair) =>
+    Number.isFinite(pair.outcomes.horizons["1h"]));
+  const missedPairs = measuredOneHourPairs.filter((pair) =>
+    pair.outcomes.horizons["1h"] <= 0);
+  return {
+    version: "prox-canonical-miss-patterns-v1" as const,
+    authority: "read_only_research" as const,
+    missDefinition: {
+      primary: "measured_one_hour_return_less_than_or_equal_to_zero" as const,
+      secondary: [
+        "failed_plus_five_before_minus_five",
+        "maximum_drawdown_at_or_below_minus_five_percent",
+      ] as const,
+      missingOutcomePolicy: "exclude_not_zero" as const,
+    },
+    measuredOneHourPairCount: measuredOneHourPairs.length,
+    missPairCount: missedPairs.length,
+    missRatePercent: rate(missedPairs.length, measuredOneHourPairs.length),
+    missSeverity: {
+      medianOneHourReturnPercent: median(
+        missedPairs.map((pair) => pair.outcomes.horizons["1h"]),
+      ),
+      medianMaxGainPercent: median(
+        missedPairs.map((pair) => pair.outcomes.maxGainPercent),
+      ),
+      medianMaxDrawdownPercent: median(
+        missedPairs.map((pair) => pair.outcomes.maxDrawdownPercent),
+      ),
+      fivePercentDrawdownMissCount: missedPairs.filter(
+        (pair) => pair.outcomes.maxDrawdownPercent <= -5,
+      ).length,
+    },
+    allPairPatternComparisons: {
+      canonicalStrategy: groupPatterns(pairs, (pair) => pair.canonical.strategy),
+      canonicalRole: groupPatterns(pairs, (pair) => pair.canonical.role),
+      canonicalScoreBand: groupPatterns(pairs, (pair) => scoreBand(pair.canonical.score)),
+      proxDisposition: groupPatterns(pairs, (pair) => pair.prox.disposition),
+      proxReadiness: groupPatterns(pairs, (pair) => pair.prox.readiness),
+      proxEdgeScoreBand: groupPatterns(pairs, (pair) => scoreBand(pair.prox.edgeScore)),
+      proxEvidenceConfidenceBand: groupPatterns(
+        pairs,
+        (pair) => scoreBand(pair.prox.evidenceConfidence),
+      ),
+      marketSession: groupPatterns(pairs, (pair) => pair.marketSession),
+      selectionAgreement: groupPatterns(pairs, (pair) => pair.selection.agreement),
+    },
+    missesByPattern: {
+      canonicalStrategy: groupPatterns(missedPairs, (pair) => pair.canonical.strategy),
+      canonicalRole: groupPatterns(missedPairs, (pair) => pair.canonical.role),
+      canonicalScoreBand: groupPatterns(missedPairs, (pair) => scoreBand(pair.canonical.score)),
+      proxDisposition: groupPatterns(missedPairs, (pair) => pair.prox.disposition),
+      proxReadiness: groupPatterns(missedPairs, (pair) => pair.prox.readiness),
+      proxEdgeScoreBand: groupPatterns(missedPairs, (pair) => scoreBand(pair.prox.edgeScore)),
+      proxEvidenceConfidenceBand: groupPatterns(
+        missedPairs,
+        (pair) => scoreBand(pair.prox.evidenceConfidence),
+      ),
+      marketSession: groupPatterns(missedPairs, (pair) => pair.marketSession),
+      selectionAgreement: groupPatterns(missedPairs, (pair) => pair.selection.agreement),
+    },
+    interpretationPolicy: {
+      minimumReviewableMeasuredGroup: 30,
+      strongerMeasuredGroup: 100,
+      note: "Pattern groups are diagnostic candidates, not automatic score weights or filters. Validate them on later unseen sessions before any separately approved versioned change.",
+    },
+  };
+}
+
 export function buildProxCanonicalPairedScorecard(
   canonicalCandidates: CanonicalPairCandidate[],
   proxCandidates: ProxPairCandidate[],
@@ -352,6 +483,7 @@ export function buildProxCanonicalPairedScorecard(
       allPairs: summarizePairs(pairs),
       byAgreement,
     },
+    missAnalysis: buildMissPatternAnalysis(pairs),
     pairs,
     exclusions,
   };

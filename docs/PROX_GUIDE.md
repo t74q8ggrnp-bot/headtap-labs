@@ -361,6 +361,22 @@ ProX weights, Agent authority, Paper behavior, or execution. Any such change
 still requires a separately approved promotion with a version bump,
 regression protection, and out-of-sample evidence.
 
+The same report includes the versioned `prox-canonical-miss-patterns-v1`
+diagnostic. A primary miss is a complete measured one-hour return less than or
+equal to zero; missing outcomes remain excluded. Secondary diagnostics cover
+failure to reach +5% before -5%, five-percent adverse excursions, Canonical
+lane/role/score bands, ProX disposition/readiness/edge/confidence bands,
+session, and Canonical/ProX agreement. Groups below 30 measured one-hour
+outcomes are exploratory only, groups from 30 through 99 are reviewable, and
+100 or more form a stronger sample. These labels are not automatic filters or
+score weights.
+
+Agent target calibration remains a separate paper-only research view. It uses
+immutable visual-plan lifecycle events to report entry triggers, Target 1,
+Target 2, invalidations, expirations, ambiguity, and unresolved plans by
+Canonical lane. Ambiguous or unresolved plans are never relabeled as target
+misses. This evidence cannot rewrite target prices or expand Agent authority.
+
 ## Promotion ladder
 
 ProX authority expands only through explicit, measured stages:

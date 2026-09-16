@@ -18,6 +18,9 @@ test("paired scorecard is internal, paginated, read-only, and provider-free", ()
   assert.match(route, /\.range\(offset, offset \+ READ_PAGE_SIZE - 1\)/);
   assert.match(route, /ht_agent_cohort_observations/);
   assert.match(route, /ht_agent_decision_frames/);
+  assert.match(route, /ht_agent_visual_plan_versions/);
+  assert.match(route, /ht_agent_visual_plan_events/);
+  assert.match(route, /agentTargetCalibration/);
   assert.match(route, /buildHtAgentCohortMetrics/);
   assert.match(route, /providerRequests: 0/);
   assert.doesNotMatch(route, /fetch\(|\.insert\(|\.update\(|\.upsert\(|\.delete\(/);

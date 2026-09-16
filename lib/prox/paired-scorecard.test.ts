@@ -104,3 +104,63 @@ test("reports disagreements and measured outcomes without changing authority", (
   assert.equal(report.automaticAuthorityChange, false);
   assert.equal(report.promotionReview.status, "insufficient_evidence");
 });
+
+test("segments misses without treating missing outcomes as losses or changing scores", () => {
+  const report = buildProxCanonicalPairedScorecard(
+    [
+      canonical(),
+      canonical({
+        id: "canonical-2",
+        decisionAt: "2026-09-16T14:35:30.000Z",
+        providerAt: "2026-09-16T14:35:25.000Z",
+        score: 72,
+        role: "contender",
+      }),
+      canonical({
+        id: "canonical-3",
+        decisionAt: "2026-09-16T14:40:30.000Z",
+        providerAt: "2026-09-16T14:40:25.000Z",
+        score: 65,
+        role: "radar",
+      }),
+    ],
+    [
+      prox(),
+      prox({
+        episodeId: "episode-2",
+        memberId: "member-2",
+        decisionAt: "2026-09-16T14:35:45.000Z",
+        providerAt: "2026-09-16T14:35:40.000Z",
+        edgeScore: 72,
+        maxGainPercent: 1,
+        maxDrawdownPercent: -6,
+        horizons: { "1h": -3 },
+      }),
+      prox({
+        episodeId: "episode-3",
+        memberId: "member-3",
+        decisionAt: "2026-09-16T14:40:45.000Z",
+        providerAt: "2026-09-16T14:40:40.000Z",
+        edgeScore: 62,
+        horizons: {},
+      }),
+    ],
+  );
+  assert.equal(report.missAnalysis.measuredOneHourPairCount, 2);
+  assert.equal(report.missAnalysis.missPairCount, 1);
+  assert.equal(report.missAnalysis.missRatePercent, 50);
+  assert.equal(report.missAnalysis.missSeverity.fivePercentDrawdownMissCount, 1);
+  assert.equal(
+    report.missAnalysis.allPairPatternComparisons.canonicalScoreBand.find(
+      (group) => group.label === "70-79",
+    )?.nonPositiveOneHourRatePercent,
+    100,
+  );
+  assert.equal(
+    report.missAnalysis.allPairPatternComparisons.canonicalScoreBand.find(
+      (group) => group.label === "60-69",
+    )?.measuredOneHourCount,
+    0,
+  );
+  assert.equal(report.pairs[1].canonical.score, 72);
+});

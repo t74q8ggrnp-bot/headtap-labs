@@ -8,6 +8,7 @@ import {
 } from "@/lib/prox/paired-scorecard";
 import { buildHtAgentCohortMetrics } from "@/lib/ht-agent/cohort-metrics";
 import { HT_AGENT_COHORT_VERSION } from "@/lib/ht-agent/contracts";
+import { summarizeAgentTargetCalibration } from "@/lib/ht-agent/target-calibration";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -253,6 +254,36 @@ export async function GET(request: Request) {
         Math.min(providerAt, canonicalAt, proxAt) <= 120_000;
     });
 
+    const visualPlanRows: Array<Record<string, unknown>> = [];
+    let visualPlanReadCapped = false;
+    for (let offset = 0; offset < MAX_READ_ROWS; offset += READ_PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("ht_agent_visual_plan_versions")
+        .select("id,canonical_lane,target_one,target_two,target_one_risk_reward,target_two_risk_reward,provider_timestamp,created_at")
+        .gte("provider_timestamp", windowStart)
+        .order("provider_timestamp", { ascending: true })
+        .range(offset, offset + READ_PAGE_SIZE - 1);
+      if (error) throw error;
+      const page = (data ?? []) as Array<Record<string, unknown>>;
+      visualPlanRows.push(...page);
+      if (page.length < READ_PAGE_SIZE) break;
+      if (offset + READ_PAGE_SIZE >= MAX_READ_ROWS) visualPlanReadCapped = true;
+    }
+    if (visualPlanReadCapped) {
+      throw new Error(
+        "Agent visual-plan rows exceeded the bounded research window; request fewer days.",
+      );
+    }
+    const visualPlanIds = visualPlanRows.map((row) => String(row.id));
+    const visualPlanEventRows = await readInBatches(visualPlanIds, async (batch) => {
+      const { data, error } = await supabase
+        .from("ht_agent_visual_plan_events")
+        .select("plan_version_id,event_type,provider_timestamp,detail")
+        .in("plan_version_id", batch);
+      if (error) throw error;
+      return (data ?? []) as Array<Record<string, unknown>>;
+    });
+
     const canonicalCandidates = canonicalRows.flatMap((row) => {
       const snapshot = record(row.decision_snapshot);
       const decisionFrame = record(snapshot.decisionFrame);
@@ -359,6 +390,18 @@ export async function GET(request: Request) {
         },
         cohortMetrics: agentCohortMetrics,
       },
+      agentTargetCalibration: summarizeAgentTargetCalibration(
+        visualPlanRows.map((row) => ({
+          id: String(row.id),
+          canonicalLane: String(row.canonical_lane),
+          targetTwo: number(row.target_two),
+        })),
+        visualPlanEventRows.map((row) => ({
+          planVersionId: String(row.plan_version_id),
+          eventType: String(row.event_type),
+          detail: record(row.detail),
+        })),
+      ),
       providerRequests: 0,
       timestamp: new Date().toISOString(),
     });
