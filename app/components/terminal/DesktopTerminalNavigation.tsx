@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
 
 const routes = [
@@ -14,7 +14,13 @@ const routes = [
 ] as const;
 const primaryRouteIds = new Set(["home", "scanner", "workspace", "paper"]);
 
-export default function DesktopTerminalNavigation({ onResetLayout }: { onResetLayout: () => void }) {
+export default function DesktopTerminalNavigation({
+  onResetLayout,
+  utilities,
+}: {
+  onResetLayout: () => void;
+  utilities?: ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -71,6 +77,7 @@ export default function DesktopTerminalNavigation({ onResetLayout }: { onResetLa
           <span aria-hidden="true">⌕</span>
         </button>
       </div>
+      {utilities ? <div className="ht-terminal-nav__utilities">{utilities}</div> : null}
       <details ref={moreRef} className="ht-terminal-nav__more-wrap">
         <summary className="ht-terminal-nav__more" aria-label="More HT Labs routes" aria-current={currentRoute && !primaryRouteIds.has(currentRoute.id) ? "page" : undefined} data-label="More">
           <span aria-hidden="true">•••</span>

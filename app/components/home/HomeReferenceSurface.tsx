@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import HomeTradePlan from "@/app/components/agent/HomeTradePlan";
 import DesktopTerminalFrame from "@/app/components/terminal/DesktopTerminalFrame";
 import { AccessibleDialogSheet } from "@/app/components/ui/ApplicationPrimitives";
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
+import { getSafeAccountIdentity, type HomeAlert } from "@/lib/home-account";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-model";
+import { HomeAccountSurface, HomeAlertsSurface } from "./HomeAccountAlerts";
 import HomeReferenceChart from "./HomeReferenceChart";
 import HomeTerminalMarkets from "./HomeTerminalMarkets";
 
@@ -35,6 +38,24 @@ type Props = {
   loading: boolean;
   selectionLoading: boolean;
   selectionError: string;
+  authDestination: "signin" | "profile" | null;
+  authReady: boolean;
+  session: Session | null;
+  authEmail: string;
+  authPassword: string;
+  authLoading: boolean;
+  authMessage: string;
+  watchlistCloudEnabled: boolean;
+  watchlistSyncState: "loading" | "local" | "syncing" | "synced" | "error";
+  watchlistSyncError: string | null;
+  savedSetupCount: number;
+  signalMemoryInsight: { tracked: number; successRate: number | null } | null;
+  alerts: HomeAlert[];
+  onAuthEmailChange: (value: string) => void;
+  onAuthPasswordChange: (value: string) => void;
+  onAuthenticate: (mode: "signin" | "signup") => void;
+  onSignOut: () => void;
+  onSelectAlert: (alert: HomeAlert) => void;
   onSelect: (opportunity: Opportunity) => void;
   onToggleWatchlist: () => void;
 };
@@ -66,12 +87,33 @@ export default function HomeReferenceSurface({
   loading,
   selectionLoading,
   selectionError,
+  authDestination,
+  authReady,
+  session,
+  authEmail,
+  authPassword,
+  authLoading,
+  authMessage,
+  watchlistCloudEnabled,
+  watchlistSyncState,
+  watchlistSyncError,
+  savedSetupCount,
+  signalMemoryInsight,
+  alerts,
+  onAuthEmailChange,
+  onAuthPasswordChange,
+  onAuthenticate,
+  onSignOut,
+  onSelectAlert,
   onSelect,
   onToggleWatchlist,
 }: Props) {
   const [compactIntelligenceOpen, setCompactIntelligenceOpen] = useState(false);
   const [marketBrowserOpen, setMarketBrowserOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const compactIntelligenceTouched = useRef(false);
+  const accountDestinationHandled = useRef<string | null>(null);
 
   useEffect(() => {
     const apply = () => {
@@ -84,17 +126,81 @@ export default function HomeReferenceSurface({
     return () => window.removeEventListener("resize", apply);
   }, []);
 
+  useEffect(() => {
+    if (!authDestination || accountDestinationHandled.current === authDestination) return;
+    accountDestinationHandled.current = authDestination;
+    setAccountOpen(true);
+  }, [authDestination]);
+
+  useEffect(() => {
+    const openAccount = () => setAccountOpen(true);
+    const openAlerts = () => setAlertsOpen(true);
+    window.addEventListener("htlabs:open-account", openAccount);
+    window.addEventListener("htlabs:open-alerts", openAlerts);
+    return () => {
+      window.removeEventListener("htlabs:open-account", openAccount);
+      window.removeEventListener("htlabs:open-alerts", openAlerts);
+    };
+  }, []);
+
+  const unreadAlertCount = alerts.filter((alert) => !alert.read).length;
+  const accountIdentity = getSafeAccountIdentity(session?.user.email);
+  const accountAndAlerts = (
+    <>
+      <HomeAccountSurface
+        open={accountOpen}
+        onOpenChange={setAccountOpen}
+        authReady={authReady}
+        session={session}
+        email={authEmail}
+        password={authPassword}
+        authLoading={authLoading}
+        authMessage={authMessage}
+        cloudEnabled={watchlistCloudEnabled}
+        syncState={watchlistSyncState}
+        syncError={watchlistSyncError}
+        watchlistCount={watchlist.length}
+        savedSetupCount={savedSetupCount}
+        signalMemory={signalMemoryInsight}
+        unreadAlertCount={unreadAlertCount}
+        onEmailChange={onAuthEmailChange}
+        onPasswordChange={onAuthPasswordChange}
+        onAuthenticate={onAuthenticate}
+        onSignOut={onSignOut}
+        onOpenAlerts={() => {
+          setAccountOpen(false);
+          window.requestAnimationFrame(() => setAlertsOpen(true));
+        }}
+      />
+      <HomeAlertsSurface
+        open={alertsOpen}
+        onOpenChange={setAlertsOpen}
+        alerts={alerts}
+        onSelect={(alert) => {
+          onSelectAlert(alert);
+          setAlertsOpen(false);
+        }}
+      />
+    </>
+  );
+
   if (!opportunity) {
     return (
-      <main className="htb-home htb-home--state" aria-label="HT Labs Home">
-        <div className="htb-home__loading" role="status" aria-live="polite">
-          <span className="htb-live-dot" />
-          <div>
-            <h1>{loading ? "Loading market intelligence" : "No eligible opportunity"}</h1>
-            <p>{loading ? "Connecting to the existing canonical feed." : "HT Labs will not invent a setup when the canonical gate has no eligible result."}</p>
+      <>
+        <main className="htb-home htb-home--state" aria-label="HT Labs Home">
+          <button type="button" className="ht-home-state-account" onClick={() => setAccountOpen(true)}>
+            {!authReady ? "Checking account…" : session ? accountIdentity.initials : "Sign in"}
+          </button>
+          <div className="htb-home__loading" role="status" aria-live="polite">
+            <span className="htb-live-dot" />
+            <div>
+              <h1>{loading ? "Loading market intelligence" : "No eligible opportunity"}</h1>
+              <p>{loading ? "Connecting to the existing canonical feed." : "HT Labs will not invent a setup when the canonical gate has no eligible result."}</p>
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+        {accountAndAlerts}
+      </>
     );
   }
 
@@ -274,6 +380,29 @@ export default function HomeReferenceSurface({
   return (
     <main className="htb-home ht-home-terminal-surface" aria-label="HT Labs Home">
       <DesktopTerminalFrame
+        navigationUtilities={(
+          <>
+            <button
+              type="button"
+              className="ht-terminal-nav__utility"
+              aria-label={unreadAlertCount > 0 ? `Open HT Alerts, ${unreadAlertCount} unread` : "Open HT Alerts"}
+              data-label="HT Alerts"
+              onClick={() => setAlertsOpen(true)}
+            >
+              <span aria-hidden="true">◌</span>
+              {unreadAlertCount > 0 ? <strong aria-hidden="true">{unreadAlertCount > 9 ? "9+" : unreadAlertCount}</strong> : null}
+            </button>
+            <button
+              type="button"
+              className="ht-terminal-nav__utility ht-terminal-nav__account"
+              aria-label={!authReady ? "Checking HT Labs account session" : session ? `Open account for ${accountIdentity.shortEmail}` : "Sign in to HT Labs"}
+              data-label={!authReady ? "Checking account" : session ? accountIdentity.shortEmail : "Sign in"}
+              onClick={() => setAccountOpen(true)}
+            >
+              {!authReady ? <span aria-hidden="true">…</span> : session ? accountIdentity.initials : <span aria-hidden="true">↪</span>}
+            </button>
+          </>
+        )}
         markets={(
           <HomeTerminalMarkets
             spotMomentum={spotMomentum}
@@ -306,6 +435,7 @@ export default function HomeReferenceSurface({
           onNavigate={() => setMarketBrowserOpen(false)}
         />
       </AccessibleDialogSheet>
+      {accountAndAlerts}
     </main>
   );
 }

@@ -78,6 +78,7 @@ export default function DesktopTerminalFrame({
   instrumentHeader,
   chart,
   intelligence,
+  navigationUtilities,
   marketsTitle = "Markets",
   intelligenceTitle = "HT Intelligence",
 }: {
@@ -85,6 +86,7 @@ export default function DesktopTerminalFrame({
   instrumentHeader: ReactNode;
   chart: ReactNode;
   intelligence: ReactNode;
+  navigationUtilities?: ReactNode;
   marketsTitle?: string;
   intelligenceTitle?: string;
 }) {
@@ -145,7 +147,7 @@ export default function DesktopTerminalFrame({
       data-markets-open={layout.marketsOpen ? "true" : "false"}
       data-intelligence-open={layout.intelligenceOpen ? "true" : "false"}
     >
-      <DesktopTerminalNavigation onResetLayout={resetLayout} />
+      <DesktopTerminalNavigation onResetLayout={resetLayout} utilities={navigationUtilities} />
       <aside
         ref={marketsPaneRef}
         id={`${prefix}-markets-pane`}

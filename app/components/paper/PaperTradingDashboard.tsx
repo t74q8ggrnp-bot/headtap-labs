@@ -697,7 +697,7 @@ export default function PaperTradingDashboard() {
             <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-300">HT Paper</p>
             <h1 className="mt-4 text-4xl font-black tracking-tight">Practice without risking real money</h1>
             <p className="mx-auto mt-4 max-w-xl text-sm font-semibold leading-6 text-zinc-500">Sign in to open your private $100,000 simulation account. No live brokerage connection is used.</p>
-            <Link href="/?tab=profile" className="mt-7 inline-flex rounded-xl bg-orange-500 px-6 py-3 text-sm font-black text-black">Open Profile</Link>
+            <Link href="/?auth=signin" className="mt-7 inline-flex rounded-xl bg-orange-500 px-6 py-3 text-sm font-black text-black">Sign in to HT Labs</Link>
           </section>
         ) : !dashboard ? (
           <section className="p-8 sm:p-12">

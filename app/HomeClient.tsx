@@ -43,6 +43,7 @@ import {
   type Opportunity as APIOpportunity,
 } from "@/lib/opportunity-model";
 import { getRelativeVolume } from "@/app/lib/legacy-stock-scoring";
+import type { HomeAlert } from "@/lib/home-account";
 
 const ScannerGrid = dynamic(() => import("./components/desktop/ScannerGrid"), {
   loading: () => (
@@ -259,23 +260,13 @@ export default function HomeClient({
   const [marketCtx, setMarketCtx] = useState<MarketContext | null>(null);
 
   // HT Alert System
-  type HTAlert = {
-    id: string;
-    ticker: string;
-    type: "before_crowd" | "momentum" | "catalyst";
-    title: string;
-    message: string;
-    confidence: number;
-    timestamp: Date;
-    read: boolean;
-  };
-  const [alerts, setAlerts] = useState<HTAlert[]>([]);
+  const [alerts, setAlerts] = useState<HomeAlert[]>([]);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const prevAlertTickers = useRef<Set<string>>(new Set());
 
   const generateAlerts = (opportunities: APIOpportunity[]) => {
     if (!mounted || opportunities.length === 0) return;
-    const newAlerts: HTAlert[] = [];
+    const newAlerts: HomeAlert[] = [];
     const now = new Date();
 
     for (const opportunity of opportunities) {
@@ -283,7 +274,7 @@ export default function HomeClient({
       if (opportunity.tier !== "hero" && opportunity.tier !== "feature") continue;
       if (opportunity.freshnessLabel !== "Live Scan") continue;
 
-      const type: HTAlert["type"] = opportunity.catalystScore >= 20
+      const type: HomeAlert["type"] = opportunity.catalystScore >= 20
         ? "catalyst"
         : opportunity.strategy === "before_the_crowd" || opportunity.isBeforeCrowd
           ? "before_crowd"
@@ -338,9 +329,11 @@ export default function HomeClient({
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
+  const [authReady, setAuthReady] = useState(false);
+  const explicitSignOutRef = useRef(false);
   const [, setSearchStatus] = useState("Search any ticker to pull it into HT instantly.");
   const cloudSyncMessage = watchlistSyncError
-    ? `Cloud sync unavailable: ${watchlistSyncError}`
+    ? "Cloud synchronization is temporarily unavailable. Your device watchlist remains intact."
     : watchlistSyncState === "syncing"
       ? "Syncing cloud watchlist..."
       : watchlistCloudEnabled && watchlistSyncState === "synced"
@@ -961,14 +954,25 @@ export default function HomeClient({
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      setAuthReady(true);
     }).catch(() => {
+      setAuthReady(true);
       setAuthMessage("Your account session could not be verified. You can retry by reloading this page.");
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+    } = supabase.auth.onAuthStateChange((event, currentSession) => {
       setSession(currentSession);
+      setAuthReady(true);
+      if (event === "SIGNED_OUT") {
+        setAuthMessage(explicitSignOutRef.current
+          ? "Signed out. Public research remains available."
+          : "Your session expired. Sign in again to restore private account features.");
+        explicitSignOutRef.current = false;
+      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        setAuthMessage(event === "SIGNED_IN" ? "Signed in successfully." : "Session refreshed securely.");
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -1081,17 +1085,29 @@ export default function HomeClient({
       }
 
       setAuthPassword("");
-    } catch (error) {
-      console.error("AUTH ERROR:", error);
-      setAuthMessage("Auth request failed. Check Supabase settings or try again.");
+    } catch {
+      setAuthMessage("Authentication is temporarily unavailable. Check your connection and try again.");
     } finally {
       setAuthLoading(false);
     }
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    setAuthMessage("Signed out.");
+    try {
+      explicitSignOutRef.current = true;
+      setAuthLoading(true);
+      setAuthMessage("Signing out…");
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        explicitSignOutRef.current = false;
+        setAuthMessage("Sign-out could not be completed. Try again shortly.");
+      }
+    } catch {
+      explicitSignOutRef.current = false;
+      setAuthMessage("Sign-out could not be completed. Check your connection and try again.");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const handleTickerSearch = async () => {
@@ -1223,6 +1239,11 @@ export default function HomeClient({
     : apiMomentum;
   const referenceFramework = tradeFrameworkToDisplay(referenceOpportunity?.tradeFramework);
   const referenceSliceEnabled = process.env.NEXT_PUBLIC_PHASE_25B_REFERENCE_SLICE !== "off";
+  const requestedAccountSurface = searchParams?.get("auth") === "signin"
+    ? "signin"
+    : searchParams?.get("account") === "profile" || searchParams?.get("tab") === "profile"
+      ? "profile"
+      : null;
 
   if (referenceSliceEnabled) {
     return (
@@ -1239,6 +1260,33 @@ export default function HomeClient({
         loading={apiOpportunitiesLoading}
         selectionLoading={selectedOpportunityLoading}
         selectionError={selectedOpportunityError}
+        authDestination={requestedAccountSurface}
+        authReady={authReady}
+        session={session}
+        authEmail={authEmail}
+        authPassword={authPassword}
+        authLoading={authLoading}
+        authMessage={authMessage}
+        watchlistCloudEnabled={watchlistCloudEnabled}
+        watchlistSyncState={watchlistSyncState}
+        watchlistSyncError={watchlistSyncError}
+        savedSetupCount={savedSetups.length}
+        signalMemoryInsight={signalMemoryInsight}
+        alerts={alerts}
+        onAuthEmailChange={setAuthEmail}
+        onAuthPasswordChange={setAuthPassword}
+        onAuthenticate={(mode) => void handleAuth(mode)}
+        onSignOut={() => void handleSignOut()}
+        onSelectAlert={(alert) => {
+          setAlerts((current) => current.map((item) => item.id === alert.id ? { ...item, read: true } : item));
+          const canonical = apiFullRankedList.find((item) => item.ticker === alert.ticker);
+          if (canonical) {
+            setSelectedStock(opportunityToStock(canonical));
+          } else {
+            openReadTicker(alert.ticker);
+          }
+          recordRecentlyViewed(alert.ticker);
+        }}
         onSelect={(opportunity) => {
           setSelectedStock(opportunityToStock(opportunity));
           recordRecentlyViewed(opportunity.ticker);

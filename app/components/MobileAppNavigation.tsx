@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Fragment, useState } from "react";
 import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
 import { resolveMobileActiveTab, type MobileAppTab as AppTab } from "@/lib/checkpoint-a-ui-state";
 import { AccessibleDialogSheet } from "./ui/ApplicationPrimitives";
 import { useMobileAppNavigation } from "./MobileAppNavigationContext";
+import { useShellAuthSession } from "@/app/hooks/useShellAuthSession";
+import { getSafeAccountIdentity } from "@/lib/home-account";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "home", label: "Home", href: "/" },
@@ -62,7 +64,10 @@ function TabIcon({ tab }: { tab: AppTab }) {
 
 export default function MobileAppNavigation() {
   const pathname = usePathname();
+  const router = useRouter();
   const { homeTab } = useMobileAppNavigation();
+  const { session, ready: authReady } = useShellAuthSession();
+  const accountIdentity = getSafeAccountIdentity(session?.user.email);
   const activeTab = resolveMobileActiveTab(pathname, pathname === "/" ? "home" : homeTab);
   const currentRoute = resolveApplicationRoute(pathname);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -124,6 +129,35 @@ export default function MobileAppNavigation() {
         description="Open a market, operator, account, or support surface."
         presentation="sheet"
       >
+        <section className="ht-mobile-account-entry" aria-label="HT Labs account">
+          <button
+            type="button"
+            disabled={!authReady}
+            onClick={() => {
+              setMoreOpen(false);
+              if (pathname === "/") {
+                window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("htlabs:open-account")));
+              } else {
+                router.push(session ? "/?account=profile" : "/?auth=signin");
+              }
+            }}
+          >
+            <span aria-hidden="true">{!authReady ? "…" : session ? accountIdentity.initials : "↪"}</span>
+            <span><strong>{!authReady ? "Checking session" : session ? accountIdentity.shortEmail : "Sign in"}</strong><small>{session ? "Account, synchronization, and privacy" : "Sync watchlists and private product features"}</small></span>
+          </button>
+          {pathname === "/" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("htlabs:open-alerts")));
+              }}
+            >
+              <span aria-hidden="true">◌</span>
+              <span><strong>HT Alerts</strong><small>Canonical opportunity notifications</small></span>
+            </button>
+          ) : null}
+        </section>
         <nav id="application-routes" className="ht-mobile-route-list" aria-label="All application routes">
           {moreRoutes.map((route) => {
             const active = currentRoute?.id === route.id;

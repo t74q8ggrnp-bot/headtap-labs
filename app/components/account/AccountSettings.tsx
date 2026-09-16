@@ -191,9 +191,9 @@ export default function AccountSettings() {
         ) : !session ? (
           <section className="ht-account-panel rounded-3xl border border-white/10 bg-zinc-950 p-7" aria-labelledby="account-signed-out-heading">
             <h2 id="account-signed-out-heading" className="text-xl font-black">You are not signed in</h2>
-            <p className="mt-3 text-sm leading-6 text-zinc-400">Open Profile in HT Labs to sign in or create an account. Privacy and Terms remain available without an account.</p>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">Open the secure HT Labs sign-in surface to sign in or create an account. Privacy and Terms remain available without an account.</p>
             {message ? <p className="mt-3 text-sm text-amber-200" role="alert">{message}</p> : null}
-            <Link href="/?tab=profile" className="mt-6 inline-flex rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black">Open HT Labs Profile</Link>
+            <Link href="/?auth=signin" className="mt-6 inline-flex rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black">Sign in to HT Labs</Link>
           </section>
         ) : (
           <div className="space-y-6">
