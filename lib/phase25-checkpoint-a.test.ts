@@ -15,15 +15,15 @@ test("News controls wrap without forcing horizontal mobile overflow", () => {
 });
 
 test("mobile navigation does not mark Home active on unrelated routes", () => {
-  assert.equal(resolveMobileActiveTab("/", "convictions"), null);
-  assert.equal(resolveMobileActiveTab("/market", "home"), "home");
-  assert.equal(resolveMobileActiveTab("/paper", "home"), "paper");
-  assert.equal(resolveMobileActiveTab("/scanner", "home"), "scanner");
-  assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "home");
-  assert.equal(resolveMobileActiveTab("/account", "home"), "profile");
-  assert.equal(resolveMobileActiveTab("/news-feed", "home"), "more");
-  assert.equal(resolveMobileActiveTab("/qa", "home"), "more");
-  assert.equal(resolveMobileActiveTab("/agent", "home"), "agent");
+  assert.equal(resolveMobileActiveTab("/"), "home");
+  assert.equal(resolveMobileActiveTab("/market"), "market");
+  assert.equal(resolveMobileActiveTab("/paper"), "paper");
+  assert.equal(resolveMobileActiveTab("/scanner"), "more");
+  assert.equal(resolveMobileActiveTab("/trade/SPY"), "market");
+  assert.equal(resolveMobileActiveTab("/account"), "profile");
+  assert.equal(resolveMobileActiveTab("/news-feed"), "more");
+  assert.equal(resolveMobileActiveTab("/qa"), "more");
+  assert.equal(resolveMobileActiveTab("/agent"), "agent");
 });
 
 test("Agent announces authentication resolution instead of returning a blank screen", () => {

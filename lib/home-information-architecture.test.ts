@@ -79,9 +79,11 @@ test("Home discloses sparse one-minute tape from the existing chart frame", () =
   assert.match(canvas, /resolveMarketChartVisibleCoverage/);
 });
 
-test("mobile navigation promotes Market and removes the duplicate Trade destination", () => {
+test("mobile navigation exposes Home intelligence and Market without a duplicate Trade destination", () => {
   const navigation = source("app/components/MobileAppNavigation.tsx");
-  assert.match(navigation, /tab: "home", label: "Market", href: "\/market"/);
+  assert.match(navigation, /tab: "home", label: "Home", href: "\/"/);
+  assert.match(navigation, /tab: "market", label: "Market", href: "\/market"/);
+  assert.doesNotMatch(navigation, /label: "Scanner"/);
   assert.doesNotMatch(navigation, /tab: "workspace"/);
 });
 

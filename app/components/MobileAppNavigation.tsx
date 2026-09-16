@@ -4,13 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { resolveApplicationRoute } from "@/lib/application-navigation";
 import { resolveMobileActiveTab, type MobileAppTab as AppTab } from "@/lib/checkpoint-a-ui-state";
-import { useMobileAppNavigation } from "./MobileAppNavigationContext";
 import { useShellAuthSession } from "@/app/hooks/useShellAuthSession";
 import { getSafeAccountIdentity } from "@/lib/home-account";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
-  { tab: "scanner", label: "Scanner", href: "/scanner" },
-  { tab: "home", label: "Market", href: "/market" },
+  { tab: "home", label: "Home", href: "/" },
+  { tab: "market", label: "Market", href: "/market" },
   { tab: "paper", label: "Paper", href: "/paper" },
   { tab: "agent", label: "Agent X", href: "/agent" },
   { tab: "profile", label: "Profile", href: "/account" },
@@ -29,8 +28,11 @@ function TabIcon({ tab }: { tab: AppTab }) {
     "aria-hidden": true,
   };
 
-  if (tab === "home") return (
+  if (tab === "market") return (
     <svg {...common}><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 3-4 3 2 4-6"/><path d="M17 7h3v3"/></svg>
+  );
+  if (tab === "home") return (
+    <svg {...common}><path d="m3.5 10 8.5-7 8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M9.5 20v-6h5v6"/></svg>
   );
   if (tab === "convictions") return (
     <svg {...common}><path d="M13.2 2.5c.5 3-1.6 4.4-3.2 6.2-1.5 1.7-2.5 3.4-2.5 5.8A4.6 4.6 0 0 0 12 19.2a4.7 4.7 0 0 0 4.7-4.8c0-1.8-.7-3.2-1.8-4.7-.3 2-1.4 3-2.5 3.8.3-2.9-1-5-3.4-6.8"/></svg>
@@ -62,10 +64,9 @@ function TabIcon({ tab }: { tab: AppTab }) {
 export default function MobileAppNavigation() {
   const pathname = usePathname();
   const router = useRouter();
-  const { homeTab } = useMobileAppNavigation();
   const { session, ready: authReady } = useShellAuthSession();
   const accountIdentity = getSafeAccountIdentity(session?.user.email);
-  const activeTab = resolveMobileActiveTab(pathname, pathname === "/market" ? "home" : homeTab);
+  const activeTab = resolveMobileActiveTab(pathname);
   const currentRoute = resolveApplicationRoute(pathname);
 
   return (

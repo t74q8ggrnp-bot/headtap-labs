@@ -4,14 +4,15 @@ import test from "node:test";
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("mobile navigation separates Scanner discovery from Market analysis", () => {
+test("mobile navigation separates Home intelligence from Market analysis", () => {
   const navigation = source("app/components/MobileAppNavigation.tsx");
   const home = source("app/components/home/HomeReferenceSurface.tsx");
 
-  for (const destination of ["Scanner", "Market", "Paper", "Agent X", "Profile"]) {
+  for (const destination of ["Home", "Market", "Paper", "Agent X", "Profile"]) {
     assert.match(navigation, new RegExp(`label: "${destination}"`));
   }
   assert.doesNotMatch(navigation, /label: "Work"|label: "Trade"/);
+  assert.doesNotMatch(navigation, /label: "Scanner"/);
   assert.match(home, /htlabs:open-markets/);
   assert.match(home, /Spot \{spotMomentum\.length\}/);
   assert.match(home, /Early \{beforeCrowd\.length\}/);

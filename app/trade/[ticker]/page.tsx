@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import TradeWorkspace from "@/app/components/trade/TradeWorkspace";
+import { notFound, redirect } from "next/navigation";
 
 const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
@@ -31,5 +30,5 @@ export default async function TradeTickerPage({
   const symbol = normalizeTicker((await params).ticker);
   if (!symbol) notFound();
 
-  return <TradeWorkspace symbol={symbol} />;
+  redirect(`/market?ticker=${encodeURIComponent(symbol)}`);
 }

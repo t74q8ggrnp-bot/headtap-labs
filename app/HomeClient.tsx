@@ -3,7 +3,6 @@
 declare global { interface Window { _htScannerLastFetch?: number } }
 
 import { motion } from "framer-motion";
-import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -45,14 +44,8 @@ import {
 import { getRelativeVolume } from "@/app/lib/legacy-stock-scoring";
 import type { HomeAlert } from "@/lib/home-account";
 
-const ScannerGrid = dynamic(() => import("./components/desktop/ScannerGrid"), {
-  loading: () => (
-    <div className="mx-auto h-48 max-w-7xl animate-pulse rounded-3xl border border-white/5 bg-white/[0.02]" />
-  ),
-});
-type ScannerFilter = "all" | "hot" | "bullish" | "watchlist";
-
 type HomeClientProps = {
+  surface: "intelligence" | "market";
   initialMomentumPayload: OpportunityPayload | null;
   initialBeforeCrowdPayload: OpportunityPayload | null;
 };
@@ -182,15 +175,8 @@ const broadMarketUniverse = [
 
 const marketUniverse = Array.from(new Set([...defaultStarterTickers, ...broadMarketUniverse]));
 
-const scannerFilters: { label: string; value: ScannerFilter }[] = [
-  { label: "All", value: "all" },
-  { label: "Hot", value: "hot" },
-  { label: "Bullish", value: "bullish" },
-  { label: "Watchlist", value: "watchlist" },
-];
-
-
 export default function HomeClient({
+  surface,
   initialMomentumPayload,
   initialBeforeCrowdPayload,
 }: HomeClientProps) {
@@ -224,18 +210,16 @@ export default function HomeClient({
   // Mobile "Live Scanner" tab data — same backend source as Home,
   // Scanner, and Other Active Reads. Replaces raw stocks.slice(0,30),
   // which showed every ETF in the universe at flat 0% with fake labels.
-  const [aiAnalysis, setAiAnalysis] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState("");
+  const aiAnalysis = "";
+  const aiLoading = false;
+  const aiError = "";
   const [, setIsRefreshing] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [scannerFilter, setScannerFilter] = useState<ScannerFilter>("all");
   const [news, setNews] = useState<Record<string, NewsItem[]>>({});
   const [newsIntel, setNewsIntel] = useState<Record<string, NewsIntel>>({});
   const [session, setSession] = useState<Session | null>(null);
   const {
     symbols: watchlist,
-    add: addWatchlistSymbol,
     toggle: toggleWatchlistSymbol,
     loading: watchlistLoading,
     cloudEnabled: watchlistCloudEnabled,
@@ -353,22 +337,6 @@ export default function HomeClient({
   const getNewsArticles = (symbol: string) => {
     return newsIntel[symbol]?.articles || news[symbol] || [];
   };
-
-  const filteredOpportunities = useMemo(() => {
-    if (scannerFilter === "hot") {
-      return apiFullRankedList.filter((opportunity) => Math.abs(opportunity.change) > 4);
-    }
-
-    if (scannerFilter === "bullish") {
-      return apiFullRankedList.filter((opportunity) => opportunity.change >= 0);
-    }
-
-    if (scannerFilter === "watchlist") {
-      return apiFullRankedList.filter((opportunity) => watchlist.includes(opportunity.ticker));
-    }
-
-    return apiFullRankedList;
-  }, [scannerFilter, apiFullRankedList, watchlist]);
 
   const watchlistStocks = useMemo(
     () =>
@@ -1148,83 +1116,8 @@ export default function HomeClient({
     }
   };
 
-  const addTicker = async () => {
-    if (!ticker) return;
-
-    const cleanTicker = ticker.toUpperCase().trim();
-
-    const addRes = await fetch(`/api/quote?symbol=${cleanTicker}`);
-    const addData = await addRes.json();
-    const newStock: Stock = {
-      symbol: cleanTicker,
-      price: Number(addData.c || 0),
-      change: Number(addData.dp || 0),
-    };
-
-    setStocks((prev) => {
-      const filtered = prev.filter((stock) => stock.symbol !== cleanTicker);
-      const updated = [...filtered, newStock];
-
-      return updated.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-    });
-
-    await addWatchlistSymbol(cleanTicker);
-
-    setTicker("");
-  };
-
   const toggleWatchlist = (symbol: string) => {
     void toggleWatchlistSymbol(symbol);
-  };
-
-
-  const toggleSavedSetup = (symbol: string) => {
-    let updatedSetups: string[];
-
-    if (savedSetups.includes(symbol)) {
-      updatedSetups = savedSetups.filter((item) => item !== symbol);
-    } else {
-      updatedSetups = [...savedSetups, symbol];
-    }
-
-    setSavedSetups(updatedSetups);
-    localStorage.setItem("htlabs-saved-setups", JSON.stringify(updatedSetups));
-  };
-
-
-  const openAiModal = async (stock: Stock) => {
-    setSelectedStock(stock);
-    recordRecentlyViewed(stock.symbol);
-    setAiLoading(true);
-    setAiError("");
-    setAiAnalysis("");
-
-    try {
-      const res = await fetch("/api/ai", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          symbol: stock.symbol,
-          price: stock.price,
-          change: stock.change,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!data.analysis) {
-        setAiError("No AI analysis returned.");
-      } else {
-        setAiAnalysis(data.analysis);
-      }
-    } catch (err) {
-      console.error(err);
-      setAiError("Failed to generate AI analysis.");
-    } finally {
-      setAiLoading(false);
-    }
   };
 
   // Frontend does not pick homepage winners anymore.
@@ -1238,14 +1131,13 @@ export default function HomeClient({
       ?? apiMomentum
     : apiMomentum;
   const referenceFramework = tradeFrameworkToDisplay(referenceOpportunity?.tradeFramework);
-  const referenceSliceEnabled = process.env.NEXT_PUBLIC_PHASE_25B_REFERENCE_SLICE !== "off";
   const requestedAccountSurface = searchParams?.get("auth") === "signin"
     ? "signin"
     : searchParams?.get("account") === "profile" || searchParams?.get("tab") === "profile"
       ? "profile"
       : null;
 
-  if (referenceSliceEnabled) {
+  if (surface === "market") {
     return (
       <HomeReferenceSurface
         opportunity={referenceOpportunity}
@@ -1601,7 +1493,7 @@ export default function HomeClient({
                   </div>
                   {workspaceSearchTicker && (
                     <Link
-                      href={`/trade/${encodeURIComponent(workspaceSearchTicker)}`}
+                      href={`/market?ticker=${encodeURIComponent(workspaceSearchTicker)}`}
                       className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.05] px-3 py-2.5 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-300 transition hover:border-cyan-400/40 hover:text-cyan-200"
                     >
                       Workspace ↗
@@ -1920,24 +1812,6 @@ export default function HomeClient({
           </motion.div>
         </section>
 
-        <ScannerGrid
-          ticker={ticker}
-          setTicker={setTicker}
-          addTicker={addTicker}
-          scannerFilters={scannerFilters}
-          scannerFilter={scannerFilter}
-          setScannerFilter={setScannerFilter}
-          filteredOpportunities={filteredOpportunities}
-          watchlist={watchlist}
-          toggleWatchlist={toggleWatchlist}
-          getTopNews={getTopNews}
-          toggleSavedSetup={toggleSavedSetup}
-          savedSetups={savedSetups}
-          openAiModal={openAiModal}
-          aiLoading={aiLoading}
-          selectedStock={selectedStock}
-        />
-
         <footer className="border-t border-orange-500/10 bg-black/60 px-5 py-8">
           <div className="mx-auto flex max-w-7xl flex-col gap-5">
             <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-start">
@@ -2234,10 +2108,10 @@ export default function HomeClient({
 
                   <div className="flex items-center gap-2">
                     <Link
-                      href={`/trade/${encodeURIComponent(selectedStock.symbol)}`}
+                      href={`/market?ticker=${encodeURIComponent(selectedStock.symbol)}`}
                       className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.05] px-4 py-2 text-sm font-black text-cyan-300 transition hover:border-cyan-400/40"
                     >
-                      Open workspace ↗
+                      Open Market ↗
                     </Link>
                     <motion.button
                       onClick={() => setSelectedStock(null)}

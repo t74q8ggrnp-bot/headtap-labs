@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function TradeWorkspaceEntryPage() {
-  redirect("/trade/SPY");
+  redirect("/market?ticker=SPY");
 }

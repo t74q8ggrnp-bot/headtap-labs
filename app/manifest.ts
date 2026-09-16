@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "HT Labs",
     short_name: "HT Labs",
     description: "Market intelligence and opportunity discovery from HT Labs.",
-    start_url: "/scanner",
+    start_url: "/",
     display: "standalone",
     background_color: "#050505",
     theme_color: "#050505",

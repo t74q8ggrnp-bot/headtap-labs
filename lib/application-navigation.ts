@@ -1,4 +1,5 @@
 export type ApplicationRouteId =
+  | "discovery"
   | "home"
   | "workspace"
   | "scanner"
@@ -25,7 +26,7 @@ export type ApplicationRoute = {
 };
 
 export const APPLICATION_ROUTES: readonly ApplicationRoute[] = [
-  { id: "scanner", label: "Scanner", shortLabel: "Scanner", href: "/scanner", match: "exact", audience: "market" },
+  { id: "discovery", label: "Home", shortLabel: "Home", href: "/", match: "exact", audience: "market" },
   { id: "home", label: "Market", shortLabel: "Market", href: "/market", match: "exact", audience: "market" },
   { id: "signals", label: "Signal History", shortLabel: "Signals", href: "/signals", match: "exact", audience: "market" },
   { id: "news", label: "News Intel", shortLabel: "News", href: "/news-feed", match: "exact", audience: "market" },
@@ -36,6 +37,7 @@ export const APPLICATION_ROUTES: readonly ApplicationRoute[] = [
   { id: "qa", label: "System QA", shortLabel: "QA", href: "/qa", match: "exact", audience: "operator" },
   { id: "validation", label: "Market Validation", shortLabel: "Validation", href: "/validation", match: "exact", audience: "operator" },
   { id: "trading-bot", label: "Paper Bot Log", shortLabel: "Bot Log", href: "/trading-bot", match: "exact", audience: "operator" },
+  { id: "scanner", label: "Internal Scanner", shortLabel: "Scanner", href: "/scanner", match: "exact", audience: "operator" },
   { id: "account", label: "Account & Privacy", shortLabel: "Account", href: "/account", match: "exact", audience: "account" },
   { id: "support", label: "Support", shortLabel: "Support", href: "/support", match: "exact", audience: "account" },
   { id: "privacy", label: "Privacy Policy", shortLabel: "Privacy", href: "/privacy", match: "exact", audience: "account" },

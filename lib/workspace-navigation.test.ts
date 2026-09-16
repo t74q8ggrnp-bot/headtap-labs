@@ -18,16 +18,16 @@ test("mobile navigation converges legacy Trading Workspace routes on Market", ()
     "utf8",
   );
 
-  assert.match(source, /\{ tab: "home", label: "Market", href: "\/market" \}/);
-  assert.equal(resolveMobileActiveTab("/trade", "home"), "home");
-  assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "home");
-  assert.match(source, /resolveMobileActiveTab\(pathname, pathname === "\/market" \? "home" : homeTab\)/);
+  assert.match(source, /\{ tab: "market", label: "Market", href: "\/market" \}/);
+  assert.equal(resolveMobileActiveTab("/trade"), "market");
+  assert.equal(resolveMobileActiveTab("/trade/SPY"), "market");
+  assert.match(source, /resolveMobileActiveTab\(pathname\)/);
   assert.doesNotMatch(source, /tab: "workspace"/);
   assert.match(source, /grid grid-cols-5/);
 });
 
-test("the Trading Workspace entry opens a useful default instrument", () => {
+test("the legacy Trading Workspace entry opens the default instrument in Market", () => {
   const source = readFileSync(new URL("../app/trade/page.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /redirect\("\/trade\/SPY"\)/);
+  assert.match(source, /redirect\("\/market\?ticker=SPY"\)/);
 });

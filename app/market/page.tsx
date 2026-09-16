@@ -28,6 +28,7 @@ export default async function MarketPage() {
   return (
     <Suspense fallback={null}>
       <HomeClient
+        surface="market"
         initialMomentumPayload={initialMomentumPayload}
         initialBeforeCrowdPayload={initialBeforeCrowdPayload}
       />

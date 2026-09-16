@@ -8,16 +8,16 @@ test("Phase 2.5B exposes one restrained primary shell and separates operator rou
   const shell = source("app/components/ResponsiveApplicationShell.tsx");
   const mobile = source("app/components/MobileAppNavigation.tsx");
 
-  assert.match(shell, /primaryRouteIds = new Set\(\["scanner", "home", "paper", "agent", "account"\]\)/);
+  assert.match(shell, /primaryRouteIds = new Set\(\["discovery", "home", "paper", "agent", "account"\]\)/);
   assert.match(shell, /secondaryRouteIds = new Set\(\["signals", "news", "prox", "support", "workspace"\]\)/);
-  assert.match(shell, /operatorRouteIds = new Set\(\["qa", "validation", "trading-bot"\]\)/);
+  assert.match(shell, /operatorRouteIds = new Set\(\["scanner", "qa", "validation", "trading-bot"\]\)/);
   assert.match(shell, /aria-label="Operator routes"/);
   assert.doesNotMatch(shell, /"privacy", "terms"/);
   assert.doesNotMatch(shell, /fetch\(|XMLHttpRequest|\/api\//);
 
   for (const item of [
-    '{ tab: "scanner", label: "Scanner", href: "/scanner" }',
-    '{ tab: "home", label: "Market", href: "/market" }',
+    '{ tab: "home", label: "Home", href: "/" }',
+    '{ tab: "market", label: "Market", href: "/market" }',
     '{ tab: "paper", label: "Paper", href: "/paper" }',
     '{ tab: "agent", label: "Agent X", href: "/agent" }',
     '{ tab: "profile", label: "Profile", href: "/account" }',

@@ -6,9 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
 
-const primaryRouteIds = new Set(["scanner", "home", "paper", "agent", "account"]);
+const primaryRouteIds = new Set(["discovery", "home", "paper", "agent", "account"]);
 const secondaryRouteIds = new Set(["signals", "news", "prox", "support", "workspace"]);
-const operatorRouteIds = new Set(["qa", "validation", "trading-bot"]);
+const operatorRouteIds = new Set(["scanner", "qa", "validation", "trading-bot"]);
 
 export default function ResponsiveApplicationShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -54,7 +54,7 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
     >
       <a className="ht-skip-link" href="#ht-route-content">Skip to page content</a>
       <header className="ht-desktop-global-header">
-        <Link href="/scanner" className="ht-desktop-global-brand" aria-label="HT Labs scanner">
+        <Link href="/" className="ht-desktop-global-brand" aria-label="HT Labs Home">
           <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} priority />
         </Link>
 

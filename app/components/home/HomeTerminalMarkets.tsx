@@ -128,7 +128,7 @@ export default function HomeTerminalMarkets({
                           {symbol}
                         </button>
                       ) : (
-                        <Link href={`/trade/${encodeURIComponent(symbol)}`} onClick={onNavigate}>{symbol}</Link>
+                        <Link href={`/market?ticker=${encodeURIComponent(symbol)}`} onClick={onNavigate}>{symbol}</Link>
                       )}
                     </th>
                     <td>{opportunity ? formatMarketPrice(opportunity.price) : "—"}</td>

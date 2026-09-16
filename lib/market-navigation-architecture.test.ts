@@ -4,23 +4,24 @@ import test from "node:test";
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("the product opens on Scanner and preserves explicit root query destinations in Market", () => {
+test("the product opens on intelligence Home while Market remains the chart surface", () => {
   const root = source("app/page.tsx");
+  const market = source("app/market/page.tsx");
   const manifest = source("app/manifest.ts");
 
-  assert.match(root, /redirect\("\/scanner"\)/);
-  assert.match(root, /redirect\(`\/market\?\$\{preserved\.toString\(\)\}`\)/);
-  assert.match(manifest, /start_url: "\/scanner"/);
+  assert.match(root, /surface="intelligence"/);
+  assert.match(market, /surface="market"/);
+  assert.match(manifest, /start_url: "\/"/);
 });
 
-test("the approved primary navigation is Scanner, Market, Paper, Agent X, and Profile", () => {
+test("the approved primary navigation is Home, Market, Paper, Agent X, and Profile", () => {
   const mobile = source("app/components/MobileAppNavigation.tsx");
-  const labels = ["Scanner", "Market", "Paper", "Agent X", "Profile"];
+  const labels = ["Home", "Market", "Paper", "Agent X", "Profile"];
   const positions = labels.map((label) => mobile.indexOf(`label: "${label}"`));
 
   assert.ok(positions.every((position) => position >= 0));
   assert.deepEqual([...positions].sort((left, right) => left - right), positions);
-  assert.doesNotMatch(mobile, /label: "Trade"|label: "Work"/);
+  assert.doesNotMatch(mobile, /label: "Scanner"|label: "Trade"|label: "Work"/);
 });
 
 test("Scanner opens the selected ticker in Market while legacy Workspace links remain registered", () => {

@@ -9,6 +9,7 @@ import { resolveMobileActiveTab } from "./checkpoint-a-ui-state.ts";
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
 const EXPECTED_ROUTES = new Map([
+  ["/", "discovery"],
   ["/market", "home"],
   ["/trade/SPY", "workspace"],
   ["/scanner", "scanner"],
@@ -37,21 +38,21 @@ test("the shared application registry identifies every supported route exactly",
 });
 
 test("mobile navigation uses the exact five approved primary destinations", () => {
-  assert.equal(resolveMobileActiveTab("/", "watchlist"), null);
-  assert.equal(resolveMobileActiveTab("/market", "home"), "home");
-  assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "home");
-  assert.equal(resolveMobileActiveTab("/scanner", "home"), "scanner");
-  assert.equal(resolveMobileActiveTab("/paper", "home"), "paper");
-  assert.equal(resolveMobileActiveTab("/agent", "home"), "agent");
+  assert.equal(resolveMobileActiveTab("/"), "home");
+  assert.equal(resolveMobileActiveTab("/market"), "market");
+  assert.equal(resolveMobileActiveTab("/trade/SPY"), "market");
+  assert.equal(resolveMobileActiveTab("/scanner"), "more");
+  assert.equal(resolveMobileActiveTab("/paper"), "paper");
+  assert.equal(resolveMobileActiveTab("/agent"), "agent");
   for (const pathname of ["/signals", "/news-feed", "/prox", "/qa", "/validation", "/trading-bot"]) {
-    assert.equal(resolveMobileActiveTab(pathname, "home"), "more", pathname);
+    assert.equal(resolveMobileActiveTab(pathname), "more", pathname);
   }
   for (const pathname of ["/account", "/privacy", "/terms", "/support"]) {
-    assert.equal(resolveMobileActiveTab(pathname, "home"), "profile", pathname);
+    assert.equal(resolveMobileActiveTab(pathname), "profile", pathname);
   }
 
   const mobile = source("app/components/MobileAppNavigation.tsx");
-  for (const label of ["Scanner", "Market", "Paper", "Agent X", "Profile"]) {
+  for (const label of ["Home", "Market", "Paper", "Agent X", "Profile"]) {
     assert.match(mobile, new RegExp(`label: "${label}"`));
   }
   assert.doesNotMatch(mobile, /moreRoutes|aria-haspopup="dialog"/);

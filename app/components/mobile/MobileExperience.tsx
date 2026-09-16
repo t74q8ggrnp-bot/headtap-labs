@@ -126,8 +126,8 @@ export default function MobileExperience({
                 )}
                 {workspaceSearchTicker && (
                   <Link
-                    href={`/trade/${encodeURIComponent(workspaceSearchTicker)}`}
-                    aria-label={`Open ${workspaceSearchTicker} trading workspace`}
+                    href={`/market?ticker=${encodeURIComponent(workspaceSearchTicker)}`}
+                    aria-label={`Open ${workspaceSearchTicker} in Market`}
                     className="shrink-0 rounded-lg border border-cyan-400/25 bg-cyan-500/[0.06] px-2.5 py-1 text-[10px] font-black text-cyan-300"
                   >
                     ↗
@@ -545,10 +545,10 @@ export default function MobileExperience({
 
               <div className="px-5 py-4">
                 <Link
-                  href={`/trade/${encodeURIComponent(selectedStock.symbol)}`}
+                  href={`/market?ticker=${encodeURIComponent(selectedStock.symbol)}`}
                   className="mb-2 flex w-full items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.05] py-3.5 text-sm font-black text-cyan-300"
                 >
-                  Open trading workspace ↗
+                  Open Market ↗
                 </Link>
                 <button
                   onClick={() => setSelectedStock(null)}

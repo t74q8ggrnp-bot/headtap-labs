@@ -159,10 +159,10 @@ export default function MobileCardDetail({
           View Full Analysis →
         </button>
         <Link
-          href={`/trade/${encodeURIComponent(current.ticker)}`}
+          href={`/market?ticker=${encodeURIComponent(current.ticker)}`}
           className="mt-2 flex w-full items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.04] py-3 text-sm font-black uppercase tracking-[0.08em] text-cyan-300"
         >
-          Open workspace ↗
+          Open Market ↗
         </Link>
         <button onClick={() => onWatch(current.ticker)} className="mt-2 w-full rounded-2xl border border-white/10 bg-transparent py-3 text-sm font-black uppercase tracking-[0.08em] text-zinc-500">
           {watched ? "✓ In Watchlist" : "Add to Watchlist ☆"}

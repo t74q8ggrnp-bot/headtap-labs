@@ -1,18 +1,37 @@
-import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import HomeClient from "./HomeClient";
+import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
+import { compactHomeInitialOpportunityPayload } from "@/lib/home-initial-payload";
 
-type RootPageProps = {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+export const dynamic = "force-dynamic";
 
-export default async function RootPage({ searchParams }: RootPageProps) {
-  const requested = await searchParams;
-  const preserved = new URLSearchParams();
+export default async function HomePage() {
+  const [momentumResult, beforeCrowdResult] = await Promise.allSettled([
+    getRollingCanonicalDecisionFrame("momentum"),
+    getRollingCanonicalDecisionFrame("before_crowd"),
+  ]);
 
-  for (const [key, value] of Object.entries(requested)) {
-    if (Array.isArray(value)) value.forEach((entry) => preserved.append(key, entry));
-    else if (typeof value === "string") preserved.set(key, value);
+  if (momentumResult.status === "rejected") {
+    console.error("[home] initial Spot Momentum snapshot failed:", momentumResult.reason);
+  }
+  if (beforeCrowdResult.status === "rejected") {
+    console.error("[home] initial Before The Crowd snapshot failed:", beforeCrowdResult.reason);
   }
 
-  if (preserved.size > 0) redirect(`/market?${preserved.toString()}`);
-  redirect("/scanner");
+  const initialMomentumPayload = momentumResult.status === "fulfilled"
+    ? compactHomeInitialOpportunityPayload(momentumResult.value, 15)
+    : null;
+  const initialBeforeCrowdPayload = beforeCrowdResult.status === "fulfilled"
+    ? compactHomeInitialOpportunityPayload(beforeCrowdResult.value, 5)
+    : null;
+
+  return (
+    <Suspense fallback={null}>
+      <HomeClient
+        surface="intelligence"
+        initialMomentumPayload={initialMomentumPayload}
+        initialBeforeCrowdPayload={initialBeforeCrowdPayload}
+      />
+    </Suspense>
+  );
 }

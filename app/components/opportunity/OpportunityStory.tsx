@@ -79,10 +79,10 @@ export default function OpportunityStory({
           Full Signal Breakdown →
         </button>
         <Link
-          href={`/trade/${encodeURIComponent(opportunity.ticker)}`}
+          href={`/market?ticker=${encodeURIComponent(opportunity.ticker)}`}
           className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-2.5 text-xs font-black text-zinc-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
         >
-          Open workspace ↗
+          Open Market ↗
         </Link>
         <button onClick={onWatch} className={`rounded-xl border px-4 py-2.5 text-xs font-black transition ${watched ? "border-violet-400/25 bg-violet-500/[0.07] text-violet-300" : "border-white/8 text-zinc-600 hover:text-zinc-400"}`}>
           {watched ? "★ Watching" : "☆ Watch"}
