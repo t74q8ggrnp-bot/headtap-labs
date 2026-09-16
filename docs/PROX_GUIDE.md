@@ -340,6 +340,27 @@ Only after both boards are independently complete may the system compare:
 Canonical data may evaluate ProX performance, but it may not leak into the
 independent ProX score.
 
+### Versioned paired scorecard
+
+`prox-canonical-paired-scorecard-v1` is the read-only implementation of the
+measured-comparison stage. It joins already completed Canonical observations
+and independent ProX episode representatives only when the ticker matches,
+their provider clocks align within 120 seconds, and their decision clocks
+align within 180 seconds. A Canonical observation may be paired only once.
+Missing, stale, misaligned, duplicate, or incomplete evidence is excluded with
+an explicit reason and is never converted into a zero return.
+
+The internal `/api/prox-paired-scorecard` route reads existing append-only
+records and makes zero provider requests. It also reports the existing
+versioned Agent X `canonical_only`, `canonical_prox`, and `ht_agent_full`
+cohorts and verifies that their immutable evidence-frame clocks remain within
+the 120-second alignment contract. Its 30-session, 500-pair, and 500
+measured one-hour outcome floors indicate only that evidence may be brought to
+the owner for review. Crossing those floors cannot change Canonical ranking,
+ProX weights, Agent authority, Paper behavior, or execution. Any such change
+still requires a separately approved promotion with a version bump,
+regression protection, and out-of-sample evidence.
+
 ## Promotion ladder
 
 ProX authority expands only through explicit, measured stages:

@@ -67,6 +67,15 @@ paper-only decision. It cannot promote a Canonical-ineligible ticker, alter
 either upstream score, size on ProX authority, or route anywhere except the HT
 Labs paper ledger.
 
+`app/api/prox-paired-scorecard/route.ts` is an internal, read-only evaluator of
+the two completed systems. It may pair timestamp-aligned observations and
+their measured outcomes for research, but it is not a score producer or a
+consumer authority. It makes no provider requests and cannot write back into
+Canonical, ProX, Agent X, Paper, or execution state.
+The route may aggregate the existing versioned Agent X research cohorts and
+their provider-clock alignment, but it cannot change a cohort decision or use
+one user's Paper state as market-scoring truth.
+
 ## Bounded ProX Market Pulse consumer
 
 `lib/prox/public-authority.ts` owns the separate, established ProX Market Pulse
