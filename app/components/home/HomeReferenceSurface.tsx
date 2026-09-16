@@ -136,12 +136,22 @@ export default function HomeReferenceSurface({
   useEffect(() => {
     const openAccount = () => setAccountOpen(true);
     const openAlerts = () => setAlertsOpen(true);
+    const openMarkets = () => setMarketBrowserOpen(true);
     window.addEventListener("htlabs:open-account", openAccount);
     window.addEventListener("htlabs:open-alerts", openAlerts);
+    window.addEventListener("htlabs:open-markets", openMarkets);
     return () => {
       window.removeEventListener("htlabs:open-account", openAccount);
       window.removeEventListener("htlabs:open-alerts", openAlerts);
+      window.removeEventListener("htlabs:open-markets", openMarkets);
     };
+  }, []);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("markets") !== "open") return;
+    const openTimer = window.setTimeout(() => setMarketBrowserOpen(true), 0);
+    window.history.replaceState(window.history.state, "", "/");
+    return () => window.clearTimeout(openTimer);
   }, []);
 
   const unreadAlertCount = alerts.filter((alert) => !alert.read).length;
@@ -304,6 +314,15 @@ export default function HomeReferenceSurface({
       {selectionLoading ? <div className="htb-selection-state" role="status">Loading {opportunity.ticker} canonical context…</div> : null}
       {selectionError ? <div className="htb-selection-state htb-selection-state--error" role="status">{selectionError}</div> : null}
       <div data-home-priority="3-chart"><HomeReferenceChart symbol={opportunity.ticker} /></div>
+      <button
+        type="button"
+        className="ht-home-discovery-strip"
+        aria-label={`Explore ${spotMomentum.length} Spot Momentum opportunities, ${beforeCrowd.length} Before the Crowd opportunities, Watchlist, and Recently Viewed`}
+        onClick={() => setMarketBrowserOpen(true)}
+      >
+        <span><strong>Spot {spotMomentum.length}</strong><strong>Early {beforeCrowd.length}</strong><span>Watchlist</span></span>
+        <span aria-hidden="true">Explore →</span>
+      </button>
     </>
   );
 

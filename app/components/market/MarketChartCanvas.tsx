@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -59,6 +60,11 @@ import {
   type HtChartObject,
   type HtChartPriceZone,
 } from "@/lib/chart-objects";
+import {
+  MarketChartUserDrawingLayer,
+  type MarketChartUserDrawing,
+  type MarketChartUserDrawingTool,
+} from "./MarketChartUserDrawings";
 
 export type { MarketChartIndicatorOverlays } from "@/lib/market-chart-rendering";
 
@@ -85,6 +91,12 @@ export type MarketChartCanvasProps = {
   visibleRange?: MarketChartVisibleRange;
   latestResetToken?: number;
   onVisibleCoverageChange?: (coverage: MarketChartVisibleCoverage | null) => void;
+  userDrawings?: readonly MarketChartUserDrawing[];
+  userDrawingTool?: MarketChartUserDrawingTool;
+  selectedUserDrawingId?: string | null;
+  onSelectUserDrawing?: (id: string | null) => void;
+  onCommitUserDrawings?: (drawings: MarketChartUserDrawing[]) => void;
+  onUserDrawingToolComplete?: () => void;
   /** @deprecated Prefer layerHost. Kept as a compatibility alias. */
   layerSlots?: ChartLayerSlots;
   className?: string;
@@ -158,6 +170,11 @@ type PriceWriter = {
 type PriceSeriesRegistry = {
   graph: ISeriesApi<"Area">;
   candles: ISeriesApi<"Candlestick">;
+};
+
+type DrawingRuntime = {
+  chart: IChartApi | null;
+  series: PriceSeriesRegistry[keyof PriceSeriesRegistry] | null;
 };
 
 type PriceWriterRegistry = Record<MarketChartMode, PriceWriter>;
@@ -413,6 +430,12 @@ export function MarketChartCanvas({
   visibleRange,
   latestResetToken = 0,
   onVisibleCoverageChange,
+  userDrawings = [],
+  userDrawingTool = "pan",
+  selectedUserDrawingId = null,
+  onSelectUserDrawing,
+  onCommitUserDrawings,
+  onUserDrawingToolComplete,
   className = "",
 }: MarketChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -438,6 +461,8 @@ export function MarketChartCanvas({
   const latestFrameRef = useRef<MarketChartRenderFrame | null>(null);
   const visibleCoverageCallbackRef = useRef(onVisibleCoverageChange);
   const slotCountRef = useRef(0);
+  const [drawingRenderVersion, setDrawingRenderVersion] = useState(0);
+  const [drawingRuntime, setDrawingRuntime] = useState<DrawingRuntime>({ chart: null, series: null });
   const palette = MARKET_CHART_ACCENTS[accent];
   const resolvedTimeZone = timeZone || "America/New_York";
   const resolvedIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0
@@ -647,6 +672,10 @@ export function MarketChartCanvas({
     container.dataset.chartInitializationCount = String(
       Number(container.dataset.chartInitializationCount || "0") + 1,
     );
+    const drawingReadyFrame = window.requestAnimationFrame(() => {
+      setDrawingRuntime({ chart, series: priceSeries[mode] });
+      setDrawingRenderVersion((version) => version + 1);
+    });
 
     const rememberViewport = (range: { from: number; to: number } | null) => {
       if (!range) {
@@ -669,6 +698,7 @@ export function MarketChartCanvas({
           range,
         ),
       );
+      setDrawingRenderVersion((version) => version + 1);
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(rememberViewport);
 
@@ -678,6 +708,7 @@ export function MarketChartCanvas({
         height: Math.max(1, container.clientHeight),
       });
       chartObjectWriterRef.current?.refresh();
+      setDrawingRenderVersion((version) => version + 1);
     };
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? null
@@ -704,6 +735,7 @@ export function MarketChartCanvas({
       renderedViewportKeyRef.current = null;
       chartObjectWriterRef.current?.destroy();
       chartObjectWriterRef.current = null;
+      window.cancelAnimationFrame(drawingReadyFrame);
       chart.remove();
     };
     // The trade workspace opts into a persistent identity. Its display mode,
@@ -734,9 +766,14 @@ export function MarketChartCanvas({
       priceFormat,
       visible: mode === "candles",
     });
+    const drawingModeFrame = window.requestAnimationFrame(() => {
+      setDrawingRuntime({ chart: chartRef.current, series: priceSeriesRef.current?.[mode] ?? null });
+      setDrawingRenderVersion((version) => version + 1);
+    });
     for (const series of indicatorSeriesRef.current.values()) {
       series.applyOptions({ priceFormat });
     }
+    return () => window.cancelAnimationFrame(drawingModeFrame);
   }, [mode, palette.line, priceResolution.minMove]);
 
   useEffect(() => {
@@ -918,6 +955,19 @@ export function MarketChartCanvas({
         data-chart-watermark="ht-labs"
       />
       <ChartLayerHost slots={layerHost ?? layerSlots} nativeLayerRef={nativeLayerRef} />
+      {onCommitUserDrawings && onSelectUserDrawing && onUserDrawingToolComplete ? (
+        <MarketChartUserDrawingLayer
+          chart={drawingRuntime.chart}
+          series={drawingRuntime.series}
+          drawings={userDrawings}
+          tool={userDrawingTool}
+          selectedId={selectedUserDrawingId}
+          renderVersion={drawingRenderVersion}
+          onSelect={onSelectUserDrawing}
+          onCommit={onCommitUserDrawings}
+          onToolComplete={onUserDrawingToolComplete}
+        />
+      ) : null}
     </div>
   );
 }

@@ -6,6 +6,10 @@ import MarketChartCanvas, {
   type MarketChartIndicatorOverlays,
   type MarketChartMode,
 } from "@/app/components/market/MarketChartCanvas";
+import type {
+  MarketChartUserDrawing,
+  MarketChartUserDrawingTool,
+} from "@/app/components/market/MarketChartUserDrawings";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import { useChartLayerPreferences } from "@/app/hooks/useChartLayerPreferences";
 import { calculateMarketIndicators } from "@/lib/market-indicators";
@@ -38,6 +42,27 @@ const visibleRanges = [
   { id: "session", label: "Session" },
 ] as const satisfies ReadonlyArray<{ id: MarketChartVisibleRange; label: string }>;
 
+type DrawingHistory = {
+  past: MarketChartUserDrawing[][];
+  present: MarketChartUserDrawing[];
+  future: MarketChartUserDrawing[][];
+};
+
+const EMPTY_DRAWING_HISTORY: DrawingHistory = { past: [], present: [], future: [] };
+
+function validStoredDrawings(value: unknown): MarketChartUserDrawing[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((drawing): drawing is MarketChartUserDrawing => {
+    if (!drawing || typeof drawing !== "object") return false;
+    const candidate = drawing as MarketChartUserDrawing;
+    return typeof candidate.id === "string" &&
+      ["horizontal", "trend", "measure"].includes(candidate.kind) &&
+      Array.isArray(candidate.points) &&
+      candidate.points.length >= 1 &&
+      candidate.points.every((point) => Number.isFinite(point?.time) && Number.isFinite(point?.price));
+  });
+}
+
 export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   const marketView = useLiveMarketView(symbol, { chart: true });
   const [timeframe, setTimeframe] = useState<MarketChartTimeframe>("1m");
@@ -46,7 +71,12 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>("2h");
   const [latestResetToken, setLatestResetToken] = useState(0);
   const [visibleCoverage, setVisibleCoverage] = useState<MarketChartVisibleCoverage | null>(null);
+  const [drawingHistory, setDrawingHistory] = useState<DrawingHistory>(EMPTY_DRAWING_HISTORY);
+  const [drawingTool, setDrawingTool] = useState<MarketChartUserDrawingTool>("pan");
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const rangeInitializedRef = useRef(false);
+  const loadedDrawingSymbolRef = useRef<string | null>(null);
+  const drawMenuRef = useRef<HTMLDetailsElement | null>(null);
   const chartLayers = useChartLayerPreferences();
   const layers = chartLayers.preferences;
 
@@ -57,9 +87,9 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     const apply = () => {
       setHeight(
         landscapeQuery.matches
-          ? Math.max(260, window.innerHeight - 88)
+          ? Math.max(210, window.innerHeight - 140)
           : mobileQuery.matches
-          ? Math.min(620, Math.max(360, window.innerHeight - 258))
+          ? Math.min(620, Math.max(330, window.innerHeight - 302))
           : terminalQuery.matches
             ? Math.max(620, window.innerHeight - 125)
             : 500,
@@ -81,6 +111,31 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
       window.removeEventListener("resize", apply);
     };
   }, []);
+
+  useEffect(() => {
+    const storageKey = `htlabs:user-drawings:v1:${symbol}`;
+    let drawings: MarketChartUserDrawing[] = [];
+    try {
+      drawings = validStoredDrawings(JSON.parse(window.localStorage.getItem(storageKey) ?? "[]"));
+    } catch {
+      drawings = [];
+    }
+    loadedDrawingSymbolRef.current = symbol;
+    const syncTimer = window.setTimeout(() => {
+      setDrawingHistory({ past: [], present: drawings, future: [] });
+      setSelectedDrawingId(null);
+      setDrawingTool("pan");
+    }, 0);
+    return () => window.clearTimeout(syncTimer);
+  }, [symbol]);
+
+  useEffect(() => {
+    if (loadedDrawingSymbolRef.current !== symbol) return;
+    window.localStorage.setItem(
+      `htlabs:user-drawings:v1:${symbol}`,
+      JSON.stringify(drawingHistory.present),
+    );
+  }, [drawingHistory.present, symbol]);
 
   const baseBars = useMemo(() => marketView.chart?.bars ?? [], [marketView.chart]);
   const bars = useMemo(
@@ -115,6 +170,51 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
 
   const selectVisibleRange = (range: MarketChartVisibleRange) => {
     setVisibleRange(range);
+  };
+
+  const commitDrawings = (next: MarketChartUserDrawing[]) => {
+    setDrawingHistory((current) => ({
+      past: [...current.past, current.present].slice(-50),
+      present: next,
+      future: [],
+    }));
+  };
+
+  const undoDrawing = () => {
+    setDrawingHistory((current) => {
+      const previous = current.past.at(-1);
+      if (!previous) return current;
+      return {
+        past: current.past.slice(0, -1),
+        present: previous,
+        future: [current.present, ...current.future].slice(0, 50),
+      };
+    });
+    setSelectedDrawingId(null);
+  };
+
+  const redoDrawing = () => {
+    setDrawingHistory((current) => {
+      const next = current.future[0];
+      if (!next) return current;
+      return {
+        past: [...current.past, current.present].slice(-50),
+        present: next,
+        future: current.future.slice(1),
+      };
+    });
+    setSelectedDrawingId(null);
+  };
+
+  const deleteSelectedDrawing = () => {
+    if (!selectedDrawingId) return;
+    commitDrawings(drawingHistory.present.filter((drawing) => drawing.id !== selectedDrawingId));
+    setSelectedDrawingId(null);
+  };
+
+  const chooseDrawingTool = (tool: MarketChartUserDrawingTool) => {
+    setDrawingTool(tool);
+    drawMenuRef.current?.removeAttribute("open");
   };
 
   return (
@@ -153,6 +253,12 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
             visibleRange={visibleRange}
             latestResetToken={latestResetToken}
             onVisibleCoverageChange={handleVisibleCoverageChange}
+            userDrawings={drawingHistory.present}
+            userDrawingTool={drawingTool}
+            selectedUserDrawingId={selectedDrawingId}
+            onSelectUserDrawing={setSelectedDrawingId}
+            onCommitUserDrawings={commitDrawings}
+            onUserDrawingToolComplete={() => setDrawingTool("select")}
           />
         </div>
       )}
@@ -216,6 +322,28 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
                 </button>
               ))}
             </div>
+          </div>
+        </details>
+        <details ref={drawMenuRef} className="htb-chart__draw-menu">
+          <summary aria-label={`Drawing tools${drawingHistory.present.length ? `, ${drawingHistory.present.length} saved` : ""}`}>Draw</summary>
+          <div className="htb-chart__draw-panel">
+            <div role="group" aria-label="Drawing mode">
+              {([
+                ["pan", "Pan"],
+                ["select", "Select"],
+                ["horizontal", "Horizontal"],
+                ["trend", "Trendline"],
+                ["measure", "Price range"],
+              ] as const).map(([tool, label]) => (
+                <button key={tool} type="button" aria-pressed={drawingTool === tool} onClick={() => chooseDrawingTool(tool)}>{label}</button>
+              ))}
+            </div>
+            <div className="htb-chart__draw-history" role="group" aria-label="Drawing history">
+              <button type="button" disabled={drawingHistory.past.length === 0} onClick={undoDrawing}>Undo</button>
+              <button type="button" disabled={drawingHistory.future.length === 0} onClick={redoDrawing}>Redo</button>
+              <button type="button" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}>Delete selected</button>
+            </div>
+            <p>{drawingHistory.present.length} saved on this device for {symbol}.</p>
           </div>
         </details>
         <button

@@ -18,11 +18,11 @@ test("mobile navigation exposes and activates the Trading Workspace", () => {
     "utf8",
   );
 
-  assert.match(source, /\{ tab: "workspace", label: "Trade", href: "\/trade" \}/);
+  assert.match(source, /\{ tab: "workspace", label: "Work", href: "\/trade" \}/);
   assert.equal(resolveMobileActiveTab("/trade", "home"), "workspace");
   assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "workspace");
   assert.match(source, /resolveMobileActiveTab\(pathname, pathname === "\/" \? "home" : homeTab\)/);
-  assert.match(source, /\{ tab: "workspace", label: "Trade", href: "\/trade" \}/);
+  assert.match(source, /\{ tab: "workspace", label: "Work", href: "\/trade" \}/);
   assert.match(source, /tab === "more"/);
   assert.match(source, /grid grid-cols-5/);
 });

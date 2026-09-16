@@ -46,7 +46,7 @@ test("Home terminal wires real Canonical lists and keeps required actions explic
   assert.doesNotMatch(markets, /mock|fixture|hardcoded/i);
 });
 
-test("desktop chart controls render below the chart without exposing a dead Draw control", () => {
+test("desktop chart controls render below the chart and expose only functional Draw controls", () => {
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const css = source("app/globals.css");
   const canvasIndex = chart.indexOf("<MarketChartCanvas");
@@ -54,8 +54,11 @@ test("desktop chart controls render below the chart without exposing a dead Draw
 
   assert.ok(canvasIndex > -1);
   assert.ok(toolbarIndex > canvasIndex);
-  assert.doesNotMatch(css, /\border\s*:/);
-  assert.doesNotMatch(chart, />\s*Draw\s*</);
+  assert.doesNotMatch(css, /(?:^|[;{])\s*order\s*:/m);
+  assert.match(chart, />Draw<\/summary>/);
+  assert.match(chart, /Horizontal/);
+  assert.match(chart, /Trendline/);
+  assert.match(chart, /Price range/);
   assert.match(chart, /mobileQuery\.matches \? "1h" : "2h"/);
   assert.match(chart, /terminalQuery\.matches[\s\S]*window\.innerHeight - 125/);
   assert.equal(chart.match(/aria-label="Visible chart range"/g)?.length, 1);

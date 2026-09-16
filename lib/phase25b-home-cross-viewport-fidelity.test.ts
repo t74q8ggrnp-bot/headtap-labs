@@ -27,7 +27,8 @@ test("Home chart exposes one quiet control strip with settings inside Layers", (
   assert.match(chart, /aria-label="Chart style"/);
   assert.match(chart, /Chart layers/);
   assert.match(chart, />\s*Latest\s*</);
-  assert.doesNotMatch(chart, />\s*Draw\s*</);
+  assert.match(chart, /<summary aria-label=\{`Drawing tools/);
+  assert.match(chart, />Draw<\/summary>/);
 });
 
 test("Home Intelligence is progressive and compact layouts open it in a sheet", () => {
@@ -65,7 +66,7 @@ test("Home chart and terminal reading order rely on DOM order, not CSS order", (
   assert.ok(surface.indexOf("instrumentHeader={instrumentHeader}") < surface.indexOf("chart={chart}"));
   assert.ok(surface.indexOf("chart={chart}") < surface.indexOf('intelligence={compactLayout === "desktop"'));
   assert.ok(layout.indexOf("<ResponsiveApplicationShell>") < layout.indexOf("<MobileAppNavigation />"));
-  assert.doesNotMatch(css, /\border\s*:/);
+  assert.doesNotMatch(css, /(?:^|[;{])\s*order\s*:/m);
 });
 
 test("legacy mobile Home declarations cannot restore the old two-row toolbar", () => {
@@ -81,7 +82,7 @@ test("compact portrait and landscape keep content inside the visual viewport", (
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const css = source("app/globals.css");
 
-  assert.match(chart, /landscapeQuery\.matches[\s\S]*window\.innerHeight - 88[\s\S]*mobileQuery\.matches[\s\S]*window\.innerHeight - 258/);
+  assert.match(chart, /landscapeQuery\.matches[\s\S]*window\.innerHeight - 140[\s\S]*mobileQuery\.matches[\s\S]*window\.innerHeight - 302/);
   assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1179px\) and \(orientation: landscape\)[\s\S]*\.ht-home-terminal-surface \{ height: 100dvh; min-height: 0; overflow: hidden; \}/);
   assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.ht-terminal-pane--intelligence[\s\S]*display: none/);
   assert.match(css, /\.ht-home-intelligence-dialog \.ht-dialog-sheet__content \{ min-height: 0; overflow-y: auto;/);
@@ -96,7 +97,7 @@ test("portrait actions stay compact and accessible while collapsed Intelligence 
   assert.match(surface, /aria-label=\{`Open \$\{opportunity\.ticker\} workspace`\}/);
   assert.match(surface, /ht-home-action-label--mobile">Trade/);
   assert.match(surface, /ht-home-action-label--desktop">Open workspace/);
-  assert.match(chart, /Math\.min\(620, Math\.max\(360, window\.innerHeight - 258\)\)/);
+  assert.match(chart, /Math\.min\(620, Math\.max\(330, window\.innerHeight - 302\)\)/);
   assert.match(css, /\.ht-home-terminal-surface \.ht-home-action-label--desktop \{ display: none; \}/);
   assert.match(css, /\.htb-home \{ padding-bottom: calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\); \}/);
 });

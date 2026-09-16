@@ -81,7 +81,7 @@ test("Home discloses sparse one-minute tape from the existing chart frame", () =
 
 test("mobile navigation keeps the explicit Trading Workspace destination", () => {
   const navigation = source("app/components/MobileAppNavigation.tsx");
-  assert.match(navigation, /tab: "workspace", label: "Trade", href: "\/trade"/);
+  assert.match(navigation, /tab: "workspace", label: "Work", href: "\/trade"/);
 });
 
 test("desktop gives every discovery and personal lane the full Markets width", () => {

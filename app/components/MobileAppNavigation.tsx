@@ -12,10 +12,10 @@ import { getSafeAccountIdentity } from "@/lib/home-account";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
   { tab: "home", label: "Home", href: "/" },
-  { tab: "scanner", label: "Scan", href: "/scanner" },
-  { tab: "workspace", label: "Trade", href: "/trade" },
+  { tab: "scanner", label: "Markets", href: "/?markets=open" },
+  { tab: "workspace", label: "Work", href: "/trade" },
   { tab: "paper", label: "Paper", href: "/paper" },
-  { tab: "more", label: "More", href: "#application-routes" },
+  { tab: "profile", label: "Account", href: "/account" },
 ];
 
 const moreRoutes = APPLICATION_ROUTES.filter((route) =>
@@ -74,7 +74,7 @@ export default function MobileAppNavigation() {
 
   return (
     <Fragment>
-      <nav className="ht-mobile-global-nav" aria-label="Primary app navigation">
+      <nav className="ht-mobile-global-nav" aria-label="Primary app navigation" data-application-route={currentRoute?.id ?? "unknown"}>
         <div className="w-full">
           <div className="grid grid-cols-5 px-1 pt-1">
           {items.map(({ tab, label, href }) => {
@@ -82,7 +82,7 @@ export default function MobileAppNavigation() {
             const className = `relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition active:scale-95 ${active ? "text-orange-400" : "text-zinc-600"}`;
             const content = (
               <>
-                {active && <span className="absolute top-0 h-0.5 w-5 rounded-full bg-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.75)]" />}
+                {active && <span className="absolute top-0 h-0.5 w-5 bg-orange-400" />}
                 <TabIcon tab={tab} />
                 <span className={`text-[8px] font-black uppercase tracking-[0.04em] ${active ? "text-orange-300" : "text-zinc-600"}`}>
                   {label}
@@ -90,15 +90,37 @@ export default function MobileAppNavigation() {
               </>
             );
 
-            if (tab === "more") {
+            if (tab === "scanner") {
               return (
                 <button
                   key={tab}
                   type="button"
-                  onClick={() => setMoreOpen(true)}
-                  aria-label="More application routes"
+                  onClick={() => {
+                    if (pathname === "/") window.dispatchEvent(new CustomEvent("htlabs:open-markets"));
+                    else router.push(href);
+                  }}
+                  aria-label="Open Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"
                   aria-current={active ? "page" : undefined}
                   aria-haspopup="dialog"
+                  className={className}
+                >
+                  {content}
+                </button>
+              );
+            }
+
+            if (tab === "profile") {
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  disabled={!authReady}
+                  onClick={() => {
+                    if (pathname === "/") window.dispatchEvent(new CustomEvent("htlabs:open-account"));
+                    else router.push(session ? "/account" : "/?auth=signin");
+                  }}
+                  aria-label={!authReady ? "Checking account" : session ? `Open account for ${accountIdentity.shortEmail}` : "Sign in to HT Labs"}
+                  aria-current={active ? "page" : undefined}
                   className={className}
                 >
                   {content}
