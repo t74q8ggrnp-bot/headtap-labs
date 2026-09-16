@@ -34,12 +34,13 @@ test("Home terminal wires real Canonical lists and keeps required actions explic
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
   const markets = source("app/components/home/HomeTerminalMarkets.tsx");
 
-  assert.match(home, /opportunities=\{apiFullRankedList\}/);
+  assert.match(home, /spotMomentum=\{apiFullRankedList\}/);
+  assert.match(home, /beforeCrowd=\{apiBeforeCrowdList\}/);
   assert.match(home, /watchlist=\{watchlist\}/);
   assert.match(home, /recents=\{recentlyViewed\}/);
   assert.match(surface, />\{watched \? "Watching" : "Watch"\}</);
   assert.match(surface, /href=\{`\/trade\/\$\{encodeURIComponent\(opportunity\.ticker\)\}`\}/);
-  assert.match(markets, /onClick=\{\(\) => onSelect\(opportunity\)\}/);
+  assert.match(markets, /onSelect\(opportunity\)/);
   assert.match(markets, /href=\{`\/trade\/\$\{encodeURIComponent\(symbol\)\}`\}/);
   assert.doesNotMatch(markets, /fetch\(|XMLHttpRequest/);
   assert.doesNotMatch(markets, /mock|fixture|hardcoded/i);

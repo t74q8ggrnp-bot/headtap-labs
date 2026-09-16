@@ -1228,7 +1228,8 @@ export default function HomeClient({
     return (
       <HomeReferenceSurface
         opportunity={referenceOpportunity}
-        opportunities={apiFullRankedList}
+        spotMomentum={apiFullRankedList}
+        beforeCrowd={apiBeforeCrowdList}
         framework={referenceFramework}
         marketContext={marketCtx}
         watchlist={watchlist}

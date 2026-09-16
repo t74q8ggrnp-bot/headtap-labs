@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MarketChartCanvas, {
   type ChartLayerSlots,
   type MarketChartIndicatorOverlays,
@@ -16,6 +16,10 @@ import {
   type MarketChartTimeframe,
 } from "@/lib/market-chart-timeframes";
 import type { MarketChartVisibleRange } from "@/lib/market-chart-visible-range";
+import {
+  MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT,
+  type MarketChartVisibleCoverage,
+} from "@/lib/market-chart-rendering";
 
 const EMPTY_LAYER_HOST: ChartLayerSlots = Object.freeze({});
 
@@ -41,6 +45,7 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   const [height, setHeight] = useState(500);
   const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>("2h");
   const [latestResetToken, setLatestResetToken] = useState(0);
+  const [visibleCoverage, setVisibleCoverage] = useState<MarketChartVisibleCoverage | null>(null);
   const rangeSelectedByUserRef = useRef(false);
   const chartLayers = useChartLayerPreferences();
   const layers = chartLayers.preferences;
@@ -93,6 +98,21 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     ...(layers.ema20 ? { ema20: calculated.ema20 } : {}),
   }), [calculated, layers.ema20, layers.ema9, layers.vwap]);
   const intervalSeconds = getMarketChartTimeframeMetadata(timeframe).intervalSeconds;
+  const handleVisibleCoverageChange = useCallback(
+    (coverage: MarketChartVisibleCoverage | null) => {
+      setVisibleCoverage((current) => (
+        current?.expectedIntervalCount === coverage?.expectedIntervalCount &&
+          current?.renderedProviderBarCount === coverage?.renderedProviderBarCount &&
+          current?.coveragePercentage === coverage?.coveragePercentage
+          ? current
+          : coverage
+      ));
+    },
+    [],
+  );
+  const showSparseTape = timeframe === "1m" &&
+    visibleCoverage !== null &&
+    visibleCoverage.coveragePercentage < MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT;
 
   const selectVisibleRange = (range: MarketChartVisibleRange) => {
     rangeSelectedByUserRef.current = true;
@@ -100,7 +120,13 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   };
 
   return (
-    <section className="htb-chart" aria-label={`${symbol} verified market chart`}>
+    <section
+      className="htb-chart"
+      aria-label={`${symbol} verified market chart`}
+      data-chart-coverage-percent={visibleCoverage?.coveragePercentage}
+      data-chart-expected-intervals={visibleCoverage?.expectedIntervalCount}
+      data-chart-rendered-bars={visibleCoverage?.renderedProviderBarCount}
+    >
       {marketView.error && !marketView.chart ? (
         <div className="htb-chart__state" style={{ height }} role="status">
           <strong>Verified chart unavailable</strong>
@@ -128,9 +154,16 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
             preserveEngineOnLocalControls
             visibleRange={visibleRange}
             latestResetToken={latestResetToken}
+            onVisibleCoverageChange={handleVisibleCoverageChange}
           />
         </div>
       )}
+
+      {visibleCoverage ? (
+        <output className="sr-only" aria-label="Visible chart coverage">
+          {visibleCoverage.renderedProviderBarCount} of {visibleCoverage.expectedIntervalCount} intervals contain verified provider bars · {visibleCoverage.coveragePercentage}% coverage
+        </output>
+      ) : null}
 
       <div className="htb-chart__toolbar">
         <div className="htb-chart__controls" role="group" aria-label="Chart timeframe">
@@ -196,6 +229,27 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
           Latest
         </button>
       </div>
+
+      {showSparseTape ? (
+        <aside
+          className="htb-chart__sparse-status"
+          aria-label="Sparse chart coverage"
+          data-chart-coverage-percent={visibleCoverage.coveragePercentage}
+          data-chart-expected-intervals={visibleCoverage.expectedIntervalCount}
+          data-chart-rendered-bars={visibleCoverage.renderedProviderBarCount}
+        >
+          <div role="status" aria-live="polite">
+            <strong>
+              Sparse tape · {visibleCoverage.renderedProviderBarCount} of {visibleCoverage.expectedIntervalCount} minutes traded
+            </strong>
+            <span>Blank intervals represent minutes with no verified provider aggregate.</span>
+          </div>
+          <div className="htb-chart__sparse-actions" aria-label="Sparse chart alternatives">
+            <button type="button" onClick={() => setTimeframe("5m")}>View 5m</button>
+            <button type="button" onClick={() => selectVisibleRange("session")}>View session</button>
+          </div>
+        </aside>
+      ) : null}
 
       <div className="htb-chart__caption">
         <span>{marketView.chart?.sourceLabel ?? "Provider-backed market history"}</span>

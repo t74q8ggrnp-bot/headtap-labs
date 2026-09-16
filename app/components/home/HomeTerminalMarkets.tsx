@@ -5,40 +5,55 @@ import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { Opportunity } from "@/lib/opportunity-model";
 import { formatMarketPrice } from "@/lib/market-price-format";
 
-type MarketTab = "opportunities" | "watchlist" | "recent";
+type MarketTab = "momentum" | "before-crowd" | "watchlist" | "recent";
 
 const tabs: Array<{ id: MarketTab; label: string }> = [
-  { id: "opportunities", label: "Opportunities" },
+  { id: "momentum", label: "Spot Momentum" },
+  { id: "before-crowd", label: "Before the Crowd" },
   { id: "watchlist", label: "Watchlist" },
-  { id: "recent", label: "Recent" },
+  { id: "recent", label: "Recently Viewed" },
 ];
+
+const descriptions: Record<MarketTab, string> = {
+  momentum: "Canonical opportunities showing verified momentum now.",
+  "before-crowd": "Canonical early-interest candidates that have not graduated into momentum.",
+  watchlist: "Symbols saved to your HT Labs watchlist.",
+  recent: "Symbols opened recently on this device.",
+};
 
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 
 export default function HomeTerminalMarkets({
-  opportunities,
+  spotMomentum,
+  beforeCrowd,
   watchlist,
   recents,
   currentSymbol,
   onSelect,
+  onNavigate,
 }: {
-  opportunities: Opportunity[];
+  spotMomentum: Opportunity[];
+  beforeCrowd: Opportunity[];
   watchlist: string[];
   recents: string[];
   currentSymbol: string;
   onSelect: (opportunity: Opportunity) => void;
+  onNavigate?: () => void;
 }) {
-  const [tab, setTab] = useState<MarketTab>("opportunities");
+  const [tab, setTab] = useState<MarketTab>("momentum");
   const prefix = useId().replaceAll(":", "");
   const bySymbol = useMemo(
-    () => new Map(opportunities.map((opportunity) => [opportunity.ticker, opportunity])),
-    [opportunities],
+    () => new Map(
+      [...spotMomentum, ...beforeCrowd].map((opportunity) => [opportunity.ticker, opportunity]),
+    ),
+    [beforeCrowd, spotMomentum],
   );
   const rows = useMemo(() => {
-    if (tab === "opportunities") return opportunities.slice(0, 12).map((opportunity) => ({ symbol: opportunity.ticker, opportunity }));
+    if (tab === "momentum") return spotMomentum.slice(0, 15).map((opportunity) => ({ symbol: opportunity.ticker, opportunity }));
+    if (tab === "before-crowd") return beforeCrowd.slice(0, 15).map((opportunity) => ({ symbol: opportunity.ticker, opportunity }));
     const symbols = tab === "watchlist" ? watchlist : recents;
     return symbols.slice(0, 15).map((symbol) => ({ symbol, opportunity: bySymbol.get(symbol) ?? null }));
-  }, [bySymbol, opportunities, recents, tab, watchlist]);
+  }, [beforeCrowd, bySymbol, recents, spotMomentum, tab, watchlist]);
 
   const moveTab = (event: KeyboardEvent<HTMLButtonElement>, current: MarketTab) => {
     const index = tabs.findIndex((candidate) => candidate.id === current);
@@ -68,11 +83,21 @@ export default function HomeTerminalMarkets({
             onClick={() => setTab(candidate.id)}
             onKeyDown={(event) => moveTab(event, candidate.id)}
           >
-            {candidate.label}
+            <span>{candidate.label}</span>
+            <small className="ht-tabular-numbers">
+              {candidate.id === "momentum"
+                ? spotMomentum.length
+                : candidate.id === "before-crowd"
+                  ? beforeCrowd.length
+                  : candidate.id === "watchlist"
+                    ? watchlist.length
+                    : recents.length}
+            </small>
           </button>
         ))}
       </div>
       <div id={`${prefix}-market-panel`} role="tabpanel" aria-labelledby={`${prefix}-market-tab-${tab}`}>
+        <p className="ht-terminal-market-description">{descriptions[tab]}</p>
         {rows.length > 0 ? (
           <table className="ht-terminal-market-table">
             <colgroup>
@@ -92,9 +117,18 @@ export default function HomeTerminalMarkets({
                   <tr key={`${tab}-${symbol}`} data-active={active ? "true" : "false"}>
                     <th scope="row">
                       {opportunity ? (
-                        <button type="button" aria-pressed={active} onClick={() => onSelect(opportunity)}>{symbol}</button>
+                        <button
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => {
+                            onSelect(opportunity);
+                            onNavigate?.();
+                          }}
+                        >
+                          {symbol}
+                        </button>
                       ) : (
-                        <Link href={`/trade/${encodeURIComponent(symbol)}`}>{symbol}</Link>
+                        <Link href={`/trade/${encodeURIComponent(symbol)}`} onClick={onNavigate}>{symbol}</Link>
                       )}
                     </th>
                     <td>{opportunity ? formatMarketPrice(opportunity.price) : "—"}</td>
@@ -108,11 +142,17 @@ export default function HomeTerminalMarkets({
           </table>
         ) : (
           <p className="ht-terminal-market-empty" role="status">
-            {tab === "watchlist" ? "No saved symbols yet." : tab === "recent" ? "No recently viewed symbols on this device." : "No eligible Canonical opportunities."}
+            {tab === "watchlist"
+              ? "No saved symbols yet. Add a symbol with Watch from Home or Workspace."
+              : tab === "recent"
+                ? "No recently viewed symbols on this device."
+                : tab === "before-crowd"
+                  ? "No eligible Before the Crowd candidates right now."
+                  : "No eligible Spot Momentum opportunities right now."}
           </p>
         )}
       </div>
-      <Link href="/scanner" className="ht-terminal-market-footer">Open full scanner <span aria-hidden="true">→</span></Link>
+      <Link href="/scanner" className="ht-terminal-market-footer" onClick={onNavigate}>Open full scanner <span aria-hidden="true">→</span></Link>
     </div>
   );
 }

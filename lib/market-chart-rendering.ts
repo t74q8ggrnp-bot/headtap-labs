@@ -25,6 +25,44 @@ export type MarketChartPriceResolution = {
   minMove: number;
 };
 
+export type MarketChartVisibleCoverage = {
+  expectedIntervalCount: number;
+  renderedProviderBarCount: number;
+  coveragePercentage: number;
+};
+
+export const MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT = 60;
+
+/**
+ * Measure only the intervals currently visible on the chart. Whitespace slots
+ * stay in the denominator and are never converted into estimated candles.
+ */
+export function resolveMarketChartVisibleCoverage(
+  slots: readonly MarketChartTimeSlot[],
+  range: { from: number; to: number } | null | undefined,
+): MarketChartVisibleCoverage | null {
+  if (!range || slots.length === 0) return null;
+
+  const firstIndex = Math.max(0, Math.floor(range.from));
+  const endIndex = Math.min(slots.length, Math.ceil(range.to));
+  if (endIndex <= firstIndex) return null;
+
+  const visibleSlots = slots.slice(firstIndex, endIndex);
+  const expectedIntervalCount = visibleSlots.length;
+  const renderedProviderBarCount = visibleSlots.reduce(
+    (count, slot) => count + (slot.bar ? 1 : 0),
+    0,
+  );
+
+  return {
+    expectedIntervalCount,
+    renderedProviderBarCount,
+    coveragePercentage: Math.round(
+      (renderedProviderBarCount / expectedIntervalCount) * 100,
+    ),
+  };
+}
+
 /**
  * lightweight-charts defaults to a two-decimal price scale. HT frequently
  * displays sub-dollar and sub-penny instruments, so derive one bounded price

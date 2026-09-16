@@ -9,3 +9,4 @@ IOS_SETUP.md
 .agents/
 .codex/
 tsconfig.tsbuildinfo
+.artifacts/

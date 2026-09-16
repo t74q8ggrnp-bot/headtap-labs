@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import HomeTradePlan from "@/app/components/agent/HomeTradePlan";
 import DesktopTerminalFrame from "@/app/components/terminal/DesktopTerminalFrame";
+import { AccessibleDialogSheet } from "@/app/components/ui/ApplicationPrimitives";
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-model";
@@ -23,7 +24,8 @@ export type HomeMarketContext = {
 
 type Props = {
   opportunity: Opportunity | null;
-  opportunities: Opportunity[];
+  spotMomentum: Opportunity[];
+  beforeCrowd: Opportunity[];
   framework: TradeFrameworkDisplay | null;
   marketContext: HomeMarketContext | null;
   watchlist: string[];
@@ -53,7 +55,8 @@ function providerTime(opportunity: Opportunity) {
 
 export default function HomeReferenceSurface({
   opportunity,
-  opportunities,
+  spotMomentum,
+  beforeCrowd,
   framework,
   marketContext,
   watchlist,
@@ -67,6 +70,7 @@ export default function HomeReferenceSurface({
   onToggleWatchlist,
 }: Props) {
   const [compactIntelligenceOpen, setCompactIntelligenceOpen] = useState(false);
+  const [marketBrowserOpen, setMarketBrowserOpen] = useState(false);
   const compactIntelligenceTouched = useRef(false);
 
   useEffect(() => {
@@ -138,6 +142,17 @@ export default function HomeReferenceSurface({
         <div className="ht-terminal-home-actions">
           <button
             type="button"
+            className="ht-home-market-launcher ht-home-market-launcher--landscape"
+            aria-label="Explore Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"
+            aria-haspopup="dialog"
+            aria-expanded={marketBrowserOpen}
+            onClick={() => setMarketBrowserOpen(true)}
+          >
+            <span aria-hidden="true">▦</span>
+            <span>Markets</span>
+          </button>
+          <button
+            type="button"
             className="ht-terminal-action"
             aria-label={watched ? `Remove ${opportunity.ticker} from watchlist` : `Add ${opportunity.ticker} to watchlist`}
             aria-pressed={watched}
@@ -171,6 +186,16 @@ export default function HomeReferenceSurface({
       {selectionLoading ? <div className="htb-selection-state" role="status">Loading {opportunity.ticker} canonical context…</div> : null}
       {selectionError ? <div className="htb-selection-state htb-selection-state--error" role="status">{selectionError}</div> : null}
       <div data-home-priority="3-chart"><HomeReferenceChart symbol={opportunity.ticker} /></div>
+      <button
+        type="button"
+        className="ht-home-market-launcher ht-home-market-launcher--flow"
+        aria-haspopup="dialog"
+        aria-expanded={marketBrowserOpen}
+        onClick={() => setMarketBrowserOpen(true)}
+      >
+        <span><strong>Explore markets</strong><small>Spot Momentum · Before the Crowd · Watchlist · Recent</small></span>
+        <span className="ht-tabular-numbers" aria-hidden="true">{spotMomentum.length + beforeCrowd.length} live →</span>
+      </button>
     </>
   );
 
@@ -249,11 +274,38 @@ export default function HomeReferenceSurface({
   return (
     <main className="htb-home ht-home-terminal-surface" aria-label="HT Labs Home">
       <DesktopTerminalFrame
-        markets={<HomeTerminalMarkets opportunities={opportunities} watchlist={watchlist} recents={recents} currentSymbol={opportunity.ticker} onSelect={onSelect} />}
+        markets={(
+          <HomeTerminalMarkets
+            spotMomentum={spotMomentum}
+            beforeCrowd={beforeCrowd}
+            watchlist={watchlist}
+            recents={recents}
+            currentSymbol={opportunity.ticker}
+            onSelect={onSelect}
+          />
+        )}
         instrumentHeader={instrumentHeader}
         chart={chart}
         intelligence={intelligence}
       />
+      <AccessibleDialogSheet
+        open={marketBrowserOpen}
+        onOpenChange={setMarketBrowserOpen}
+        title="Explore markets"
+        description="Browse real Canonical opportunity lanes and your personal market lists."
+        presentation="sheet"
+        className="ht-home-market-browser"
+      >
+        <HomeTerminalMarkets
+          spotMomentum={spotMomentum}
+          beforeCrowd={beforeCrowd}
+          watchlist={watchlist}
+          recents={recents}
+          currentSymbol={opportunity.ticker}
+          onSelect={onSelect}
+          onNavigate={() => setMarketBrowserOpen(false)}
+        />
+      </AccessibleDialogSheet>
     </main>
   );
 }

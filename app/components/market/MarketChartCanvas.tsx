@@ -39,11 +39,13 @@ import {
 import {
   buildMarketChartRenderFrame,
   getIncrementalMarketChartStart,
+  resolveMarketChartVisibleCoverage,
   resolveMarketChartPriceResolution,
   type MarketChartIndicatorKey,
   type MarketChartIndicatorOverlays,
   type MarketChartIndicatorSlot,
   type MarketChartRenderFrame,
+  type MarketChartVisibleCoverage,
 } from "@/lib/market-chart-rendering";
 import {
   marketChartIsFollowingLatest,
@@ -82,6 +84,7 @@ export type MarketChartCanvasProps = {
   preserveEngineOnLocalControls?: boolean;
   visibleRange?: MarketChartVisibleRange;
   latestResetToken?: number;
+  onVisibleCoverageChange?: (coverage: MarketChartVisibleCoverage | null) => void;
   /** @deprecated Prefer layerHost. Kept as a compatibility alias. */
   layerSlots?: ChartLayerSlots;
   className?: string;
@@ -409,6 +412,7 @@ export function MarketChartCanvas({
   preserveEngineOnLocalControls = false,
   visibleRange,
   latestResetToken = 0,
+  onVisibleCoverageChange,
   className = "",
 }: MarketChartCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -431,6 +435,8 @@ export function MarketChartCanvas({
   const appliedRangeCommandRef = useRef<string | null>(null);
   const activeViewportKeyRef = useRef("");
   const latestChartObjectsRef = useRef(chartObjects);
+  const latestFrameRef = useRef<MarketChartRenderFrame | null>(null);
+  const visibleCoverageCallbackRef = useRef(onVisibleCoverageChange);
   const slotCountRef = useRef(0);
   const palette = MARKET_CHART_ACCENTS[accent];
   const resolvedTimeZone = timeZone || "America/New_York";
@@ -465,6 +471,11 @@ export function MarketChartCanvas({
         showVolume,
         showVwap,
       ].join(":");
+
+  useEffect(() => {
+    latestFrameRef.current = frame;
+    visibleCoverageCallbackRef.current = onVisibleCoverageChange;
+  }, [frame, onVisibleCoverageChange]);
 
   useEffect(() => {
     activeViewportKeyRef.current = resolvedViewportKey;
@@ -638,7 +649,10 @@ export function MarketChartCanvas({
     );
 
     const rememberViewport = (range: { from: number; to: number } | null) => {
-      if (!range) return;
+      if (!range) {
+        visibleCoverageCallbackRef.current?.(null);
+        return;
+      }
       container.dataset.chartVisibleLogicalFrom = String(range.from);
       container.dataset.chartVisibleLogicalTo = String(range.to);
       container.dataset.chartFollowingLatest = String(
@@ -649,6 +663,12 @@ export function MarketChartCanvas({
         pointCount: slotCountRef.current,
         range,
       };
+      visibleCoverageCallbackRef.current?.(
+        resolveMarketChartVisibleCoverage(
+          latestFrameRef.current?.slots ?? [],
+          range,
+        ),
+      );
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(rememberViewport);
 
@@ -798,6 +818,7 @@ export function MarketChartCanvas({
       previousFrameRef.current = frame;
       renderedViewportKeyRef.current = resolvedViewportKey;
       slotCountRef.current = 0;
+      visibleCoverageCallbackRef.current?.(null);
       return;
     }
 
@@ -869,6 +890,9 @@ export function MarketChartCanvas({
         range,
       };
     }
+    visibleCoverageCallbackRef.current?.(
+      resolveMarketChartVisibleCoverage(frame.slots, range),
+    );
     chartObjectWriterRef.current?.refresh();
   }, [compact, frame, latestResetToken, resolvedIntervalSeconds, resolvedViewportKey, visibleRange]);
 
