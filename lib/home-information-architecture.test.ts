@@ -34,39 +34,41 @@ test("market browser names Spot Momentum, Before the Crowd, Watchlist, and Recen
   assert.match(markets, /Open full scanner/);
 });
 
-test("compact Home opens the market browser in an accessible focus-contained sheet", () => {
+test("compact Home opens Markets and Intelligence in accessible focus-contained sheets", () => {
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
   const dialog = source("app/components/ui/ApplicationPrimitives.tsx");
   const css = source("app/globals.css");
 
   assert.match(surface, /aria-haspopup="dialog"/);
   assert.match(surface, /title="Explore markets"/);
+  assert.match(surface, /title="HT Intelligence"/);
   assert.match(surface, /presentation="sheet"/);
   assert.match(surface, /className="ht-home-market-browser"/);
+  assert.match(surface, /className="ht-home-intelligence-dialog"/);
   assert.match(dialog, /resolveDialogFocusLoopTarget/);
   assert.match(dialog, /event\.key !== "Tab"/);
   assert.match(dialog, /onCancel=/);
-  assert.match(css, /\.ht-home-market-launcher--flow/);
-  assert.match(css, /\.ht-home-market-launcher--landscape/);
+  assert.match(css, /\.ht-home-compact-action/);
+  assert.match(css, /\.ht-home-intelligence-dialog/);
   assert.match(css, /env\(safe-area-inset-bottom/);
 });
 
-test("Home keeps one chart while mobile discovery remains after chart controls in DOM order", () => {
+test("Home keeps one chart and removes inline mobile discovery and intelligence blocks", () => {
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
   const chart = source("app/components/home/HomeReferenceChart.tsx");
 
   assert.equal(surface.match(/<HomeReferenceChart/g)?.length, 1);
   assert.equal(chart.match(/<MarketChartCanvas/g)?.length, 1);
-  assert.ok(surface.indexOf("<HomeReferenceChart") < surface.indexOf("ht-home-market-launcher--flow"));
-  assert.ok(surface.indexOf("ht-home-market-launcher--flow") < surface.indexOf("const intelligence"));
+  assert.doesNotMatch(surface, /ht-home-market-launcher--flow/);
+  assert.match(surface, /intelligence=\{compactLayout === "desktop" \? intelligence : null\}/);
 });
 
 test("Home discloses sparse one-minute tape from the existing chart frame", () => {
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const canvas = source("app/components/market/MarketChartCanvas.tsx");
 
-  assert.match(chart, /Sparse tape · \{visibleCoverage\.renderedProviderBarCount\} of \{visibleCoverage\.expectedIntervalCount\} minutes traded/);
-  assert.match(chart, /Blank intervals represent minutes with no verified provider aggregate\./);
+  assert.match(chart, /Sparse tape · \{visibleCoverage\.renderedProviderBarCount\}\/\{visibleCoverage\.expectedIntervalCount\} traded/);
+  assert.match(chart, /Blank intervals represent missing verified provider aggregates\./);
   assert.match(chart, /aria-label="Visible chart coverage"/);
   assert.match(chart, /coveragePercentage\}% coverage/);
   assert.match(chart, />View 5m</);

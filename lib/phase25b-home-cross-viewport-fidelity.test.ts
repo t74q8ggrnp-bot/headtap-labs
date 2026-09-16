@@ -30,13 +30,13 @@ test("Home chart exposes one quiet control strip with settings inside Layers", (
   assert.doesNotMatch(chart, />\s*Draw\s*</);
 });
 
-test("Home Intelligence is progressive and portrait starts collapsed", () => {
+test("Home Intelligence is progressive and compact layouts open it in a sheet", () => {
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
 
-  assert.match(surface, /aria-controls="htb-intelligence-content"/);
-  assert.match(surface, /useState\(false\)/);
-  assert.match(surface, /const portrait = window\.innerWidth < 768/);
-  assert.match(surface, /setCompactIntelligenceOpen\(!portrait\)/);
+  assert.match(surface, /const \[compactIntelligenceOpen, setCompactIntelligenceOpen\] = useState\(false\)/);
+  assert.match(surface, /title="HT Intelligence"/);
+  assert.match(surface, /open=\{compactLayout === "compact" && compactIntelligenceOpen\}/);
+  assert.match(surface, /intelligence=\{compactLayout === "desktop" \? intelligence : null\}/);
   assert.match(surface, /<summary>Levels and risk<\/summary>/);
   assert.match(surface, /<summary>Pro X evidence<\/summary>/);
   assert.match(surface, /<summary>Agent X<\/summary>/);
@@ -63,7 +63,7 @@ test("Home chart and terminal reading order rely on DOM order, not CSS order", (
 
   assert.ok(chart.indexOf("<MarketChartCanvas") < chart.indexOf('className="htb-chart__toolbar"'));
   assert.ok(surface.indexOf("instrumentHeader={instrumentHeader}") < surface.indexOf("chart={chart}"));
-  assert.ok(surface.indexOf("chart={chart}") < surface.indexOf("intelligence={intelligence}"));
+  assert.ok(surface.indexOf("chart={chart}") < surface.indexOf('intelligence={compactLayout === "desktop"'));
   assert.ok(layout.indexOf("<ResponsiveApplicationShell>") < layout.indexOf("<MobileAppNavigation />"));
   assert.doesNotMatch(css, /\border\s*:/);
 });
@@ -81,9 +81,10 @@ test("compact portrait and landscape keep content inside the visual viewport", (
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const css = source("app/globals.css");
 
-  assert.match(chart, /window\.innerHeight < 720[\s\S]*window\.innerHeight \* 0\.46/);
+  assert.match(chart, /landscapeQuery\.matches[\s\S]*window\.innerHeight - 88[\s\S]*mobileQuery\.matches[\s\S]*window\.innerHeight - 258/);
   assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1179px\) and \(orientation: landscape\)[\s\S]*\.ht-home-terminal-surface \{ height: 100dvh; min-height: 0; overflow: hidden; \}/);
-  assert.match(css, /\.ht-home-terminal-surface \.ht-terminal-pane--intelligence \{[\s\S]*height: 100dvh;[\s\S]*overflow-y: auto;/);
+  assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.ht-terminal-pane--intelligence[\s\S]*display: none/);
+  assert.match(css, /\.ht-home-intelligence-dialog \.ht-dialog-sheet__content \{ min-height: 0; overflow-y: auto;/);
 });
 
 test("portrait actions stay compact and accessible while collapsed Intelligence releases its gap", () => {
@@ -95,7 +96,7 @@ test("portrait actions stay compact and accessible while collapsed Intelligence 
   assert.match(surface, /aria-label=\{`Open \$\{opportunity\.ticker\} workspace`\}/);
   assert.match(surface, /ht-home-action-label--mobile">Trade/);
   assert.match(surface, /ht-home-action-label--desktop">Open workspace/);
-  assert.match(chart, /Math\.min\(560, Math\.max\(300, window\.innerHeight - 386\)\)/);
+  assert.match(chart, /Math\.min\(620, Math\.max\(360, window\.innerHeight - 258\)\)/);
   assert.match(css, /\.ht-home-terminal-surface \.ht-home-action-label--desktop \{ display: none; \}/);
   assert.match(css, /\.htb-home \{ padding-bottom: calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\); \}/);
 });

@@ -46,7 +46,7 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
   const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>("2h");
   const [latestResetToken, setLatestResetToken] = useState(0);
   const [visibleCoverage, setVisibleCoverage] = useState<MarketChartVisibleCoverage | null>(null);
-  const rangeSelectedByUserRef = useRef(false);
+  const rangeInitializedRef = useRef(false);
   const chartLayers = useChartLayerPreferences();
   const layers = chartLayers.preferences;
 
@@ -57,17 +57,16 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     const apply = () => {
       setHeight(
         landscapeQuery.matches
-          ? Math.max(220, window.innerHeight - 150)
+          ? Math.max(260, window.innerHeight - 88)
           : mobileQuery.matches
-          ? window.innerHeight < 720
-            ? Math.max(290, Math.round(window.innerHeight * 0.46))
-            : Math.min(560, Math.max(300, window.innerHeight - 386))
+          ? Math.min(620, Math.max(360, window.innerHeight - 258))
           : terminalQuery.matches
             ? Math.max(620, window.innerHeight - 125)
             : 500,
       );
-      if (!rangeSelectedByUserRef.current) {
+      if (!rangeInitializedRef.current) {
         setVisibleRange(mobileQuery.matches ? "1h" : "2h");
+        rangeInitializedRef.current = true;
       }
     };
     apply();
@@ -115,7 +114,6 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     visibleCoverage.coveragePercentage < MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT;
 
   const selectVisibleRange = (range: MarketChartVisibleRange) => {
-    rangeSelectedByUserRef.current = true;
     setVisibleRange(range);
   };
 
@@ -231,24 +229,24 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
       </div>
 
       {showSparseTape ? (
-        <aside
+        <details
           className="htb-chart__sparse-status"
           aria-label="Sparse chart coverage"
           data-chart-coverage-percent={visibleCoverage.coveragePercentage}
           data-chart-expected-intervals={visibleCoverage.expectedIntervalCount}
           data-chart-rendered-bars={visibleCoverage.renderedProviderBarCount}
         >
-          <div role="status" aria-live="polite">
-            <strong>
-              Sparse tape · {visibleCoverage.renderedProviderBarCount} of {visibleCoverage.expectedIntervalCount} minutes traded
-            </strong>
-            <span>Blank intervals represent minutes with no verified provider aggregate.</span>
+          <summary role="status" aria-live="polite">
+            Sparse tape · {visibleCoverage.renderedProviderBarCount}/{visibleCoverage.expectedIntervalCount} traded <span aria-hidden="true">ⓘ</span>
+          </summary>
+          <div className="htb-chart__sparse-detail">
+            <span>Blank intervals represent missing verified provider aggregates.</span>
+            <div className="htb-chart__sparse-actions" aria-label="Sparse chart alternatives">
+              <button type="button" onClick={() => setTimeframe("5m")}>View 5m</button>
+              <button type="button" onClick={() => selectVisibleRange("session")}>View session</button>
+            </div>
           </div>
-          <div className="htb-chart__sparse-actions" aria-label="Sparse chart alternatives">
-            <button type="button" onClick={() => setTimeframe("5m")}>View 5m</button>
-            <button type="button" onClick={() => selectVisibleRange("session")}>View session</button>
-          </div>
-        </aside>
+        </details>
       ) : null}
 
       <div className="htb-chart__caption">

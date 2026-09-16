@@ -52,7 +52,7 @@ test("Phase 2.5B styles retain flat surfaces and exact reference proportions", (
   assert.match(layout, /marketsWidth: 220/);
   assert.match(layout, /intelligenceWidth: 296/);
   const chart = source("app/components/home/HomeReferenceChart.tsx");
-  assert.match(chart, /landscapeQuery\.matches[\s\S]*window\.innerHeight - 150[\s\S]*mobileQuery\.matches[\s\S]*window\.innerHeight < 720[\s\S]*terminalQuery\.matches[\s\S]*window\.innerHeight - 125[\s\S]*: 500/);
+  assert.match(chart, /landscapeQuery\.matches[\s\S]*window\.innerHeight - 88[\s\S]*mobileQuery\.matches[\s\S]*window\.innerHeight - 258[\s\S]*terminalQuery\.matches[\s\S]*window\.innerHeight - 125[\s\S]*: 500/);
   assert.match(css, /\.ht-home-terminal-surface \.htb-intelligence \{ border: 0; background: transparent; \}/);
   assert.match(css, /\.ht-home-terminal-surface \.htb-symbol-header \{[\s\S]*border: 0;/);
 });

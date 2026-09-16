@@ -108,22 +108,23 @@ export default function HomeReferenceSurface({
   onSelect,
   onToggleWatchlist,
 }: Props) {
+  const [compactLayout, setCompactLayout] = useState<"pending" | "compact" | "desktop">("pending");
   const [compactIntelligenceOpen, setCompactIntelligenceOpen] = useState(false);
   const [marketBrowserOpen, setMarketBrowserOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
-  const compactIntelligenceTouched = useRef(false);
   const accountDestinationHandled = useRef<string | null>(null);
 
   useEffect(() => {
+    const query = window.matchMedia("(max-width: 1179px)");
     const apply = () => {
-      if (compactIntelligenceTouched.current) return;
-      const portrait = window.innerWidth < 768;
-      setCompactIntelligenceOpen(!portrait);
+      const next = query.matches ? "compact" : "desktop";
+      setCompactLayout(next);
+      if (next === "desktop") setCompactIntelligenceOpen(false);
     };
     apply();
-    window.addEventListener("resize", apply);
-    return () => window.removeEventListener("resize", apply);
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
   }, []);
 
   useEffect(() => {
@@ -248,7 +249,7 @@ export default function HomeReferenceSurface({
         <div className="ht-terminal-home-actions">
           <button
             type="button"
-            className="ht-home-market-launcher ht-home-market-launcher--landscape"
+            className="ht-home-compact-action ht-home-market-launcher"
             aria-label="Explore Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"
             aria-haspopup="dialog"
             aria-expanded={marketBrowserOpen}
@@ -256,6 +257,17 @@ export default function HomeReferenceSurface({
           >
             <span aria-hidden="true">▦</span>
             <span>Markets</span>
+          </button>
+          <button
+            type="button"
+            className="ht-home-compact-action ht-home-intelligence-launcher"
+            aria-label="Open HT Intelligence"
+            aria-haspopup="dialog"
+            aria-expanded={compactIntelligenceOpen}
+            onClick={() => setCompactIntelligenceOpen(true)}
+          >
+            <span aria-hidden="true">HT</span>
+            <span>Intel</span>
           </button>
           <button
             type="button"
@@ -292,40 +304,15 @@ export default function HomeReferenceSurface({
       {selectionLoading ? <div className="htb-selection-state" role="status">Loading {opportunity.ticker} canonical context…</div> : null}
       {selectionError ? <div className="htb-selection-state htb-selection-state--error" role="status">{selectionError}</div> : null}
       <div data-home-priority="3-chart"><HomeReferenceChart symbol={opportunity.ticker} /></div>
-      <button
-        type="button"
-        className="ht-home-market-launcher ht-home-market-launcher--flow"
-        aria-haspopup="dialog"
-        aria-expanded={marketBrowserOpen}
-        onClick={() => setMarketBrowserOpen(true)}
-      >
-        <span><strong>Explore markets</strong><small>Spot Momentum · Before the Crowd · Watchlist · Recent</small></span>
-        <span className="ht-tabular-numbers" aria-hidden="true">{spotMomentum.length + beforeCrowd.length} live →</span>
-      </button>
     </>
   );
 
-  const intelligence = (
+  const intelligence = compactLayout === "pending" ? null : (
     <section
       className="htb-intelligence-shell"
-      data-open={compactIntelligenceOpen ? "true" : "false"}
       data-home-priority="4-intelligence"
     >
-      <button
-        type="button"
-        className="htb-intelligence-toggle"
-        aria-expanded={compactIntelligenceOpen}
-        aria-controls="htb-intelligence-content"
-        onClick={() => {
-          compactIntelligenceTouched.current = true;
-          setCompactIntelligenceOpen((open) => !open);
-        }}
-      >
-        <span>HT Intelligence</span>
-        <strong className="ht-tabular-numbers">{Math.round(opportunity.opportunityScore)}</strong>
-        <span aria-hidden="true">{compactIntelligenceOpen ? "−" : "+"}</span>
-      </button>
-      <div id="htb-intelligence-content" className="htb-intelligence">
+      <div className="htb-intelligence">
       <h2 className="sr-only">HT Intelligence</h2>
       <section className="htb-score-block">
         <strong className="htb-score ht-tabular-numbers">{Math.round(opportunity.opportunityScore)}</strong>
@@ -415,7 +402,7 @@ export default function HomeReferenceSurface({
         )}
         instrumentHeader={instrumentHeader}
         chart={chart}
-        intelligence={intelligence}
+        intelligence={compactLayout === "desktop" ? intelligence : null}
       />
       <AccessibleDialogSheet
         open={marketBrowserOpen}
@@ -434,6 +421,16 @@ export default function HomeReferenceSurface({
           onSelect={onSelect}
           onNavigate={() => setMarketBrowserOpen(false)}
         />
+      </AccessibleDialogSheet>
+      <AccessibleDialogSheet
+        open={compactLayout === "compact" && compactIntelligenceOpen}
+        onOpenChange={setCompactIntelligenceOpen}
+        title="HT Intelligence"
+        description={`${opportunity.ticker} Canonical decision context, levels, Pro X evidence, and Agent X.`}
+        presentation="sheet"
+        className="ht-home-intelligence-dialog"
+      >
+        {compactLayout === "compact" && compactIntelligenceOpen ? intelligence : null}
       </AccessibleDialogSheet>
       {accountAndAlerts}
     </main>
