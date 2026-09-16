@@ -61,7 +61,27 @@ test("scores only independent evidence and qualifies honest positive asymmetry",
   assert.equal(result.entryQualified, true);
   assert.ok(result.edgeScore > 60);
   assert.equal(result.components.comparableOutcomes, null);
+  assert.equal(result.researchChallenger.version, "prox-edge-theory-challenger-v1");
+  assert.equal(result.researchChallenger.authority.canonicalRanking, false);
+  assert.equal(result.researchChallenger.authority.agentDecision, false);
   assert.match(result.reasons.join(" "), /insufficient/);
+});
+
+test("records the challenger without changing the frozen v2 score math", () => {
+  const result = scoreProxEdge(input);
+  const expected = Math.min(
+    100,
+    Math.max(
+      0,
+      result.continuationProbability * 0.6 +
+        result.rewardRiskAsymmetry * 0.3 +
+        result.evidenceConfidence * 0.1 -
+        result.riskPenalty,
+    ),
+  );
+  assert.ok(Math.abs(result.edgeScore - expected) <= 0.2);
+  assert.notEqual(result.researchChallenger.score, result.edgeScore);
+  assert.doesNotThrow(() => assertNoForbiddenProxInputs(result));
 });
 
 test("blocks a sub-1.0 independent scenario without hiding the mover", () => {

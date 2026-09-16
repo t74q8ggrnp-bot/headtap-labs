@@ -318,6 +318,35 @@ that never graduated. Corporate-action distortions are quarantined. A model or
 weight version is frozen while it is being evaluated; ProX does not rewrite
 its own production rules invisibly during a live session.
 
+### Prospective Edge theory challenger
+
+`prox-edge-theory-challenger-v1` is an additive, prospective research receipt
+stored inside the existing `edge_assessment` JSON. It does not replace or
+modify `prox-edge-score-v2`, rank the shadow board, appear publicly, influence
+HT Agent, authorize Paper, or receive execution authority. The live shadow
+board continues to use the frozen 60/30/10 contract above.
+
+The challenger exists to test four falsifiable corrections suggested by the
+September 16 historical audit without fitting a production rule to the same
+sample:
+
+- evidence confidence gates research qualification but contributes no bullish
+  points;
+- empirical comparable-outcome rates are shrunk toward a neutral prior based
+  on sample size, especially while evidence is merely `emerging`;
+- unavailable optional evidence remains neutral under a fixed denominator
+  rather than silently increasing the influence of all remaining components;
+  and
+- extension/exhaustion risk rises continuously when a saturated impulse is
+  already far above VWAP instead of relying only on one fixed deduction.
+
+Every receipt freezes its version, inputs, score, qualification opinion, and
+all-false authority map at the original decision time. Later outcome research
+may compare the challenger with the frozen v2 decision on unseen sessions.
+It cannot be promoted unless the normal evidence floor, date-based holdout,
+owner review, version bump, deterministic tests, and rollback requirements are
+all satisfied.
+
 Five-minute decision frames remain append-only audit evidence, but they are
 not independent performance samples. Shadow scorecards use the first decision
 for each ticker, trading date, market session, and disposition as the episode

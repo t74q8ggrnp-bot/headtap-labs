@@ -1,4 +1,6 @@
 import type { ProxMarketStructureAssessment } from "@/lib/prox/market-structure";
+// @ts-expect-error Node's strip-types test runner resolves this source module directly.
+import { buildProxEdgeTheoryChallenger, type ProxEdgeTheoryChallengerResult } from "./edge-theory-challenger.ts";
 
 export const PROX_EDGE_SCORE_VERSION = "prox-edge-score-v2";
 
@@ -123,6 +125,7 @@ export type ProxEdgeScoreResult = {
     comparableOutcomes: number | null;
     newsAttention: number | null;
   };
+  researchChallenger: ProxEdgeTheoryChallengerResult;
   hardFailures: string[];
   reasons: string[];
 };
@@ -435,6 +438,30 @@ export function scoreProxEdge(input: ProxEdgeScoreInput): ProxEdgeScoreResult {
           ? "live_only"
           : "insufficient";
 
+  const components: ProxEdgeScoreResult["components"] = {
+    liveImpulse: round(liveImpulse),
+    participation: round(participation),
+    vwapPosition: round(vwapPosition),
+    peakRetention: round(peakRetention),
+    marketStructure: round(marketStructure),
+    twoClockAlignment: round(twoClockAlignment),
+    comparableOutcomes:
+      comparableOutcomes === null ? null : round(comparableOutcomes),
+    newsAttention: newsAttention === null ? null : round(newsAttention),
+  };
+  const researchChallenger = buildProxEdgeTheoryChallenger({
+    components,
+    rewardRiskAsymmetry,
+    evidenceConfidence,
+    currentRiskPenalty: riskPenalty,
+    currentExtended: input.structure.extended,
+    extensionAtrMultiple: input.structure.extensionAtrMultiple,
+    calibration: input.calibration,
+    newsSourceCount: input.newsAttention?.sourceCount ?? 0,
+    readiness,
+    hardFailures,
+  });
+
   return {
     version: PROX_EDGE_SCORE_VERSION,
     edgeScore: round(edgeScore),
@@ -444,17 +471,8 @@ export function scoreProxEdge(input: ProxEdgeScoreInput): ProxEdgeScoreResult {
     riskPenalty: round(riskPenalty),
     entryQualified: hardFailures.length === 0,
     readiness,
-    components: {
-      liveImpulse: round(liveImpulse),
-      participation: round(participation),
-      vwapPosition: round(vwapPosition),
-      peakRetention: round(peakRetention),
-      marketStructure: round(marketStructure),
-      twoClockAlignment: round(twoClockAlignment),
-      comparableOutcomes:
-        comparableOutcomes === null ? null : round(comparableOutcomes),
-      newsAttention: newsAttention === null ? null : round(newsAttention),
-    },
+    components,
+    researchChallenger,
     hardFailures,
     reasons: reasons.slice(0, 12),
   };

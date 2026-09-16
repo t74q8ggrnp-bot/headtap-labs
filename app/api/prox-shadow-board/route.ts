@@ -683,6 +683,10 @@ export async function GET(request: Request) {
           dailyBarCount: history?.daily.length ?? 0,
           intradayBarCount: history?.intraday.length ?? 0,
           calibrationVersion: PROX_CALIBRATION_VERSION,
+          edgeTheoryChallengerVersion:
+            member.edge.researchChallenger.version,
+          edgeTheoryChallengerAuthority:
+            member.edge.researchChallenger.authority,
           canonicalFieldsConsumed: [],
         },
       };
