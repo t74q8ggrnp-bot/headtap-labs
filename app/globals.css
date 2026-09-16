@@ -3147,14 +3147,14 @@ body:has(.ht-dialog-sheet[open]) {
 .ht-home-intelligence-dialog .htb-intelligence { background: transparent; }
 
 @media (max-width: 1179px) {
-  .ht-home-terminal-surface .ht-terminal-pane--markets,
-  .ht-home-terminal-surface .ht-terminal-pane--intelligence,
-  .ht-home-terminal-surface .ht-terminal-pane-handle,
-  .ht-home-terminal-surface .ht-terminal-resizer,
-  .ht-home-terminal-surface .ht-terminal-pane__header {
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-terminal-pane--markets,
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-terminal-pane--intelligence,
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-terminal-pane-handle,
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-terminal-resizer,
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-terminal-pane__header {
     display: none;
   }
-  .ht-home-terminal-surface .ht-home-compact-action {
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-home-compact-action {
     display: inline-flex;
     min-height: 36px;
     align-items: center;
@@ -3243,7 +3243,7 @@ body:has(.ht-dialog-sheet[open]) {
   .ht-home-terminal-surface :is(.ht-home-compact-action, .ht-terminal-action, .htb-workspace-link) > span:first-child {
     font-size: 0.72rem;
   }
-  .ht-home-terminal-surface .htb-decision-line { display: none; }
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .htb-decision-line { display: none; }
   .ht-home-terminal-surface .ht-terminal-chart,
   .ht-home-terminal-surface .htb-chart { min-height: 0; }
   .ht-home-terminal-surface .htb-chart { position: relative; }
@@ -3291,13 +3291,13 @@ body:has(.ht-dialog-sheet[open]) {
 }
 
 @media (min-width: 768px) and (max-width: 1179px) and (orientation: landscape) {
-  .ht-home-terminal-surface .ht-terminal {
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-terminal {
     grid-template-columns: 52px minmax(0, 1fr);
   }
   .ht-home-terminal-surface .ht-terminal-nav { width: 52px; }
   .ht-home-terminal-surface .ht-terminal-nav__brand { width: 52px; height: 44px; }
   .ht-home-terminal-surface .ht-terminal-workspace {
-    grid-column: 2;
+    grid-column: 2 / -1;
     grid-template-rows: 48px minmax(0, 1fr);
   }
   .ht-home-terminal-surface .htb-symbol-header {
@@ -3340,5 +3340,11 @@ body:has(.ht-dialog-sheet[open]) {
     max-height: 100dvh;
     margin: 0 0 0 auto;
     border-radius: 10px 0 0 10px;
+  }
+}
+
+@media (min-width: 1180px) {
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-home-compact-action {
+    display: none;
   }
 }

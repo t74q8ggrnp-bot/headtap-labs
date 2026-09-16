@@ -249,7 +249,7 @@ export default function HomeReferenceSurface({
         <div className="ht-terminal-home-actions">
           <button
             type="button"
-            className="ht-home-compact-action ht-home-market-launcher"
+            className="ht-home-compact-action ht-home-markets-launcher"
             aria-label="Explore Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"
             aria-haspopup="dialog"
             aria-expanded={marketBrowserOpen}
