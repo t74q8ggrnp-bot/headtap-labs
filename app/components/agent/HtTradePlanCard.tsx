@@ -62,7 +62,7 @@ export default function HtTradePlanCard({
             <Image src="/logo.png" alt="" width={2909} height={1959} className="h-7 w-auto object-contain" />
           </span>
           <div className="min-w-0">
-            <p className="text-[8px] font-black uppercase tracking-[0.24em] text-cyan-300">HT Agent · Paper Research</p>
+            <p className="text-[8px] font-black uppercase tracking-[0.24em] text-cyan-300">HT Agent X Setup Forming</p>
             <strong className={`${compact ? "text-base" : "text-xl"} mt-1 block font-black tracking-tight text-white`}>{publicStatus(plan)}</strong>
           </div>
         </div>

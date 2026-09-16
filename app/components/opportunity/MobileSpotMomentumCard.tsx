@@ -50,7 +50,7 @@ export default function MobileSpotMomentumCard({
       <div className="flex items-center justify-between px-5 pb-3 pt-4">
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
-          <p className="text-[9px] font-black uppercase tracking-[0.28em] text-violet-400">Top Opportunity</p>
+          <p className="text-[9px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
         </div>
         {dualEngine && <span className="text-[8px] font-black text-amber-400">⚡ Dual Signal</span>}
       </div>
@@ -85,10 +85,21 @@ export default function MobileSpotMomentumCard({
       </div>
 
       <div className="border-b border-white/8 px-4 py-3" data-home-priority="2-chart">
-        <HeroPriceChart asset="stock" symbol={opportunity.ticker} accent="violet" compact />
+        <HeroPriceChart
+          asset="stock"
+          symbol={opportunity.ticker}
+          accent="violet"
+          compact
+          presentation="feature"
+          title="Top Opportunity"
+        />
       </div>
 
-      <div className="border-b border-white/8 px-5 py-4" data-home-priority="3-score-signal">
+      <div className="border-b border-white/8 px-5 py-4" data-home-priority="3-agent-setup">
+        <HomeTradePlan symbol={opportunity.ticker} compact />
+      </div>
+
+      <div className="border-b border-white/8 px-5 py-4" data-home-priority="4-score-signal">
         <div className="mb-3 flex items-end justify-between">
           <div>
             <p className="text-xs font-bold text-zinc-500">HT score</p>
@@ -99,10 +110,9 @@ export default function MobileSpotMomentumCard({
         <OpportunityMetrics opportunity={opportunity} />
       </div>
 
-      <div data-home-priority="4-levels-risk">
+      <div data-home-priority="5-levels-risk">
         <div className="border-b border-white/8 px-5 py-4">
           <h3 className="mb-3 text-xs font-bold text-zinc-400">Levels and risk</h3>
-          <HomeTradePlan symbol={opportunity.ticker} compact />
           {opportunity.riskTags.length > 0 && (
             <ul className="mt-3 space-y-1 text-xs font-semibold text-red-300" aria-label="Risk flags">
               {opportunity.riskTags.map((tag) => <li key={tag}>Risk flag: {tag}</li>)}
@@ -117,7 +127,7 @@ export default function MobileSpotMomentumCard({
         )}
       </div>
 
-      <div data-home-priority="5-extended-interpretation">
+      <div data-home-priority="6-extended-interpretation">
         <div className="border-b border-white/8 px-5 py-4">
           <h3 className="mb-1 text-xs font-bold text-zinc-400">Interpretation</h3>
           <p className="text-sm font-semibold leading-6 text-zinc-300">{opportunity.whyItMatters}</p>

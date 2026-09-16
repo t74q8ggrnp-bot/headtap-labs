@@ -70,7 +70,7 @@ export default function HomeTradePlan({
     <section className="rounded-2xl border border-violet-400/15 bg-violet-500/[0.035] px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[8px] font-black uppercase tracking-[0.22em] text-cyan-300">HT Agent · Paper Research</p>
+          <p className="text-[8px] font-black uppercase tracking-[0.22em] text-cyan-300">HT Agent X Setup Forming</p>
           <p className="mt-1 text-sm font-black text-violet-300">ANALYSIS FORMING</p>
         </div>
         <Link href="/agent" className="rounded-lg border border-violet-400/20 px-3 py-2 text-[9px] font-black text-violet-300">Open HT Agent</Link>

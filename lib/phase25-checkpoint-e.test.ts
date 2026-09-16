@@ -68,13 +68,23 @@ test("mobile Home presents canonical intelligence in the approved priority order
     "app/components/opportunity/MobileCardDetail.tsx",
   ]) {
     const component = source(path);
-    const positions = [
-      "1-ticker-price",
-      "2-chart",
-      "3-score-signal",
-      "4-levels-risk",
-      "5-extended-interpretation",
-    ].map((marker) => component.indexOf(`data-home-priority="${marker}"`));
+    const markers = path.endsWith("MobileSpotMomentumCard.tsx")
+      ? [
+          "1-ticker-price",
+          "2-chart",
+          "3-agent-setup",
+          "4-score-signal",
+          "5-levels-risk",
+          "6-extended-interpretation",
+        ]
+      : [
+          "1-ticker-price",
+          "2-chart",
+          "3-score-signal",
+          "4-levels-risk",
+          "5-extended-interpretation",
+        ];
+    const positions = markers.map((marker) => component.indexOf(`data-home-priority="${marker}"`));
     assert.equal(positions.every((position) => position >= 0), true, `${path} includes every priority marker`);
     assert.deepEqual([...positions].sort((a, b) => a - b), positions, `${path} keeps the approved DOM order`);
   }

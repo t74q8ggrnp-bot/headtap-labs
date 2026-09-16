@@ -87,6 +87,28 @@ test("mobile navigation exposes Home intelligence and Market without a duplicate
   assert.doesNotMatch(navigation, /tab: "workspace"/);
 });
 
+test("mobile Home presents Spot Momentum, Top Opportunity chart, then Agent X setup", () => {
+  const card = source("app/components/opportunity/MobileSpotMomentumCard.tsx");
+  const chart = source("app/components/market/HeroPriceChart.tsx");
+  const forming = source("app/components/agent/HomeTradePlan.tsx");
+  const populated = source("app/components/agent/HtTradePlanCard.tsx");
+  const order = [
+    "Spot Momentum",
+    'title="Top Opportunity"',
+    'data-home-priority="3-agent-setup"',
+    'data-home-priority="4-score-signal"',
+  ].map((marker) => card.indexOf(marker));
+
+  assert.ok(order.every((position) => position >= 0));
+  assert.deepEqual([...order].sort((left, right) => left - right), order);
+  assert.match(card, /presentation="feature"/);
+  assert.match(chart, /feature \? 220/);
+  assert.match(chart, /Drag to inspect · verified provider intervals/);
+  assert.match(forming, /HT Agent X Setup Forming/);
+  assert.match(populated, /HT Agent X Setup Forming/);
+  assert.doesNotMatch(`${forming}\n${populated}`, /Paper Research/);
+});
+
 test("desktop gives every discovery and personal lane the full Markets width", () => {
   const css = source("app/globals.css");
   assert.match(css, /data-application-route="home"\] \.ht-terminal-market-tabs \{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);

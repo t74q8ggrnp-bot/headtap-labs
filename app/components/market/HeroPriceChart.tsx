@@ -18,6 +18,8 @@ type HeroPriceChartProps = {
   accent?: "violet" | "orange" | "cyan";
   compact?: boolean;
   height?: number;
+  title?: string;
+  presentation?: "standard" | "feature";
 };
 
 export default function HeroPriceChart({
@@ -27,6 +29,8 @@ export default function HeroPriceChart({
   accent = "violet",
   compact = false,
   height,
+  title = "Verified price history",
+  presentation = "standard",
 }: HeroPriceChartProps) {
   const marketView = useLiveMarketView(symbol, { asset, productId, chart: true });
   const [chartMode, setChartMode] = useState<MarketChartMode>("candles");
@@ -41,7 +45,8 @@ export default function HeroPriceChart({
   }, [asset, productId, symbol]);
   const data = marketView.chart;
   const failed = marketView.error && !data;
-  const resolvedHeight = height ?? (compact ? 150 : 185);
+  const feature = presentation === "feature";
+  const resolvedHeight = height ?? (feature ? 220 : compact ? 150 : 185);
   const viewportKey = `${url}:${compact ? "compact" : "full"}`;
   const latestTime = data
     ? new Intl.DateTimeFormat("en-US", {
@@ -58,20 +63,24 @@ export default function HeroPriceChart({
 
   return (
     <section
-      className={`overflow-hidden rounded-2xl border ${palette.border} bg-black/35`}
-      aria-label={`${symbol} verified price chart`}
+      className={feature
+        ? "overflow-hidden bg-black"
+        : `overflow-hidden rounded-2xl border ${palette.border} bg-black/35`}
+      aria-label={`${symbol} ${title.toLowerCase()} chart`}
       data-market-symbol={symbol}
       data-market-as-of={marketView.quote?.asOf ?? ""}
       data-market-price={marketView.quote?.price ?? ""}
     >
-      <div className={`border-b border-white/7 px-3 py-2.5 ${compact ? "space-y-2.5 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0" : "flex flex-wrap items-center justify-between gap-2"}`}>
+      <div className={`${feature ? "px-1 pb-2 pt-1" : "border-b border-white/7 px-3 py-2.5"} ${compact ? "space-y-2.5 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0" : "flex flex-wrap items-center justify-between gap-2"}`}>
         <div className={compact ? "flex items-start justify-between gap-3" : ""}>
           <div>
             <p className={`text-[8px] font-black uppercase tracking-[0.2em] ${palette.text}`}>
-              Verified price history
+              {title}
             </p>
             <p className="mt-0.5 text-[8px] font-semibold text-zinc-700">
-              {data
+              {feature
+                ? `${symbol} · verified provider candles`
+                : data
                 ? `${data.windowLabel} · ${data.sourceLabel} · ${chartMode === "candles" ? "OHLC" : "close graph"}`
                 : "Provider-backed market history"}
             </p>
@@ -79,13 +88,13 @@ export default function HeroPriceChart({
               {marketView.label}{marketView.quote ? ` · ${new Date(marketView.quote.asOf).toLocaleTimeString("en-US", { timeZone, timeZoneName: "short" })}` : ""}
             </p>
           </div>
-          {compact && latestTime && (
+          {compact && latestTime && !feature && (
             <p className="shrink-0 font-mono text-[8px] font-bold text-zinc-600">
               Candle interval {latestTime}
             </p>
           )}
         </div>
-        <div className={`flex items-center gap-2 ${compact ? "w-full sm:w-auto" : ""}`}>
+        {!feature && <div className={`flex items-center gap-2 ${compact ? "w-full sm:w-auto" : ""}`}>
           <div
             className={`grid grid-cols-2 rounded-lg border border-white/8 bg-white/[0.025] p-0.5 ${compact ? "w-full sm:w-auto" : ""}`}
             role="group"
@@ -112,7 +121,7 @@ export default function HeroPriceChart({
               Candle interval {latestTime}
             </p>
           )}
-        </div>
+        </div>}
       </div>
 
       {failed ? (
@@ -140,9 +149,11 @@ export default function HeroPriceChart({
             timeZone={timeZone}
             viewportKey={viewportKey}
           />
-          <div className="flex flex-wrap items-center justify-between gap-1 border-t border-white/7 px-3 py-1.5">
+          <div className={`${feature ? "px-1 py-2" : "border-t border-white/7 px-3 py-1.5"} flex flex-wrap items-center justify-between gap-1`}>
             <p className="text-[7px] font-semibold text-zinc-700">
-              {chartMode === "candles"
+              {feature
+                ? "Drag to inspect · verified provider intervals"
+                : chartMode === "candles"
                 ? "Candles show open, high, low + close · drag to inspect"
                 : "Graph connects verified closes · drag to inspect"}
             </p>
@@ -150,7 +161,7 @@ export default function HeroPriceChart({
               Times shown {timeZoneLabel}
             </p>
           </div>
-          <div className="grid grid-cols-4 border-t border-white/7">
+          {!feature && <div className="grid grid-cols-4 border-t border-white/7">
             {[
               ["Open", formatPrice(data.summary.open)],
               ["High", formatPrice(data.summary.high)],
@@ -164,7 +175,7 @@ export default function HeroPriceChart({
                 </p>
               </div>
             ))}
-          </div>
+          </div>}
         </>
       )}
     </section>
