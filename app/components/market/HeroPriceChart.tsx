@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type {
   MarketChartAsset,
 } from "@/lib/market-chart";
+import type { MarketChartVisibleRange } from "@/lib/market-chart-visible-range";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import { formatMarketPrice as formatPrice } from "@/lib/market-price-format";
 import MarketChartCanvas, {
@@ -20,6 +21,7 @@ type HeroPriceChartProps = {
   height?: number;
   title?: string;
   presentation?: "standard" | "feature";
+  visibleRange?: MarketChartVisibleRange;
 };
 
 export default function HeroPriceChart({
@@ -31,6 +33,7 @@ export default function HeroPriceChart({
   height,
   title = "Verified price history",
   presentation = "standard",
+  visibleRange,
 }: HeroPriceChartProps) {
   const marketView = useLiveMarketView(symbol, { asset, productId, chart: true });
   const [chartMode, setChartMode] = useState<MarketChartMode>("candles");
@@ -162,6 +165,7 @@ export default function HeroPriceChart({
             height={resolvedHeight}
             timeZone={timeZone}
             viewportKey={viewportKey}
+            visibleRange={visibleRange}
           />
           <div className={`${feature ? "px-1 py-2" : "border-t border-white/7 px-3 py-1.5"} flex flex-wrap items-center justify-between gap-1`}>
             <p className="text-[7px] font-semibold text-zinc-700">

@@ -1891,6 +1891,19 @@ textarea {
 }
 .ht-mobile-home-card [class*="border-white/8"] { border-color: var(--ht-divider) !important; }
 .ht-mobile-home-card [class*="rounded-full"] { box-shadow: none !important; }
+.ht-mobile-home-card--edge {
+  margin-top: 0 !important;
+  margin-inline: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #000;
+}
+.ht-mobile-home-card--edge .ht-mobile-prox-panel > div {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
 .ht-discovery-home-mobile .ht-section-label { color: var(--ht-color-text-muted); }
 .ht-discovery-home-mobile [class*="text-[8px]"],
 .ht-discovery-home-mobile [class*="text-[7px]"] { font-size: 0.6875rem !important; letter-spacing: 0.04em !important; }
@@ -1953,7 +1966,7 @@ textarea {
   .ht-intel-table td:last-child { border-bottom: 0; }
 
   .ht-home-market-context { display: none; }
-  .ht-mobile-home-card { margin-inline: var(--ht-space-3) !important; }
+  .ht-mobile-home-card:not(.ht-mobile-home-card--edge) { margin-inline: var(--ht-space-3) !important; }
 }
 
 /* Phase 2.5 Checkpoint F: customer/account and internal/operator qualification. */

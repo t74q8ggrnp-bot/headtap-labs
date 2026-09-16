@@ -49,7 +49,13 @@ export default function MobileSpotMomentumCard({
   const [agentPlan, setAgentPlan] = useState<HtTradePlan | null>(null);
 
   return (
-    <article className="ht-mobile-home-card mx-4 mb-3 mt-4 flex-shrink-0 overflow-hidden" aria-labelledby={`mobile-home-${opportunity.ticker}`}>
+    <article className="ht-mobile-home-card ht-mobile-home-card--edge mb-3 w-full flex-shrink-0 overflow-hidden" aria-labelledby={`mobile-home-${opportunity.ticker}`}>
+      <HomeTradePlan
+        symbol={opportunity.ticker}
+        compact
+        onPlanChange={setAgentPlan}
+        showCard={false}
+      />
       <div className="flex items-center justify-between px-5 pb-3 pt-4">
         <div className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
@@ -109,19 +115,30 @@ export default function MobileSpotMomentumCard({
         </div>
       </div>
 
-      <div className="border-b border-white/8 px-4 py-3" data-home-priority="2-chart">
+      <div className="border-b border-white/8" data-home-priority="2-chart">
         <HeroPriceChart
           asset="stock"
           symbol={opportunity.ticker}
           accent="violet"
           compact
+          height={300}
           presentation="feature"
           title="Top Opportunity"
+          visibleRange="90m"
         />
       </div>
 
-      <div className="border-b border-white/8 px-5 py-4" data-home-priority="3-agent-setup">
-        <HomeTradePlan symbol={opportunity.ticker} compact onPlanChange={setAgentPlan} />
+      <div className="ht-mobile-prox-panel border-b border-white/8 px-5 py-4" data-home-priority="3-prox">
+        {opportunity.proxIntelligence && opportunity.proxIntelligence.status !== "unavailable" ? (
+          <ProxPulse packet={opportunity.proxIntelligence} />
+        ) : (
+          <section aria-label="Pro X evidence">
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">Pro X</p>
+            <p className="mt-2 text-[11px] font-semibold leading-5 text-zinc-500">
+              No fresh Pro X market pulse is attached. Canonical remains the decision authority.
+            </p>
+          </section>
+        )}
       </div>
 
       <div className="border-b border-white/8 px-5 py-4" data-home-priority="4-score-signal">
@@ -167,10 +184,6 @@ export default function MobileSpotMomentumCard({
               ))}
             </ul>
           </div>
-        )}
-
-        {opportunity.proxIntelligence && opportunity.proxIntelligence.status !== "unavailable" && (
-          <div className="border-b border-white/8 px-5 py-4"><ProxPulse packet={opportunity.proxIntelligence} /></div>
         )}
 
         {narrative && (

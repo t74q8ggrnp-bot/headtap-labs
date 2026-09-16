@@ -1,4 +1,4 @@
-export type MarketChartVisibleRange = "1h" | "2h" | "session";
+export type MarketChartVisibleRange = "1h" | "90m" | "2h" | "session";
 
 export type MarketChartLogicalRange = {
   from: number;
@@ -7,6 +7,7 @@ export type MarketChartLogicalRange = {
 
 const rangeMinutes: Record<Exclude<MarketChartVisibleRange, "session">, number> = {
   "1h": 60,
+  "90m": 90,
   "2h": 120,
 };
 

@@ -72,7 +72,7 @@ test("mobile Home presents canonical intelligence in the approved priority order
       ? [
           "1-ticker-price",
           "2-chart",
-          "3-agent-setup",
+          "3-prox",
           "4-score-signal",
           "5-levels-risk",
           "6-extended-interpretation",

@@ -20,10 +20,12 @@ export default function HomeTradePlan({
   symbol,
   compact = false,
   onPlanChange,
+  showCard = true,
 }: {
   symbol: string;
   compact?: boolean;
   onPlanChange?: (plan: HtTradePlan | null) => void;
+  showCard?: boolean;
 }) {
   const [feed, setFeed] = useState<TradePlanFeed | null>(null);
   const [signedIn, setSignedIn] = useState(false);
@@ -73,6 +75,11 @@ export default function HomeTradePlan({
   useEffect(() => {
     onPlanChange?.(selected?.plan ?? null);
   }, [onPlanChange, selected?.plan]);
+
+  // Mobile Home already presents verified Agent targets beside the quote.
+  // Keep the same single feed subscription without duplicating the card below
+  // the chart, where Pro X evidence now has the immediate context position.
+  if (!showCard) return null;
 
   if (selected) return <HtTradePlanCard plan={selected.plan} current={selected.current} compact={compact} />;
 

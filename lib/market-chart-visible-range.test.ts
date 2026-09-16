@@ -17,6 +17,12 @@ test("visible chart ranges keep one and two hours separate from the loaded sessi
     pointCount: 78,
   }), { from: 54, to: 80 });
   assert.deepEqual(marketChartVisibleLogicalRange({
+    visibleRange: "90m",
+    legacyVisibleMinutes: 180,
+    intervalSeconds: 60,
+    pointCount: 300,
+  }), { from: 210, to: 302 });
+  assert.deepEqual(marketChartVisibleLogicalRange({
     visibleRange: "session",
     legacyVisibleMinutes: 180,
     intervalSeconds: 900,

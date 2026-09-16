@@ -87,7 +87,7 @@ test("mobile navigation exposes Home intelligence and Market without a duplicate
   assert.doesNotMatch(navigation, /tab: "workspace"/);
 });
 
-test("mobile Home presents Spot Momentum, Top Opportunity chart, then Agent X setup", () => {
+test("mobile Home presents Spot Momentum, a full-width 90-minute chart, then Pro X", () => {
   const card = source("app/components/opportunity/MobileSpotMomentumCard.tsx");
   const chart = source("app/components/market/HeroPriceChart.tsx");
   const forming = source("app/components/agent/HomeTradePlan.tsx");
@@ -95,23 +95,30 @@ test("mobile Home presents Spot Momentum, Top Opportunity chart, then Agent X se
   const order = [
     "Spot Momentum",
     'title="Top Opportunity"',
-    'data-home-priority="3-agent-setup"',
+    'data-home-priority="3-prox"',
     'data-home-priority="4-score-signal"',
   ].map((marker) => card.indexOf(marker));
 
   assert.ok(order.every((position) => position >= 0));
   assert.deepEqual([...order].sort((left, right) => left - right), order);
   assert.match(card, /presentation="feature"/);
+  assert.match(card, /visibleRange="90m"/);
+  assert.match(card, /height=\{300\}/);
+  assert.match(card, /ht-mobile-home-card--edge/);
   assert.match(card, /HT Agent X targets/);
   assert.match(card, /agentPlan\.targetOne/);
   assert.match(card, /agentPlan\.targetTwo/);
   assert.match(card, /onPlanChange=\{setAgentPlan\}/);
+  assert.match(card, /showCard=\{false\}/);
+  assert.equal(card.match(/<ProxPulse/g)?.length, 1);
   assert.match(card, /Targets forming with the verified plan/);
   assert.match(card, /Verified Agent X plan levels only/);
   assert.doesNotMatch(card, /framework\.uptideMin|framework\.uptideMax/);
   assert.match(forming, /onPlanChange\?: \(plan: HtTradePlan \| null\) => void/);
+  assert.match(forming, /showCard\?: boolean/);
+  assert.match(forming, /if \(!showCard\) return null/);
   assert.match(forming, /onPlanChange\?\.\(selected\?\.plan \?\? null\)/);
-  assert.match(chart, /feature \? 220/);
+  assert.match(chart, /visibleRange=\{visibleRange\}/);
   assert.match(chart, /Top Opportunity chart display/);
   assert.match(chart, /mode === "graph" \? "Chart" : "Candles"/);
   assert.match(chart, /Drag to inspect · verified provider intervals/);
