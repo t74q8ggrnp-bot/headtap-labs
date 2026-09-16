@@ -79,9 +79,10 @@ test("Home discloses sparse one-minute tape from the existing chart frame", () =
   assert.match(canvas, /resolveMarketChartVisibleCoverage/);
 });
 
-test("mobile navigation keeps the explicit Trading Workspace destination", () => {
+test("mobile navigation promotes Market and removes the duplicate Trade destination", () => {
   const navigation = source("app/components/MobileAppNavigation.tsx");
-  assert.match(navigation, /tab: "workspace", label: "Work", href: "\/trade"/);
+  assert.match(navigation, /tab: "home", label: "Market", href: "\/market"/);
+  assert.doesNotMatch(navigation, /tab: "workspace"/);
 });
 
 test("desktop gives every discovery and personal lane the full Markets width", () => {

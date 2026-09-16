@@ -78,16 +78,11 @@ test("account and paper entry points no longer depend on the bypassed profile ta
   assert.match(paper, /href="\/\?auth=signin"/);
 });
 
-test("mobile More exposes account and alerts while native iPhone supports orientation parity", () => {
+test("mobile navigation exposes Profile directly without adding market requests", () => {
   const mobile = source("app/components/MobileAppNavigation.tsx");
-  const plist = source("ios/App/App/Info.plist");
 
-  assert.match(mobile, /Sign in/);
-  assert.match(mobile, /HT Alerts/);
+  assert.match(mobile, /tab: "profile", label: "Profile", href: "\/account"/);
   assert.match(mobile, /htlabs:open-account/);
-  assert.match(mobile, /htlabs:open-alerts/);
+  assert.match(mobile, /Sign in to HT Labs/);
   assert.doesNotMatch(mobile, /fetch\(|XMLHttpRequest|\/api\//);
-  assert.match(plist, /UIInterfaceOrientationPortrait/);
-  assert.match(plist, /UIInterfaceOrientationLandscapeLeft/);
-  assert.match(plist, /UIInterfaceOrientationLandscapeRight/);
 });

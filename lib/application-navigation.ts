@@ -25,8 +25,8 @@ export type ApplicationRoute = {
 };
 
 export const APPLICATION_ROUTES: readonly ApplicationRoute[] = [
-  { id: "home", label: "Home", shortLabel: "Home", href: "/", match: "exact", audience: "market" },
   { id: "scanner", label: "Scanner", shortLabel: "Scanner", href: "/scanner", match: "exact", audience: "market" },
+  { id: "home", label: "Market", shortLabel: "Market", href: "/market", match: "exact", audience: "market" },
   { id: "signals", label: "Signal History", shortLabel: "Signals", href: "/signals", match: "exact", audience: "market" },
   { id: "news", label: "News Intel", shortLabel: "News", href: "/news-feed", match: "exact", audience: "market" },
   { id: "workspace", label: "Trading Workspace", shortLabel: "Workspace", href: "/trade", match: "prefix", audience: "market" },

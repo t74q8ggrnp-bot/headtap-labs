@@ -94,9 +94,9 @@ test("portrait actions stay compact and accessible while collapsed Intelligence 
   const css = source("app/globals.css");
 
   assert.match(surface, /aria-label=\{watched \? `Remove \$\{opportunity\.ticker\} from watchlist` : `Add \$\{opportunity\.ticker\} to watchlist`\}/);
-  assert.match(surface, /aria-label=\{`Open \$\{opportunity\.ticker\} workspace`\}/);
-  assert.match(surface, /ht-home-action-label--mobile">Trade/);
-  assert.match(surface, /ht-home-action-label--desktop">Open workspace/);
+  assert.match(surface, /aria-label=\{`Review \$\{opportunity\.ticker\} in Paper Trading`\}/);
+  assert.match(surface, /ht-home-action-label--mobile">Paper/);
+  assert.match(surface, /ht-home-action-label--desktop">Review in Paper/);
   assert.match(chart, /Math\.min\(620, Math\.max\(330, window\.innerHeight - 302\)\)/);
   assert.match(css, /\.ht-home-terminal-surface \.ht-home-action-label--desktop \{ display: none; \}/);
   assert.match(css, /\.htb-home \{ padding-bottom: calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\); \}/);

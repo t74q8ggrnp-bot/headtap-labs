@@ -142,7 +142,7 @@ export default function ScannerPage() {
     <div className="ht-discovery-route ht-scanner-route min-h-screen bg-[#050505] text-white">
       <header className="ht-route-utility-bar">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
-          <Link href="/" aria-label="HT Labs home"><Image src="/logo.png" alt="" width={2909} height={1959} className="h-8 w-auto" priority /></Link>
+          <Link href="/scanner" aria-label="HT Labs scanner"><Image src="/logo.png" alt="" width={2909} height={1959} className="h-8 w-auto" priority /></Link>
           <div className="flex min-w-0 items-center gap-3">
             {lastUpdated && (
               <span className="hidden truncate text-xs font-semibold text-zinc-500 sm:block">
@@ -317,16 +317,10 @@ export default function ScannerPage() {
                       </div>
                     )}
                     <Link
-                      href={`/?ticker=${encodeURIComponent(o.ticker)}`}
+                      href={`/market?ticker=${encodeURIComponent(o.ticker)}`}
                       className="ml-auto rounded-full border border-white/10 px-3 py-1 text-[10px] font-black text-zinc-300 transition hover:border-orange-500/30 hover:text-orange-300"
                     >
-                      Full read →
-                    </Link>
-                    <Link
-                      href={`/trade/${encodeURIComponent(o.ticker)}`}
-                      className="rounded-full border border-orange-500/30 px-3 py-1 text-[10px] font-black text-orange-400 transition hover:bg-orange-500/10"
-                    >
-                      Workspace ↗
+                      Open Market →
                     </Link>
                   </div>
                 </li>

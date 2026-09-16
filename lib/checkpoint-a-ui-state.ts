@@ -3,6 +3,7 @@ import { resolveApplicationRoute } from "./application-navigation.ts";
 
 export type MobileAppTab =
   | "home"
+  | "agent"
   | "convictions"
   | "scanner"
   | "workspace"
@@ -18,9 +19,10 @@ export function resolveMobileActiveTab(
   const route = resolveApplicationRoute(pathname);
   if (!route) return null;
   if (route.id === "home") return homeTab;
+  if (route.id === "agent") return "agent";
   if (route.id === "paper") return "paper";
   if (route.id === "scanner") return "scanner";
-  if (route.id === "workspace") return "workspace";
+  if (route.id === "workspace") return "home";
   if (["account", "support", "privacy", "terms"].includes(route.id)) return "profile";
   return "more";
 }

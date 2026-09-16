@@ -150,7 +150,7 @@ export default function HomeReferenceSurface({
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("markets") !== "open") return;
     const openTimer = window.setTimeout(() => setMarketBrowserOpen(true), 0);
-    window.history.replaceState(window.history.state, "", "/");
+    window.history.replaceState(window.history.state, "", "/market");
     return () => window.clearTimeout(openTimer);
   }, []);
 
@@ -292,13 +292,13 @@ export default function HomeReferenceSurface({
             <span className="ht-home-action-label ht-home-action-label--desktop">{watched ? "Watching" : "Watch"}</span>
           </button>
           <Link
-            href={`/trade/${encodeURIComponent(opportunity.ticker)}`}
+            href={`/paper?symbol=${encodeURIComponent(opportunity.ticker)}`}
             className="htb-workspace-link"
-            aria-label={`Open ${opportunity.ticker} workspace`}
+            aria-label={`Review ${opportunity.ticker} in Paper Trading`}
           >
             <span className="ht-home-action-icon" aria-hidden="true">↗</span>
-            <span className="ht-home-action-label ht-home-action-label--mobile">Trade</span>
-            <span className="ht-home-action-label ht-home-action-label--desktop">Open workspace</span>
+            <span className="ht-home-action-label ht-home-action-label--mobile">Paper</span>
+            <span className="ht-home-action-label ht-home-action-label--desktop">Review in Paper</span>
           </Link>
         </div>
       </header>

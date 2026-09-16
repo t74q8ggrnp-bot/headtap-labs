@@ -9,7 +9,7 @@ import { resolveMobileActiveTab } from "./checkpoint-a-ui-state.ts";
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
 const EXPECTED_ROUTES = new Map([
-  ["/", "home"],
+  ["/market", "home"],
   ["/trade/SPY", "workspace"],
   ["/scanner", "scanner"],
   ["/signals", "signals"],
@@ -36,12 +36,14 @@ test("the shared application registry identifies every supported route exactly",
   assert.equal(resolveApplicationRoute("/unknown"), null);
 });
 
-test("mobile navigation uses a truthful primary state and exact secondary route sheet", () => {
-  assert.equal(resolveMobileActiveTab("/", "watchlist"), "watchlist");
-  assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "workspace");
+test("mobile navigation uses the exact five approved primary destinations", () => {
+  assert.equal(resolveMobileActiveTab("/", "watchlist"), null);
+  assert.equal(resolveMobileActiveTab("/market", "home"), "home");
+  assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "home");
   assert.equal(resolveMobileActiveTab("/scanner", "home"), "scanner");
   assert.equal(resolveMobileActiveTab("/paper", "home"), "paper");
-  for (const pathname of ["/signals", "/news-feed", "/prox", "/agent", "/qa", "/validation", "/trading-bot"]) {
+  assert.equal(resolveMobileActiveTab("/agent", "home"), "agent");
+  for (const pathname of ["/signals", "/news-feed", "/prox", "/qa", "/validation", "/trading-bot"]) {
     assert.equal(resolveMobileActiveTab(pathname, "home"), "more", pathname);
   }
   for (const pathname of ["/account", "/privacy", "/terms", "/support"]) {
@@ -49,8 +51,10 @@ test("mobile navigation uses a truthful primary state and exact secondary route 
   }
 
   const mobile = source("app/components/MobileAppNavigation.tsx");
-  assert.match(mobile, /aria-haspopup="dialog"/);
-  assert.match(mobile, /moreRoutes\.map/);
+  for (const label of ["Scanner", "Market", "Paper", "Agent X", "Profile"]) {
+    assert.match(mobile, new RegExp(`label: "${label}"`));
+  }
+  assert.doesNotMatch(mobile, /moreRoutes|aria-haspopup="dialog"/);
   assert.match(mobile, /grid grid-cols-5/);
   assert.match(mobile, /aria-current=\{active \? "page" : undefined\}/);
 });

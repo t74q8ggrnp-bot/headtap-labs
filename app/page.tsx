@@ -1,44 +1,18 @@
-import { Suspense } from "react";
-import HomeClient from "./HomeClient";
-import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
-import { compactHomeInitialOpportunityPayload } from "@/lib/home-initial-payload";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
+type RootPageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
-export default async function Home() {
-  const [momentumResult, beforeCrowdResult] =
-    await Promise.allSettled([
-      getRollingCanonicalDecisionFrame("momentum"),
-      getRollingCanonicalDecisionFrame("before_crowd"),
-    ]);
+export default async function RootPage({ searchParams }: RootPageProps) {
+  const requested = await searchParams;
+  const preserved = new URLSearchParams();
 
-  if (momentumResult.status === "rejected") {
-    console.error(
-      "[home] initial Spot Momentum snapshot failed:",
-      momentumResult.reason,
-    );
+  for (const [key, value] of Object.entries(requested)) {
+    if (Array.isArray(value)) value.forEach((entry) => preserved.append(key, entry));
+    else if (typeof value === "string") preserved.set(key, value);
   }
-  if (beforeCrowdResult.status === "rejected") {
-    console.error(
-      "[home] initial Before The Crowd snapshot failed:",
-      beforeCrowdResult.reason,
-    );
-  }
-  const initialMomentumPayload =
-    momentumResult.status === "fulfilled"
-      ? compactHomeInitialOpportunityPayload(momentumResult.value, 15)
-      : null;
-  const initialBeforeCrowdPayload =
-    beforeCrowdResult.status === "fulfilled"
-      ? compactHomeInitialOpportunityPayload(beforeCrowdResult.value, 5)
-      : null;
 
-  return (
-    <Suspense fallback={null}>
-      <HomeClient
-        initialMomentumPayload={initialMomentumPayload}
-        initialBeforeCrowdPayload={initialBeforeCrowdPayload}
-      />
-    </Suspense>
-  );
+  if (preserved.size > 0) redirect(`/market?${preserved.toString()}`);
+  redirect("/scanner");
 }

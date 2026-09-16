@@ -2,25 +2,19 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Fragment, useState } from "react";
-import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
+import { resolveApplicationRoute } from "@/lib/application-navigation";
 import { resolveMobileActiveTab, type MobileAppTab as AppTab } from "@/lib/checkpoint-a-ui-state";
-import { AccessibleDialogSheet } from "./ui/ApplicationPrimitives";
 import { useMobileAppNavigation } from "./MobileAppNavigationContext";
 import { useShellAuthSession } from "@/app/hooks/useShellAuthSession";
 import { getSafeAccountIdentity } from "@/lib/home-account";
 
 const items: Array<{ tab: AppTab; label: string; href: string }> = [
-  { tab: "home", label: "Home", href: "/" },
-  { tab: "scanner", label: "Markets", href: "/?markets=open" },
-  { tab: "workspace", label: "Work", href: "/trade" },
+  { tab: "scanner", label: "Scanner", href: "/scanner" },
+  { tab: "home", label: "Market", href: "/market" },
   { tab: "paper", label: "Paper", href: "/paper" },
-  { tab: "profile", label: "Account", href: "/account" },
+  { tab: "agent", label: "Agent X", href: "/agent" },
+  { tab: "profile", label: "Profile", href: "/account" },
 ];
-
-const moreRoutes = APPLICATION_ROUTES.filter((route) =>
-  ["signals", "news", "prox", "agent", "account", "support", "qa", "validation", "trading-bot"].includes(route.id),
-);
 
 function TabIcon({ tab }: { tab: AppTab }) {
   const common = {
@@ -36,13 +30,16 @@ function TabIcon({ tab }: { tab: AppTab }) {
   };
 
   if (tab === "home") return (
-    <svg {...common}><path d="m3.5 10.5 8.5-7 8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M9.5 20v-6h5v6"/></svg>
+    <svg {...common}><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 3-4 3 2 4-6"/><path d="M17 7h3v3"/></svg>
   );
   if (tab === "convictions") return (
     <svg {...common}><path d="M13.2 2.5c.5 3-1.6 4.4-3.2 6.2-1.5 1.7-2.5 3.4-2.5 5.8A4.6 4.6 0 0 0 12 19.2a4.7 4.7 0 0 0 4.7-4.8c0-1.8-.7-3.2-1.8-4.7-.3 2-1.4 3-2.5 3.8.3-2.9-1-5-3.4-6.8"/></svg>
   );
   if (tab === "scanner") return (
     <svg {...common}><path d="m13.2 2.5-8 11h6.6l-1 8 8-11h-6.6z"/></svg>
+  );
+  if (tab === "agent") return (
+    <svg {...common}><path d="M12 3 19 6v5c0 4.5-2.5 7.7-7 10-4.5-2.3-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>
   );
   if (tab === "workspace") return (
     <svg {...common}><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 3-4 3 2 4-6"/><path d="M17 7h3v3"/></svg>
@@ -68,12 +65,10 @@ export default function MobileAppNavigation() {
   const { homeTab } = useMobileAppNavigation();
   const { session, ready: authReady } = useShellAuthSession();
   const accountIdentity = getSafeAccountIdentity(session?.user.email);
-  const activeTab = resolveMobileActiveTab(pathname, pathname === "/" ? "home" : homeTab);
+  const activeTab = resolveMobileActiveTab(pathname, pathname === "/market" ? "home" : homeTab);
   const currentRoute = resolveApplicationRoute(pathname);
-  const [moreOpen, setMoreOpen] = useState(false);
 
   return (
-    <Fragment>
       <nav className="ht-mobile-global-nav" aria-label="Primary app navigation" data-application-route={currentRoute?.id ?? "unknown"}>
         <div className="w-full">
           <div className="grid grid-cols-5 px-1 pt-1">
@@ -90,25 +85,6 @@ export default function MobileAppNavigation() {
               </>
             );
 
-            if (tab === "scanner") {
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => {
-                    if (pathname === "/") window.dispatchEvent(new CustomEvent("htlabs:open-markets"));
-                    else router.push(href);
-                  }}
-                  aria-label="Open Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"
-                  aria-current={active ? "page" : undefined}
-                  aria-haspopup="dialog"
-                  className={className}
-                >
-                  {content}
-                </button>
-              );
-            }
-
             if (tab === "profile") {
               return (
                 <button
@@ -116,8 +92,8 @@ export default function MobileAppNavigation() {
                   type="button"
                   disabled={!authReady}
                   onClick={() => {
-                    if (pathname === "/") window.dispatchEvent(new CustomEvent("htlabs:open-account"));
-                    else router.push(session ? "/account" : "/?auth=signin");
+                    if (pathname === "/market") window.dispatchEvent(new CustomEvent("htlabs:open-account"));
+                    else router.push(session ? "/account" : "/market?auth=signin");
                   }}
                   aria-label={!authReady ? "Checking account" : session ? `Open account for ${accountIdentity.shortEmail}` : "Sign in to HT Labs"}
                   aria-current={active ? "page" : undefined}
@@ -144,61 +120,5 @@ export default function MobileAppNavigation() {
           </div>
         </div>
       </nav>
-      <AccessibleDialogSheet
-        open={moreOpen}
-        onOpenChange={setMoreOpen}
-        title="HT Labs navigation"
-        description="Open a market, operator, account, or support surface."
-        presentation="sheet"
-      >
-        <section className="ht-mobile-account-entry" aria-label="HT Labs account">
-          <button
-            type="button"
-            disabled={!authReady}
-            onClick={() => {
-              setMoreOpen(false);
-              if (pathname === "/") {
-                window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("htlabs:open-account")));
-              } else {
-                router.push(session ? "/?account=profile" : "/?auth=signin");
-              }
-            }}
-          >
-            <span aria-hidden="true">{!authReady ? "…" : session ? accountIdentity.initials : "↪"}</span>
-            <span><strong>{!authReady ? "Checking session" : session ? accountIdentity.shortEmail : "Sign in"}</strong><small>{session ? "Account, synchronization, and privacy" : "Sync watchlists and private product features"}</small></span>
-          </button>
-          {pathname === "/" ? (
-            <button
-              type="button"
-              onClick={() => {
-                setMoreOpen(false);
-                window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("htlabs:open-alerts")));
-              }}
-            >
-              <span aria-hidden="true">◌</span>
-              <span><strong>HT Alerts</strong><small>Canonical opportunity notifications</small></span>
-            </button>
-          ) : null}
-        </section>
-        <nav id="application-routes" className="ht-mobile-route-list" aria-label="All application routes">
-          {moreRoutes.map((route) => {
-            const active = currentRoute?.id === route.id;
-            return (
-              <Link
-                key={route.id}
-                href={route.href}
-                onClick={() => setMoreOpen(false)}
-                className="ht-mobile-route-link"
-                data-audience={route.audience}
-                aria-current={active ? "page" : undefined}
-              >
-                <span>{route.label}</span>
-                {active ? <span className="ht-mobile-route-current">Current</span> : null}
-              </Link>
-            );
-          })}
-        </nav>
-      </AccessibleDialogSheet>
-    </Fragment>
   );
 }

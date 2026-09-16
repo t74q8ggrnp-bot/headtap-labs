@@ -12,18 +12,17 @@ test("the consolidated desktop navigation exposes the Trading Workspace entry", 
   assert.match(shell, /aria-current=\{active \? "page" : undefined\}/);
 });
 
-test("mobile navigation exposes and activates the Trading Workspace", () => {
+test("mobile navigation converges legacy Trading Workspace routes on Market", () => {
   const source = readFileSync(
     new URL("../app/components/MobileAppNavigation.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /\{ tab: "workspace", label: "Work", href: "\/trade" \}/);
-  assert.equal(resolveMobileActiveTab("/trade", "home"), "workspace");
-  assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "workspace");
-  assert.match(source, /resolveMobileActiveTab\(pathname, pathname === "\/" \? "home" : homeTab\)/);
-  assert.match(source, /\{ tab: "workspace", label: "Work", href: "\/trade" \}/);
-  assert.match(source, /tab === "more"/);
+  assert.match(source, /\{ tab: "home", label: "Market", href: "\/market" \}/);
+  assert.equal(resolveMobileActiveTab("/trade", "home"), "home");
+  assert.equal(resolveMobileActiveTab("/trade/SPY", "home"), "home");
+  assert.match(source, /resolveMobileActiveTab\(pathname, pathname === "\/market" \? "home" : homeTab\)/);
+  assert.doesNotMatch(source, /tab: "workspace"/);
   assert.match(source, /grid grid-cols-5/);
 });
 

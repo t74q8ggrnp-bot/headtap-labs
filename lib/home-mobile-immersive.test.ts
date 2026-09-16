@@ -35,13 +35,13 @@ test("rotation resizes the existing chart without changing the selected visible 
   assert.match(canvas, /dataset\.chartInitializationCount/);
 });
 
-test("compact Home keeps Markets, Intelligence, Watch, and Workspace available from the instrument header", () => {
+test("compact Market keeps discovery, Intelligence, Watch, and Paper review available from the instrument header", () => {
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
 
   assert.match(surface, /className="ht-home-compact-action ht-home-markets-launcher"/);
   assert.match(surface, /className="ht-home-compact-action ht-home-intelligence-launcher"/);
   assert.match(surface, /onToggleWatchlist/);
-  assert.match(surface, /href=\{`\/trade\/\$\{encodeURIComponent\(opportunity\.ticker\)\}`\}/);
+  assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(opportunity\.ticker\)\}`\}/);
   assert.match(surface, /title="Explore markets"/);
   assert.match(surface, /title="HT Intelligence"/);
 });

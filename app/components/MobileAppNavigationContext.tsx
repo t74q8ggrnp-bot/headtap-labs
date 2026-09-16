@@ -48,8 +48,8 @@ export function MobileAppNavigationProvider({ children }: { children: ReactNode 
 
   const setHomeTab = useCallback((tab: MobileHomeTab) => {
     setHomeTabState(tab);
-    if (window.location.pathname === "/") {
-      const url = tab === "home" ? "/" : `/?tab=${tab}`;
+    if (window.location.pathname === "/market") {
+      const url = tab === "home" ? "/market" : `/market?tab=${tab}`;
       window.history.replaceState(window.history.state, "", url);
     }
   }, []);

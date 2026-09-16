@@ -6,8 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-navigation";
 
-const primaryRouteIds = new Set(["home", "scanner", "workspace", "paper"]);
-const secondaryRouteIds = new Set(["signals", "news", "prox", "agent", "account", "support"]);
+const primaryRouteIds = new Set(["scanner", "home", "paper", "agent", "account"]);
+const secondaryRouteIds = new Set(["signals", "news", "prox", "support", "workspace"]);
 const operatorRouteIds = new Set(["qa", "validation", "trading-bot"]);
 
 export default function ResponsiveApplicationShell({ children }: { children: ReactNode }) {
@@ -30,7 +30,7 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return;
     setTicker("");
     setMobileSearchOpen(false);
-    router.push(`/trade/${encodeURIComponent(symbol)}`);
+    router.push(`/market?ticker=${encodeURIComponent(symbol)}`);
   };
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
     >
       <a className="ht-skip-link" href="#ht-route-content">Skip to page content</a>
       <header className="ht-desktop-global-header">
-        <Link href="/" className="ht-desktop-global-brand" aria-label="HT Labs home">
+        <Link href="/scanner" className="ht-desktop-global-brand" aria-label="HT Labs scanner">
           <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} priority />
         </Link>
 
