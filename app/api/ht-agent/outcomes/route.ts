@@ -27,6 +27,12 @@ import {
 } from "@/lib/ht-agent/visual-plan";
 import { HT_AGENT_VISUAL_PLAN_VERSION } from "@/lib/ht-agent/contracts";
 import { marketChartPollingState } from "@/lib/market-chart-polling";
+import {
+  evaluateHtAgentTargetResearch,
+  extendExistingOutcomeRangesForTargetResearch,
+  type HtAgentTargetResearchEpisode,
+  type HtAgentTargetResearchResult,
+} from "@/lib/ht-agent/target-research";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -41,6 +47,7 @@ type ClaimPayload = {
   rows?: unknown;
   claimed?: unknown;
   retiredAgentRuns?: unknown;
+  targetEpisodes?: unknown;
 };
 
 type VisualPlanClaim = {
@@ -51,6 +58,41 @@ type VisualPlanClaim = {
   stateVersion: number;
   lastEvaluatedCandleAt: string | null;
 };
+
+function parseTargetResearchClaims(value: unknown): HtAgentTargetResearchEpisode[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw): HtAgentTargetResearchEpisode[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const row = raw as Record<string, unknown>;
+    const targetTwo = row.targetTwo === null ? null : Number(row.targetTwo);
+    if (
+      typeof row.id !== "string" ||
+      typeof row.decisionId !== "string" ||
+      typeof row.symbol !== "string" ||
+      !["15m", "60m", "session"].includes(String(row.horizon)) ||
+      typeof row.validFrom !== "string" ||
+      typeof row.targetAt !== "string" ||
+      !Number.isFinite(Number(row.leastFavorableEntry)) ||
+      !Number.isFinite(Number(row.triggerPrice)) ||
+      !Number.isFinite(Number(row.stopPrice)) ||
+      !Number.isFinite(Number(row.targetOne)) ||
+      (targetTwo !== null && !Number.isFinite(targetTwo))
+    ) return [];
+    return [{
+      id: row.id,
+      decisionId: row.decisionId,
+      symbol: row.symbol,
+      horizon: String(row.horizon) as HtAgentTargetResearchEpisode["horizon"],
+      validFrom: row.validFrom,
+      targetAt: row.targetAt,
+      leastFavorableEntry: Number(row.leastFavorableEntry),
+      triggerPrice: Number(row.triggerPrice),
+      stopPrice: Number(row.stopPrice),
+      targetOne: Number(row.targetOne),
+      targetTwo,
+    }];
+  });
+}
 
 function authorized(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -181,6 +223,7 @@ export async function GET(request: Request) {
     proposedEntry: row.proposedEntry === null ? null : finite(row.proposedEntry),
     conservativeSlippageBps: finite(row.conservativeSlippageBps),
   }));
+  const targetResearchClaims = parseTargetResearchClaims(payload.targetEpisodes);
   // Lifecycle evidence is provider-market evidence, so no visual-plan claim or
   // provider request is allowed outside the known extended-hours calendar.
   const visualClaimResult = visualLifecyclePolling.active
@@ -199,6 +242,13 @@ export async function GET(request: Request) {
     });
   }
   const outcomeRangeSymbols = new Set(ranges.keys());
+  const targetResearchRangePlan = extendExistingOutcomeRangesForTargetResearch(
+    ranges,
+    targetResearchClaims,
+  );
+  const targetResearchEpisodes = targetResearchRangePlan.eligibleEpisodes;
+  ranges.clear();
+  for (const [symbol, range] of targetResearchRangePlan.ranges) ranges.set(symbol, range);
   const visualSymbols = new Set(visualClaims.map((plan) => plan.symbol));
   const visualProviderRequestCount = [...visualSymbols].filter((symbol) => !outcomeRangeSymbols.has(symbol)).length;
   for (const plan of visualClaims) {
@@ -238,6 +288,38 @@ export async function GET(request: Request) {
     const measured = updates.filter((update) => update.resolutionState === "measured").length;
     const unavailable = updates.length - measured;
     const pending = rows.length - updates.length;
+    const targetResearchResults: HtAgentTargetResearchResult[] = [];
+    let targetResearchFailures = 0;
+    let targetResearchError: string | null = null;
+    for (const episode of targetResearchEpisodes) {
+      if (failedSymbols.has(episode.symbol)) continue;
+      try {
+        targetResearchResults.push(evaluateHtAgentTargetResearch(
+          episode,
+          barsBySymbol.get(episode.symbol) ?? [],
+        ));
+      } catch (error) {
+        targetResearchFailures += 1;
+        targetResearchError ??= error instanceof Error
+          ? error.message
+          : "Target research evaluation failed.";
+      }
+    }
+    let targetResearchInserted = 0;
+    if (targetResearchResults.length > 0) {
+      const targetResearchWrite = await service.rpc(
+        "ht_agent_record_target_research_results",
+        { p_worker_id: workerId, p_results: targetResearchResults },
+      );
+      if (targetResearchWrite.error) {
+        targetResearchFailures += targetResearchResults.length;
+        targetResearchError ??= targetResearchWrite.error.message;
+      } else {
+        targetResearchInserted = finite(
+          (targetResearchWrite.data as { inserted?: unknown } | null)?.inserted,
+        );
+      }
+    }
     let visualEvidenceAccepted = 0;
     let visualTransitions = 0;
     const transitionCounts: Record<string, number> = {};
@@ -359,6 +441,12 @@ export async function GET(request: Request) {
         visualPlanProviderRequests: visualProviderRequestCount,
         visualPlanLifecycleSession: visualLifecyclePolling.active ? "active" : "closed",
         visualPlanClosedMarketSkipped: !visualLifecyclePolling.active,
+        targetResearchClaimed: targetResearchClaims.length,
+        targetResearchEvaluated: targetResearchResults.length,
+        targetResearchInserted,
+        targetResearchProviderRequests: 0,
+        targetResearchFailures,
+        targetResearchError,
       },
     });
     if (finish.error) throw finish.error;
@@ -380,11 +468,17 @@ export async function GET(request: Request) {
       visualPlanProviderRequests: visualProviderRequestCount,
       visualPlanLifecycleSession: visualLifecyclePolling.active ? "active" : "closed",
       visualPlanClosedMarketSkipped: !visualLifecyclePolling.active,
+      targetResearchClaimed: targetResearchClaims.length,
+      targetResearchEvaluated: targetResearchResults.length,
+      targetResearchInserted,
+      targetResearchProviderRequests: 0,
+      targetResearchFailures,
+      targetResearchError,
     }));
     return NextResponse.json({
       ok: pending === 0 && failedSymbols.size === 0,
       authority: "historical_massive_paper_research_only",
-      workerVersion: "ht-agent-outcome-worker-v3-phase2-release",
+      workerVersion: "ht-agent-outcome-worker-v4-target-research",
       due: rows.length,
       completed: updates.length,
       measured,
@@ -400,6 +494,12 @@ export async function GET(request: Request) {
       visualPlanProviderRequests: visualProviderRequestCount,
       visualPlanLifecycleSession: visualLifecyclePolling.active ? "active" : "closed",
       visualPlanClosedMarketSkipped: !visualLifecyclePolling.active,
+      targetResearchClaimed: targetResearchClaims.length,
+      targetResearchEvaluated: targetResearchResults.length,
+      targetResearchInserted,
+      targetResearchProviderRequests: 0,
+      targetResearchFailures,
+      targetResearchError,
       timestamp: observedAt.toISOString(),
     }, { status: pending === 0 && failedSymbols.size === 0 ? 200 : 202 });
   } catch (error) {

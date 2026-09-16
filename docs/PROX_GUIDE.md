@@ -413,6 +413,11 @@ immutable visual-plan lifecycle events to report entry triggers, Target 1,
 Target 2, invalidations, expirations, ambiguity, and unresolved plans by
 Canonical lane. Ambiguous or unresolved plans are never relabeled as target
 misses. This evidence cannot rewrite target prices or expand Agent authority.
+The prospective `ht-agent-target-path-research-v1` ledger extends that analysis
+with fixed 15-minute, 60-minute, and session paths from completed provider
+minutes. Frozen ProX evidence is explanatory segmentation only: the ledger
+cannot change ProX scoring or cadence, and ProX conclusions cannot be treated
+as independent labels for training Canonical.
 
 ## Promotion ladder
 

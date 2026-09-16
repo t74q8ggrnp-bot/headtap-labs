@@ -76,6 +76,15 @@ The route may aggregate the existing versioned Agent X research cohorts and
 their provider-clock alignment, but it cannot change a cohort decision or use
 one user's Paper state as market-scoring truth.
 
+`ht-agent-target-path-research-v1` is another downstream, read-only consumer.
+It measures whether immutable Agent targets or stops were observed after the
+least-favorable permitted entry using completed provider minutes. It cannot
+write to Canonical, ProX, Agent decisions, Paper, or execution. Its labels may
+support a future separately versioned Canonical entry-timing challenger only
+after owner review and forward out-of-sample evaluation; direct feedback from
+Agent-generated targets into the live Canonical score is prohibited as
+circular.
+
 ## Bounded ProX Market Pulse consumer
 
 `lib/prox/public-authority.ts` owns the separate, established ProX Market Pulse

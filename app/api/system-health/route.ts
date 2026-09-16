@@ -3404,6 +3404,35 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
+    const researchResult = await supabase.rpc("ht_agent_target_research_health");
+    if (researchResult.error) throw researchResult.error;
+    const research = researchResult.data && typeof researchResult.data === "object"
+      ? researchResult.data as Record<string, unknown>
+      : null;
+    const boundaryReady =
+      research?.version === "ht-agent-target-path-research-v1" &&
+      research?.authority === "research_only" &&
+      Number(research?.providerRequestsAdded) === 0 &&
+      research?.executionAuthority === "none";
+    checks.push({
+      name: "ht_agent_target_path_research",
+      ok: boundaryReady,
+      message: boundaryReady
+        ? `Agent target-path research is isolated and prospective: ${Number(research?.measured ?? 0)} measured, ${Number(research?.ambiguous ?? 0)} ambiguous, ${Number(research?.pending ?? 0)} pending.`
+        : "Agent target-path research is missing its zero-authority boundary; apply migration 0058 before deploying the matching worker.",
+      detail: research,
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "ht_agent_target_path_research",
+      ok: false,
+      message: "Agent target-path research is unavailable; apply migration 0058 before deploying the matching worker.",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    if (!supabase) throw new Error("Supabase unavailable");
     const [infrastructureResult, releaseResult, acceptanceResult, workerResult] = await Promise.all([
       supabase.rpc("ht_agent_phase2_visual_plan_infrastructure_health"),
       supabase.rpc("ht_agent_phase2_visual_plan_release_health"),

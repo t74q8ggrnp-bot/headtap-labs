@@ -141,6 +141,40 @@ must be chronological walk-forward; training and evaluation windows may not
 overlap. Performance estimates use the paper ledger's conservative simulated
 slippage and must not be presented as live-execution results.
 
+### Prospective target-path research
+
+`ht-agent-target-path-research-v1` records the first eligible Agent setup per
+profile, symbol, session, Canonical lane, and fixed horizon (`15m`, `60m`, or
+`session`). It freezes the original Canonical evidence, independent ProX
+evidence, market facts, least-favorable permitted entry, trigger, stop, and
+Target 1/Target 2 levels. It is prospective only: historical decisions are not
+backfilled or relabeled.
+
+The existing outcome-worker request for a due symbol is widened to cover the
+episode and its completed Massive minute aggregates are reused. The research
+ledger creates zero additional provider requests. The session-horizon result
+also records the post-entry maximum high and minimum low from those same bars.
+A separate daily aggregate high may be used later as a reachability
+cross-check, but it cannot establish whether a target occurred after entry,
+before a stop, or inside a fixed horizon; minute-path evidence remains the
+ordering authority.
+
+Same-minute entry/target/stop conflicts are `ambiguous`, while an actual
+provider request failure remains pending and excluded. A successful sparse
+aggregate response is retained with its explicit expected-minute, provider-bar,
+and coverage counts; blank minutes are not fabricated and sparse momentum names
+are not silently removed from the sample. Target 1 observation does not stop
+Target 2 research. Results are immutable and carry explicit false
+authority for Canonical decisions/ranking, Agent decisions, Paper execution,
+and live execution.
+
+Target outcomes cannot feed directly back into the production Canonical score:
+Agent targets are downstream of Canonical evidence, so that would create a
+circular label. After at least 30 distinct sessions and 500 measured episodes,
+the owner may review a separately versioned, read-only Canonical entry-timing
+challenger trained only from frozen decision-time facts and evaluated on unseen
+forward sessions. Crossing that evidence floor never auto-promotes a rule.
+
 `ht-agent-cohorts-v2-mode-independent` determines full-Agent research
 qualification from Canonical eligibility, no ProX veto, no existing symbol
 position, and every deterministic risk rule passing. It does not use action
