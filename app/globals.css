@@ -3553,10 +3553,8 @@ body:has(.ht-dialog-sheet[open]) {
 @media
   (min-width: 768px) and
   (max-width: 1179px) and
-  (max-height: 560px) and
-  (orientation: landscape) and
-  (hover: none) and
-  (pointer: coarse) {
+  (max-height: 600px) and
+  (orientation: landscape) {
   .ht-responsive-shell[data-application-route="home"] > .ht-desktop-global-header,
   .ht-simplified-ui > .relative.z-10 {
     display: none;
