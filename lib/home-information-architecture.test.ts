@@ -103,7 +103,7 @@ test("mobile Home presents Spot Momentum, a full-width 90-minute chart, then Pro
   assert.deepEqual([...order].sort((left, right) => left - right), order);
   assert.match(card, /presentation="feature"/);
   assert.match(card, /visibleRange="90m"/);
-  assert.match(card, /height=\{390\}/);
+  assert.match(card, /height="var\(--ht-mobile-spot-chart-height, 390px\)"/);
   assert.match(card, /ht-mobile-home-card--edge/);
   assert.match(card, /HT Agent X targets/);
   assert.match(card, /agentPlan\.targetOne/);

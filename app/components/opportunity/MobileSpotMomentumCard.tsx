@@ -56,78 +56,81 @@ export default function MobileSpotMomentumCard({
         onPlanChange={setAgentPlan}
         showCard={false}
       />
-      <div className="flex items-center justify-between px-5 pb-3 pt-4">
-        <div className="flex items-center gap-2">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
-          <p className="text-[9px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
+      <div className="ht-mobile-spot-summary">
+        <div className="flex items-center justify-between px-5 pb-3 pt-4">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]" />
+            <p className="text-[9px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
+          </div>
+          {dualEngine && <span className="text-[8px] font-black text-amber-400">⚡ Dual Signal</span>}
         </div>
-        {dualEngine && <span className="text-[8px] font-black text-amber-400">⚡ Dual Signal</span>}
-      </div>
 
-      <div className="border-b border-white/8 px-5 pb-4" data-home-priority="1-ticker-price">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(126px,0.85fr)] items-end gap-4">
-          <div className="min-w-0">
-            <h2 id={`mobile-home-${opportunity.ticker}`} className="font-mono text-[2.55rem] font-black leading-none tracking-[-0.06em] text-white">{opportunity.ticker}</h2>
-            <p className="mt-2 font-mono text-lg font-black leading-none text-white">{formatMarketPrice(displayPrice)}</p>
-            <div className="mt-1.5 flex items-center gap-2">
-              <span className={`font-mono text-xs font-black ${displayChange >= 0 ? "text-green-400" : "text-red-400"}`}>
-                {displayChange >= 0 ? "+" : ""}{displayChange.toFixed(2)}%
-              </span>
-              {displayLive && (
-                <span className="text-[7px] font-black uppercase tracking-[0.14em] text-green-400">Live</span>
+        <div className="border-b border-white/8 px-5 pb-4" data-home-priority="1-ticker-price">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(126px,0.85fr)] items-end gap-4">
+            <div className="min-w-0">
+              <h2 id={`mobile-home-${opportunity.ticker}`} className="font-mono text-[2.55rem] font-black leading-none tracking-[-0.06em] text-white">{opportunity.ticker}</h2>
+              <p className="mt-2 font-mono text-lg font-black leading-none text-white">{formatMarketPrice(displayPrice)}</p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className={`font-mono text-xs font-black ${displayChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {displayChange >= 0 ? "+" : ""}{displayChange.toFixed(2)}%
+                </span>
+                {displayLive && (
+                  <span className="text-[7px] font-black uppercase tracking-[0.14em] text-green-400">Live</span>
+                )}
+              </div>
+            </div>
+            <div className="min-w-0 border-l border-white/8 pl-4" aria-label="HT Agent X modeled targets">
+              <p className="text-[8px] font-black uppercase tracking-[0.15em] text-blue-400">HT Agent X targets</p>
+              {agentPlan?.targetOne !== null && agentPlan?.targetOne !== undefined ? (
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  <div className="min-w-0">
+                    <span className="block text-[7px] font-bold uppercase text-zinc-600">Target 1</span>
+                    <strong className="mt-1 block truncate font-mono text-xs text-[#ff7a18]">
+                      {formatMarketPrice(agentPlan.targetOne)}
+                    </strong>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-[7px] font-bold uppercase text-zinc-600">Target 2</span>
+                    <strong className="mt-1 block truncate font-mono text-xs text-[#ff7a18]">
+                      {agentPlan.targetTwo === null ? "Forming" : formatMarketPrice(agentPlan.targetTwo)}
+                    </strong>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2 text-[10px] font-bold leading-4 text-zinc-500">Targets forming with the verified plan</p>
               )}
+              <p className="mt-1.5 text-[7px] leading-3 text-zinc-700">Verified Agent X plan levels only.</p>
             </div>
           </div>
-          <div className="min-w-0 border-l border-white/8 pl-4" aria-label="HT Agent X modeled targets">
-            <p className="text-[8px] font-black uppercase tracking-[0.15em] text-blue-400">HT Agent X targets</p>
-            {agentPlan?.targetOne !== null && agentPlan?.targetOne !== undefined ? (
-              <div className="mt-2 grid grid-cols-2 gap-3">
-                <div className="min-w-0">
-                  <span className="block text-[7px] font-bold uppercase text-zinc-600">Target 1</span>
-                  <strong className="mt-1 block truncate font-mono text-xs text-[#ff7a18]">
-                    {formatMarketPrice(agentPlan.targetOne)}
-                  </strong>
-                </div>
-                <div className="min-w-0">
-                  <span className="block text-[7px] font-bold uppercase text-zinc-600">Target 2</span>
-                  <strong className="mt-1 block truncate font-mono text-xs text-[#ff7a18]">
-                    {agentPlan.targetTwo === null ? "Forming" : formatMarketPrice(agentPlan.targetTwo)}
-                  </strong>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-[10px] font-bold leading-4 text-zinc-500">Targets forming with the verified plan</p>
-            )}
-            <p className="mt-1.5 text-[7px] leading-3 text-zinc-700">Verified Agent X plan levels only.</p>
+          {!displayLive && (
+            <p className="mb-2 text-[9px] font-semibold text-zinc-500">
+              {displayQuote ? marketView.label : opportunity.freshnessLabel}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-black text-zinc-400">{opportunity.stage}</span>
+            <span className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black ${view.positionLabel === "EARLY" ? "border-green-400/20 bg-green-500/[0.06] text-green-400" : "border-zinc-700 text-zinc-600"}`}>
+              {view.positionLabel}
+            </span>
+            {catalyst && <span className="rounded-full border border-orange-400/25 bg-orange-500/[0.06] px-2.5 py-0.5 text-[9px] font-black text-orange-300">⚡ {catalyst}</span>}
           </div>
-        </div>
-        {!displayLive && (
-          <p className="mb-2 text-[9px] font-semibold text-zinc-500">
-            {displayQuote ? marketView.label : opportunity.freshnessLabel}
-          </p>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-black text-zinc-400">{opportunity.stage}</span>
-          <span className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black ${view.positionLabel === "EARLY" ? "border-green-400/20 bg-green-500/[0.06] text-green-400" : "border-zinc-700 text-zinc-600"}`}>
-            {view.positionLabel}
-          </span>
-          {catalyst && <span className="rounded-full border border-orange-400/25 bg-orange-500/[0.06] px-2.5 py-0.5 text-[9px] font-black text-orange-300">⚡ {catalyst}</span>}
         </div>
       </div>
 
-      <div className="border-b border-white/8" data-home-priority="2-chart">
+      <div className="ht-mobile-spot-chart border-b border-white/8" data-home-priority="2-chart">
         <HeroPriceChart
           asset="stock"
           symbol={opportunity.ticker}
           accent="violet"
           compact
-          height={390}
+          height="var(--ht-mobile-spot-chart-height, 390px)"
           presentation="feature"
           title="Top Opportunity"
           visibleRange="90m"
         />
       </div>
 
+      <div className="ht-mobile-spot-details contents">
       <div className="ht-mobile-prox-panel border-b border-white/8 px-5 py-4" data-home-priority="3-prox">
         {opportunity.proxIntelligence && opportunity.proxIntelligence.status !== "unavailable" ? (
           <ProxPulse packet={opportunity.proxIntelligence} />
@@ -210,6 +213,7 @@ export default function MobileSpotMomentumCard({
           Open Market ↗
         </Link>
         <p className="mt-2.5 text-center text-[8px] font-semibold text-zinc-700">Signals are for research only, not financial advice.</p>
+      </div>
       </div>
     </article>
   );

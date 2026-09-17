@@ -18,7 +18,7 @@ type HeroPriceChartProps = {
   productId?: string;
   accent?: "violet" | "orange" | "cyan";
   compact?: boolean;
-  height?: number;
+  height?: number | string;
   title?: string;
   presentation?: "standard" | "feature";
   visibleRange?: MarketChartVisibleRange;

@@ -3543,3 +3543,109 @@ body:has(.ht-dialog-sheet[open]) {
   .ht-home-terminal-surface .htb-chart__toolbar { gap: 0.18rem; }
   .ht-home-terminal-surface .htb-chart__draw-panel { right: -2rem; }
 }
+
+/* Home uses the mobile composition on short, touch-first landscape viewports.
+   Width alone cannot distinguish a rotated phone from a desktop window. */
+@media (min-width: 768px) {
+  .ht-mobile-home-experience { display: none; }
+}
+
+@media
+  (min-width: 768px) and
+  (max-width: 1179px) and
+  (max-height: 560px) and
+  (orientation: landscape) and
+  (hover: none) and
+  (pointer: coarse) {
+  .ht-responsive-shell[data-application-route="home"] > .ht-desktop-global-header,
+  .ht-simplified-ui > .relative.z-10 {
+    display: none;
+  }
+
+  .ht-mobile-home-experience {
+    display: flex;
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+    padding-left: env(safe-area-inset-left, 0px);
+    background: #000;
+  }
+
+  .ht-mobile-home-experience .ht-mobile-home-header { display: none; }
+  .ht-mobile-home-experience .ht-mobile-home-content { min-height: 0; }
+  .ht-mobile-home-experience .ht-mobile-home-feed {
+    display: block;
+    height: 100%;
+    overscroll-behavior-y: contain;
+    background: #000;
+  }
+
+  .ht-mobile-home-experience .ht-mobile-home-card--edge {
+    --ht-mobile-spot-chart-height: 100%;
+    display: grid;
+    min-height: calc(100dvh - 48px - env(safe-area-inset-bottom, 0px));
+    grid-template-columns: clamp(240px, 31vw, 272px) minmax(0, 1fr);
+    grid-template-rows: calc(100dvh - 48px - env(safe-area-inset-bottom, 0px)) auto;
+    margin: 0;
+    overflow: visible;
+    background: #000;
+  }
+
+  .ht-mobile-home-experience .ht-mobile-spot-summary {
+    min-width: 0;
+    overflow-y: auto;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    background: #000;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-summary::-webkit-scrollbar { display: none; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary > div:first-child { padding: 0.55rem 0.72rem 0.35rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary > [data-home-priority="1-ticker-price"] {
+    border: 0;
+    padding: 0.35rem 0.72rem 0.6rem;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-summary > [data-home-priority="1-ticker-price"] > div:first-child {
+    grid-template-columns: minmax(0, 0.75fr) minmax(118px, 1fr);
+    gap: 0.55rem;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-summary h2 { font-size: 1.8rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary h2 + p { margin-top: 0.35rem; font-size: 0.92rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary [aria-label="HT Agent X modeled targets"] { padding-left: 0.55rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary [aria-label="HT Agent X modeled targets"] > p:last-child { display: none; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary [aria-label="HT Agent X modeled targets"] strong { font-size: 0.64rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary [data-home-priority="1-ticker-price"] > div:last-child { gap: 0.28rem; }
+
+  .ht-mobile-home-experience .ht-mobile-spot-chart {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 0;
+    background: #000;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-chart > section,
+  .ht-mobile-home-experience .ht-mobile-spot-chart [data-market-chart-canvas="true"] {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .ht-mobile-home-experience .ht-mobile-spot-details {
+    display: block;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    background: #000;
+  }
+
+  .ht-mobile-global-nav[data-application-route="home"] {
+    min-height: calc(48px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    background: #000;
+  }
+  .ht-mobile-global-nav[data-application-route="home"] > div > div { padding-top: 0; }
+  .ht-mobile-global-nav[data-application-route="home"] :is(a, button) {
+    min-height: 48px;
+    gap: 0.05rem;
+    padding-block: 0.15rem;
+  }
+  .ht-mobile-global-nav[data-application-route="home"] svg { width: 17px; height: 17px; }
+  .ht-mobile-global-nav[data-application-route="home"] :is(a, button) span:last-child { font-size: 0.54rem; }
+}

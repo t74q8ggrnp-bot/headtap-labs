@@ -22,6 +22,27 @@ test("landscape Home uses the chart workspace without a permanent Intelligence r
   assert.match(css, /\.ht-home-intelligence-dialog\[data-presentation="sheet"\][\s\S]*width: min\(390px, 46vw\)/);
 });
 
+test("short touch landscape uses the mobile Home instead of the desktop-mobile hybrid", () => {
+  const css = source("app/globals.css");
+  const mobile = source("app/components/mobile/MobileExperience.tsx");
+  const card = source("app/components/opportunity/MobileSpotMomentumCard.tsx");
+  const landscape = css.slice(css.indexOf("Home uses the mobile composition on short, touch-first landscape viewports"));
+
+  assert.match(mobile, /ht-mobile-home-experience/);
+  assert.doesNotMatch(mobile, /ht-mobile-home-experience[^\n]*md:hidden/);
+  assert.match(landscape, /\(max-height: 560px\)/);
+  assert.match(landscape, /\(orientation: landscape\)/);
+  assert.match(landscape, /\(hover: none\)/);
+  assert.match(landscape, /\(pointer: coarse\)/);
+  assert.match(landscape, /\.ht-desktop-global-header,[\s\S]*\.ht-simplified-ui > \.relative\.z-10[\s\S]*display: none/);
+  assert.match(landscape, /\.ht-mobile-home-experience \{[\s\S]*display: flex/);
+  assert.match(landscape, /grid-template-columns: clamp\(240px, 31vw, 272px\) minmax\(0, 1fr\)/);
+  assert.match(landscape, /--ht-mobile-spot-chart-height: 100%/);
+  assert.match(card, /className="ht-mobile-spot-summary"/);
+  assert.match(card, /className="ht-mobile-spot-chart/);
+  assert.equal(card.match(/<HeroPriceChart/g)?.length, 1);
+});
+
 test("rotation resizes the existing chart without changing the selected visible range", () => {
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const canvas = source("app/components/market/MarketChartCanvas.tsx");

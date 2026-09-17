@@ -98,10 +98,10 @@ export default function MobileExperience({
     : null;
 
   return (
-    <div className="ht-mobile-page-shell ht-discovery-home-mobile fixed inset-0 z-[200] flex flex-col bg-[#050505] text-white md:hidden" aria-label="Mobile Home">
+    <div className="ht-mobile-page-shell ht-mobile-home-experience ht-discovery-home-mobile fixed inset-0 z-[200] flex flex-col bg-[#050505] text-white" aria-label="Mobile Home">
 
         {/* Mobile Header */}
-        <div className="flex-shrink-0 border-b border-white/10 bg-black/80 backdrop-blur-xl px-4 pt-safe">
+        <div className="ht-mobile-home-header flex-shrink-0 border-b border-white/10 bg-black/80 backdrop-blur-xl px-4 pt-safe">
           <div className="flex items-center justify-between gap-3 py-3">
             <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-8 w-auto" priority />
             <div className="flex-1 mx-3">
@@ -143,7 +143,7 @@ export default function MobileExperience({
         </div>
 
         {/* Mobile content area */}
-        <div className="flex-1 overflow-hidden relative">
+        <div className="ht-mobile-home-content flex-1 overflow-hidden relative">
 
           {/* HOME TAB — Before The Crowd + Swipeable conviction cards */}
           {mobileTab === "home" && (() => {
@@ -192,7 +192,7 @@ export default function MobileExperience({
             const current = mobileCards[mobileCardIndex];
             return (
               <section
-                className="flex h-full flex-col overflow-y-auto"
+                className="ht-mobile-home-feed flex h-full flex-col overflow-y-auto"
                 aria-label="Home opportunity intelligence"
                 onTouchStart={(e) => setMobileTouchStart(e.touches[0].clientX)}
                 onTouchEnd={(e) => {

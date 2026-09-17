@@ -79,7 +79,7 @@ export type MarketChartCanvasProps = {
   intervalSeconds: number;
   mode: MarketChartMode;
   accent?: MarketChartAccent;
-  height: number;
+  height: number | string;
   compact?: boolean;
   timeZone?: string;
   viewportKey?: string;
@@ -841,7 +841,10 @@ export function MarketChartCanvas({
   }, [chartObjects]);
 
   useEffect(() => {
-    chartRef.current?.applyOptions({ height });
+    const resolvedHeight = typeof height === "number"
+      ? height
+      : containerRef.current?.clientHeight;
+    if (resolvedHeight) chartRef.current?.applyOptions({ height: resolvedHeight });
   }, [height]);
 
   useEffect(() => {
