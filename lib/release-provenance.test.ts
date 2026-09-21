@@ -21,7 +21,7 @@ test("release provenance separates immutable deployment identity from applicatio
 });
 
 test("missing deployment provenance is an explicit release-integrity failure", () => {
-  const receipt = getReleaseProvenance({});
+  const receipt = getReleaseProvenance({ NEXT_PUBLIC_BUILD_TIMESTAMP: "" });
   assert.equal(receipt.ok, false);
   assert.deepEqual(receipt.missing, ["gitSha", "deploymentId", "buildTimestamp"]);
 });
