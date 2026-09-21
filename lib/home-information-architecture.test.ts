@@ -97,6 +97,10 @@ test("mobile Home preserves Recently Viewed and routes unranked watchlist names 
   assert.match(home, /if \(href\) router\.push\(href\);/);
   assert.doesNotMatch(home, /fetch\(`\/api\/opportunity-ticker\?ticker=/);
   assert.match(mobile, /Recently Viewed/);
+  assert.match(mobile, /Before the Crowd/);
+  assert.match(mobile, /Evaluating verified early setups/);
+  assert.match(mobile, /No early setup currently clears the Canonical qualification gate/);
+  assert.match(home, /desktop-before-crowd-empty-title/);
   assert.match(mobile, /href=\{`\/market\?ticker=\$\{encodeURIComponent\(symbol\)\}`\}/);
   assert.match(mobile, /onOpenTicker=\{openReadTicker\}/);
   assert.match(watchlist, /onOpenTicker: \(ticker: string\) => void/);

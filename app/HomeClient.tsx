@@ -1637,7 +1637,7 @@ export default function HomeClient({
                     })()}
 
                     {/* Before The Crowd uses the same canonical backend opportunity on every surface. */}
-                    {apiBeforeCrowdPick && (
+                    {apiBeforeCrowdPick ? (
                       <BeforeCrowdCard
                         opportunity={apiBeforeCrowdPick}
                         framework={btcFramework}
@@ -1648,6 +1648,16 @@ export default function HomeClient({
                         onOpen={() => setSelectedStock(opportunityToStock(apiBeforeCrowdPick))}
                         onWatch={() => toggleWatchlist(apiBeforeCrowdPick.ticker)}
                       />
+                    ) : apiOpportunitiesLoading ? (
+                      <section className="px-1 py-4" aria-labelledby="desktop-before-crowd-loading-title">
+                        <p id="desktop-before-crowd-loading-title" className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">Before the Crowd</p>
+                        <p className="mt-1 text-sm font-semibold text-zinc-500" role="status" aria-live="polite">Evaluating verified early setups…</p>
+                      </section>
+                    ) : (
+                      <section className="px-1 py-4" aria-labelledby="desktop-before-crowd-empty-title">
+                        <p id="desktop-before-crowd-empty-title" className="text-[10px] font-black uppercase tracking-[0.18em] text-orange-300">Before the Crowd</p>
+                        <p className="mt-1 text-sm font-semibold text-zinc-500" role="status">No early setup currently clears the Canonical qualification gate.</p>
+                      </section>
                     )}
 
                     {/* ── STAT BAR ── */}

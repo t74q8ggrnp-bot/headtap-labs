@@ -234,7 +234,7 @@ export default function MobileExperience({
                 </div>
 
                 {/* Mobile Before The Crowd reads the same canonical opportunity as desktop. */}
-                {apiBeforeCrowdPick && (
+                {apiBeforeCrowdPick ? (
                   <MobileBeforeCrowdCard
                     opportunity={apiBeforeCrowdPick}
                     framework={btcFramework}
@@ -244,6 +244,16 @@ export default function MobileExperience({
                     onOpen={() => setSelectedStock(opportunityToStock(apiBeforeCrowdPick))}
                     onWatch={() => toggleWatchlist(apiBeforeCrowdPick.ticker)}
                   />
+                ) : apiOpportunitiesLoading ? (
+                  <section className="mx-4 mb-3 flex-shrink-0 px-1 py-3" aria-labelledby="mobile-before-crowd-loading-title">
+                    <p id="mobile-before-crowd-loading-title" className="text-[10px] font-black uppercase tracking-[0.16em] text-orange-300">Before the Crowd</p>
+                    <p className="mt-1 text-xs font-semibold text-zinc-500" role="status" aria-live="polite">Evaluating verified early setups…</p>
+                  </section>
+                ) : (
+                  <section className="mx-4 mb-3 flex-shrink-0 px-1 py-3" aria-labelledby="mobile-before-crowd-empty-title">
+                    <p id="mobile-before-crowd-empty-title" className="text-[10px] font-black uppercase tracking-[0.16em] text-orange-300">Before the Crowd</p>
+                    <p className="mt-1 text-xs font-semibold text-zinc-500" role="status">No early setup currently clears the Canonical qualification gate.</p>
+                  </section>
                 )}
 
                 <section className="mx-4 mb-3 flex-shrink-0" aria-labelledby="mobile-recent-title">
