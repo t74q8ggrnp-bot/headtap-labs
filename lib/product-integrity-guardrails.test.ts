@@ -24,6 +24,8 @@ test("security headers and deployment provenance are explicit release gates", ()
   assert.match(config, /poweredByHeader: false/);
   assert.match(health, /releaseIntegrity/);
   assert.match(health, /releaseReady: releaseProvenance\.ok && schemaVerified/);
+  assert.match(health, /const schemaVerified = productIntegrityGuardrailsVerified/);
+  assert.doesNotMatch(health, /schemaVerified = researchObservabilityVerified/);
 });
 
 test("Bull Bear failures are unavailable and never fabricate directional cases", () => {

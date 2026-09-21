@@ -3630,10 +3630,11 @@ export async function GET(request: Request) {
 
   const hardFailures = checks.filter((check) => !check.ok);
   const ok = hardFailures.length === 0;
-  const researchObservabilityVerified = checks.some((check) =>
-    check.name === "ht_agent_target_path_research" && check.ok
-  );
-  const schemaVerified = researchObservabilityVerified && productIntegrityGuardrailsVerified;
+  // Release provenance answers whether the deployed binary and required schema
+  // match. Research collection health stays a separate product-health signal;
+  // a failed research-only cohort must not erase proof that migration 0060 is
+  // installed, nor may an installed migration make the research cohort green.
+  const schemaVerified = productIntegrityGuardrailsVerified;
   const releaseIntegrity = {
     ...releaseProvenance,
     observedSchemaMigrationLevel: schemaVerified
