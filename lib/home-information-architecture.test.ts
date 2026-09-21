@@ -87,6 +87,23 @@ test("mobile navigation exposes Home intelligence and Market without a duplicate
   assert.doesNotMatch(navigation, /tab: "workspace"/);
 });
 
+test("mobile Home preserves Recently Viewed and routes unranked watchlist names to exact Market tickers", () => {
+  const home = source("app/HomeClient.tsx");
+  const mobile = source("app/components/mobile/MobileExperience.tsx");
+  const watchlist = source("app/components/opportunity/MobileWatchlist.tsx");
+
+  assert.match(home, /recentlyViewed=\{recentlyViewed\}/);
+  assert.match(home, /const href = marketWorkspaceHref\(ticker\);/);
+  assert.match(home, /if \(href\) router\.push\(href\);/);
+  assert.doesNotMatch(home, /fetch\(`\/api\/opportunity-ticker\?ticker=/);
+  assert.match(mobile, /Recently Viewed/);
+  assert.match(mobile, /href=\{`\/market\?ticker=\$\{encodeURIComponent\(symbol\)\}`\}/);
+  assert.match(mobile, /onOpenTicker=\{openReadTicker\}/);
+  assert.match(watchlist, /onOpenTicker: \(ticker: string\) => void/);
+  assert.match(watchlist, /onOpenTicker\(ticker\)/);
+  assert.match(watchlist, /aria-label=\{`Open \$\{ticker\} from watchlist`\}/);
+});
+
 test("mobile Home presents Spot Momentum, a full-width 90-minute chart, then Pro X", () => {
   const card = source("app/components/opportunity/MobileSpotMomentumCard.tsx");
   const chart = source("app/components/market/HeroPriceChart.tsx");

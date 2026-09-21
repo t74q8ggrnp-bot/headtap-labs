@@ -516,27 +516,8 @@ export default function HomeClient({
   const openReadTicker = (ticker: string) => {
     const existing = stocks.find((st) => st.symbol === ticker);
     if (existing) { setSelectedStock(existing); return; }
-    fetch(`/api/opportunity-ticker?ticker=${ticker}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        const o = data?.opportunity;
-        if (!o) return;
-        setSelectedStock({
-          symbol: o.ticker,
-          price: Number(o.price || 0),
-          change: Number(o.change || 0),
-          relativeVolume: Number(o.relativeVolume || 0),
-          catalystScore: Number(o.catalystScore || 0),
-          htSignalScore: Number(o.confidence || o.opportunityScore || 0),
-          momentumScore: Number(o.momentumScore || 0),
-          crowdScore: Number(o.attentionScore || 0),
-          trapScore: Number(o.riskScore || 0),
-          signalState: o.stage,
-          signalPattern: o.signals?.[2] ?? o.stage,
-          changePercent: Number(o.change || 0),
-        } as Stock);
-      })
-      .catch(() => {});
+    const href = marketWorkspaceHref(ticker);
+    if (href) router.push(href);
   };
 
 
@@ -2189,6 +2170,7 @@ export default function HomeClient({
         bullBearData={bullBearData}
         isDualEngineConfirmation={isDualEngineConfirmation}
         watchlist={watchlist}
+        recentlyViewed={recentlyViewed}
         setSelectedStock={setSelectedStock}
         toggleWatchlist={toggleWatchlist}
         opportunityToStock={opportunityToStock}

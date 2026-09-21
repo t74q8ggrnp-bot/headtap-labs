@@ -49,6 +49,7 @@ export type MobileExperienceProps = {
   bullBearData: BullBearAnalysis | null;
   isDualEngineConfirmation: boolean;
   watchlist: string[];
+  recentlyViewed: string[];
   setSelectedStock: (stock: Stock | null) => void;
   toggleWatchlist: (symbol: string) => void;
   opportunityToStock: (opportunity: APIOpportunity) => Stock;
@@ -83,7 +84,7 @@ export default function MobileExperience({
   ticker, setTicker, handleTickerSearch, mobileTab, setMobileTab, lastUpdated,
   canonicalMobileOpportunities, momentumRunnersUp, momentumRadar, mobileCardIndex, setMobileCardIndex, mobileTouchStart,
   setMobileTouchStart, apiOpportunitiesLoading, apiMomentum, smFramework, smTrace,
-  bullBearData, isDualEngineConfirmation, watchlist, setSelectedStock, toggleWatchlist,
+  bullBearData, isDualEngineConfirmation, watchlist, recentlyViewed, setSelectedStock, toggleWatchlist,
   opportunityToStock, apiBeforeCrowdPick, btcFramework, btcTrace,
   mobileScannerReads,
   openReadTicker, watchlistStocks, session, handleSignOut, savedSetups,
@@ -245,6 +246,28 @@ export default function MobileExperience({
                   />
                 )}
 
+                <section className="mx-4 mb-3 flex-shrink-0" aria-labelledby="mobile-recent-title">
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 id="mobile-recent-title" className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Recently Viewed</h2>
+                    <Link href="/market?markets=open" className="text-[10px] font-black text-orange-300">Explore markets →</Link>
+                  </div>
+                  {recentlyViewed.length > 0 ? (
+                    <div className="mt-2 flex gap-2 overflow-x-auto pb-1" aria-label="Recently viewed tickers">
+                      {recentlyViewed.slice(0, 8).map((symbol) => (
+                        <Link
+                          key={symbol}
+                          href={`/market?ticker=${encodeURIComponent(symbol)}`}
+                          className="shrink-0 rounded-lg bg-white/[0.04] px-3 py-2 font-mono text-xs font-black text-zinc-300"
+                        >
+                          {symbol}
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[10px] font-semibold text-zinc-600">Tickers opened in Market stay on this device.</p>
+                  )}
+                </section>
+
                 {current && (
                   <MobileCardDetail
                     opportunities={mobileCards}
@@ -331,6 +354,7 @@ export default function MobileExperience({
               opportunities={canonicalMobileOpportunities}
               onOpenStock={setSelectedStock}
               onOpenOpportunity={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
+              onOpenTicker={openReadTicker}
             />
           )}
 

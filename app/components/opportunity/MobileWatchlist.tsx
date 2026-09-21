@@ -8,6 +8,7 @@ type MobileWatchlistProps = {
   opportunities: Opportunity[];
   onOpenStock: (stock: MarketStock) => void;
   onOpenOpportunity: (opportunity: Opportunity) => void;
+  onOpenTicker: (ticker: string) => void;
 };
 
 export default function MobileWatchlist({
@@ -16,6 +17,7 @@ export default function MobileWatchlist({
   opportunities,
   onOpenStock,
   onOpenOpportunity,
+  onOpenTicker,
 }: MobileWatchlistProps) {
   const stockByTicker = new Map(stocks.map((stock) => [stock.symbol, stock]));
   const opportunityByTicker = new Map(opportunities.map((opportunity) => [opportunity.ticker, opportunity]));
@@ -39,7 +41,18 @@ export default function MobileWatchlist({
             return (
               <button
                 key={ticker}
-                onClick={() => opportunity ? onOpenOpportunity(opportunity) : stock && onOpenStock(stock)}
+                onClick={() => {
+                  if (opportunity) {
+                    onOpenOpportunity(opportunity);
+                    return;
+                  }
+                  if (stock) {
+                    onOpenStock(stock);
+                    return;
+                  }
+                  onOpenTicker(ticker);
+                }}
+                aria-label={`Open ${ticker} from watchlist`}
                 className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3"
               >
                 <div className="text-left">
