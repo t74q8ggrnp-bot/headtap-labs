@@ -13,6 +13,7 @@ import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-
 import { HomeAccountSurface, HomeAlertsSurface } from "./HomeAccountAlerts";
 import HomeReferenceChart from "./HomeReferenceChart";
 import HomeTerminalMarkets from "./HomeTerminalMarkets";
+import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 
 export type HomeMarketContext = {
   spy: { price: number; change: number; rvol: number };
@@ -26,6 +27,7 @@ export type HomeMarketContext = {
 };
 
 type Props = {
+  symbol: string;
   opportunity: Opportunity | null;
   spotMomentum: Opportunity[];
   beforeCrowd: Opportunity[];
@@ -35,7 +37,6 @@ type Props = {
   recents: string[];
   watched: boolean;
   watchlistBusy: boolean;
-  loading: boolean;
   selectionLoading: boolean;
   selectionError: string;
   authDestination: "signin" | "profile" | null;
@@ -63,8 +64,7 @@ type Props = {
 const changeLabel = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 const readable = (value: string | null | undefined) => value ? value.replaceAll("_", " ") : "Unavailable";
 
-function providerTime(opportunity: Opportunity) {
-  const timestamp = opportunity.displayQuoteAsOf ?? opportunity.scannedAt;
+function providerTime(timestamp: string | null | undefined) {
   if (!timestamp) return "Provider time pending";
   const parsed = new Date(timestamp);
   if (!Number.isFinite(parsed.getTime())) return "Provider time pending";
@@ -75,6 +75,7 @@ function providerTime(opportunity: Opportunity) {
 }
 
 export default function HomeReferenceSurface({
+  symbol,
   opportunity,
   spotMomentum,
   beforeCrowd,
@@ -84,7 +85,6 @@ export default function HomeReferenceSurface({
   recents,
   watched,
   watchlistBusy,
-  loading,
   selectionLoading,
   selectionError,
   authDestination,
@@ -114,6 +114,7 @@ export default function HomeReferenceSurface({
   const [accountOpen, setAccountOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const accountDestinationHandled = useRef<string | null>(null);
+  const marketView = useLiveMarketView(symbol);
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1179px)");
@@ -195,30 +196,20 @@ export default function HomeReferenceSurface({
     </>
   );
 
-  if (!opportunity) {
-    return (
-      <>
-        <main className="htb-home htb-home--state" aria-label="HT Labs Home">
-          <button type="button" className="ht-home-state-account" onClick={() => setAccountOpen(true)}>
-            {!authReady ? "Checking account…" : session ? accountIdentity.initials : "Sign in"}
-          </button>
-          <div className="htb-home__loading" role="status" aria-live="polite">
-            <span className="htb-live-dot" />
-            <div>
-              <h1>{loading ? "Loading market intelligence" : "No eligible opportunity"}</h1>
-              <p>{loading ? "Connecting to the existing canonical feed." : "HT Labs will not invent a setup when the canonical gate has no eligible result."}</p>
-            </div>
-          </div>
-        </main>
-        {accountAndAlerts}
-      </>
-    );
-  }
-
-  const view = getOpportunityPresentation(opportunity);
-  const eligible = opportunity.eligibility?.eligible === true;
-  const prox = opportunity.proxIntelligence;
-  const visibleEvidence = opportunity.signals.slice(0, 5);
+  const canonicalOpportunity = opportunity?.ticker === symbol ? opportunity : null;
+  const view = canonicalOpportunity
+    ? getOpportunityPresentation(canonicalOpportunity)
+    : null;
+  const eligible = canonicalOpportunity?.eligibility?.eligible === true;
+  const prox = canonicalOpportunity?.proxIntelligence;
+  const visibleEvidence = canonicalOpportunity?.signals.slice(0, 5) ?? [];
+  const displayPrice = marketView.quote?.price ?? canonicalOpportunity?.price ?? null;
+  const displayChange = marketView.quote?.changePercent ?? canonicalOpportunity?.change ?? null;
+  const providerTimestamp = marketView.quote?.asOf ??
+    canonicalOpportunity?.displayQuoteAsOf ?? canonicalOpportunity?.scannedAt ?? null;
+  const providerLabel = providerTimestamp
+    ? providerTime(providerTimestamp)
+    : "Provider time pending";
 
   const marketTape = (
     <section className="htb-tape" aria-label="Market context" tabIndex={0}>
@@ -250,11 +241,13 @@ export default function HomeReferenceSurface({
       <header className="htb-symbol-header ht-terminal-home-instrument" data-home-priority="1-ticker-price">
         <div className="ht-terminal-home-quote">
           <div className="htb-symbol-line">
-            <h1 id="htb-symbol-title">{opportunity.ticker}</h1>
-            <strong className="ht-tabular-numbers">{formatMarketPrice(opportunity.price)}</strong>
-            <span className={`ht-tabular-numbers ${opportunity.change >= 0 ? "is-positive" : "is-negative"}`}>{changeLabel(opportunity.change)}</span>
+            <h1 id="htb-symbol-title">{symbol}</h1>
+            <strong className="ht-tabular-numbers">{displayPrice === null ? "—" : formatMarketPrice(displayPrice)}</strong>
+            {displayChange === null ? null : (
+              <span className={`ht-tabular-numbers ${displayChange >= 0 ? "is-positive" : "is-negative"}`}>{changeLabel(displayChange)}</span>
+            )}
           </div>
-          <p>{readable(opportunity.scanSession)} · {providerTime(opportunity)}</p>
+          <p>{canonicalOpportunity ? readable(canonicalOpportunity.scanSession) : marketView.label} · {providerLabel}</p>
         </div>
         <div className="ht-terminal-home-actions">
           <button
@@ -282,7 +275,7 @@ export default function HomeReferenceSurface({
           <button
             type="button"
             className="ht-terminal-action"
-            aria-label={watched ? `Remove ${opportunity.ticker} from watchlist` : `Add ${opportunity.ticker} to watchlist`}
+            aria-label={watched ? `Remove ${symbol} from watchlist` : `Add ${symbol} to watchlist`}
             aria-pressed={watched}
             disabled={watchlistBusy}
             onClick={onToggleWatchlist}
@@ -292,9 +285,9 @@ export default function HomeReferenceSurface({
             <span className="ht-home-action-label ht-home-action-label--desktop">{watched ? "Watching" : "Watch"}</span>
           </button>
           <Link
-            href={`/paper?symbol=${encodeURIComponent(opportunity.ticker)}`}
+            href={`/paper?symbol=${encodeURIComponent(symbol)}`}
             className="htb-workspace-link"
-            aria-label={`Review ${opportunity.ticker} in Paper Trading`}
+            aria-label={`Review ${symbol} in Paper Trading`}
           >
             <span className="ht-home-action-icon" aria-hidden="true">↗</span>
             <span className="ht-home-action-label ht-home-action-label--mobile">Paper</span>
@@ -308,12 +301,21 @@ export default function HomeReferenceSurface({
   const chart = (
     <>
       <div className="htb-decision-line" data-home-priority="2-decision">
-        <strong>{readable(opportunity.opportunityType)} · {Math.round(opportunity.opportunityScore)}</strong>
-        <span>{opportunity.whatChanged || opportunity.whyItMatters}</span>
+        {canonicalOpportunity ? (
+          <>
+            <strong>{readable(canonicalOpportunity.opportunityType)} · {Math.round(canonicalOpportunity.opportunityScore)}</strong>
+            <span>{canonicalOpportunity.whatChanged || canonicalOpportunity.whyItMatters}</span>
+          </>
+        ) : (
+          <>
+            <strong>{symbol}</strong>
+            <span>No current Canonical decision exists for {symbol}. The chart remains provider-backed.</span>
+          </>
+        )}
       </div>
-      {selectionLoading ? <div className="htb-selection-state" role="status">Loading {opportunity.ticker} canonical context…</div> : null}
+      {selectionLoading ? <div className="htb-selection-state" role="status">Loading {symbol} Canonical context…</div> : null}
       {selectionError ? <div className="htb-selection-state htb-selection-state--error" role="status">{selectionError}</div> : null}
-      <div data-home-priority="3-chart"><HomeReferenceChart symbol={opportunity.ticker} /></div>
+      <div data-home-priority="3-chart"><HomeReferenceChart symbol={symbol} /></div>
       <button
         type="button"
         className="ht-home-discovery-strip"
@@ -334,18 +336,21 @@ export default function HomeReferenceSurface({
       <div className="htb-intelligence">
       <h2 className="sr-only">HT Intelligence</h2>
       <section className="htb-score-block">
-        <strong className="htb-score ht-tabular-numbers">{Math.round(opportunity.opportunityScore)}</strong>
-        <div><h3>{view.momentumLabel}</h3><p>{opportunity.whyItMatters}</p></div>
+        <strong className="htb-score ht-tabular-numbers">{canonicalOpportunity ? Math.round(canonicalOpportunity.opportunityScore) : "—"}</strong>
+        <div>
+          <h3>{view?.momentumLabel ?? "No current Canonical decision"}</h3>
+          <p>{canonicalOpportunity?.whyItMatters ?? `${symbol} is available as a universal provider-backed chart, but it is not in the current Canonical opportunity frame.`}</p>
+        </div>
       </section>
       <section className="htb-intel-section htb-intel-section--primary">
         <h3>Decision</h3>
         <dl className="htb-facts">
-          <div><dt>Status</dt><dd>{eligible ? "Eligible" : "Monitoring only"}</dd></div>
-          <div><dt>Setup</dt><dd>{readable(opportunity.stage)}</dd></div>
-          <div><dt>Entry</dt><dd>{framework ? view.positionLabel : "Withheld"}</dd></div>
-          <div><dt>Risk</dt><dd className={view.riskLabel === "HIGH" ? "is-negative" : "is-warning"}>{view.riskLabel}</dd></div>
+          <div><dt>Status</dt><dd>{canonicalOpportunity ? eligible ? "Eligible" : "Monitoring only" : "Unavailable"}</dd></div>
+          <div><dt>Setup</dt><dd>{canonicalOpportunity ? readable(canonicalOpportunity.stage) : "No current setup"}</dd></div>
+          <div><dt>Entry</dt><dd>{framework && view ? view.positionLabel : "Withheld"}</dd></div>
+          <div><dt>Risk</dt><dd className={view?.riskLabel === "HIGH" ? "is-negative" : "is-warning"}>{view?.riskLabel ?? "Unmeasured"}</dd></div>
         </dl>
-        <p className="htb-risk-copy">{opportunity.riskNote}</p>
+        <p className="htb-risk-copy">{canonicalOpportunity?.riskNote ?? `HT Labs will not fabricate a score, setup, entry, or risk level for ${symbol}.`}</p>
       </section>
       <details className="htb-intel-disclosure">
         <summary>Levels and risk</summary>
@@ -369,14 +374,14 @@ export default function HomeReferenceSurface({
       </details>
       <details className="htb-intel-disclosure htb-agent-plan">
         <summary>Agent X</summary>
-        <div className="htb-intel-disclosure__body"><HomeTradePlan symbol={opportunity.ticker} compact /></div>
+        <div className="htb-intel-disclosure__body"><HomeTradePlan symbol={symbol} compact /></div>
       </details>
       <details className="htb-intel-disclosure htb-evidence">
         <summary>Full evidence</summary>
         <div>
           {visibleEvidence.length > 0 ? <ul>{visibleEvidence.map((signal, index) => <li key={`${signal}-${index}`}>{signal}</li>)}</ul> : <p>No additional evidence is available.</p>}
-          <p>{opportunity.whatChanged}</p>
-          <p>Engine: {opportunity.engineVersion ?? "canonical"}</p>
+          <p>{canonicalOpportunity?.whatChanged ?? `No current Canonical evidence is attached to ${symbol}.`}</p>
+          <p>Engine: {canonicalOpportunity?.engineVersion ?? "No current decision"}</p>
         </div>
       </details>
       </div>
@@ -384,7 +389,11 @@ export default function HomeReferenceSurface({
   );
 
   return (
-    <main className="htb-home ht-home-terminal-surface" aria-label="HT Labs Home">
+    <main
+      className="htb-home ht-home-terminal-surface"
+      aria-label="HT Labs Market workspace"
+      data-workspace-symbol={symbol}
+    >
       <DesktopTerminalFrame
         navigationUtilities={(
           <>
@@ -415,7 +424,7 @@ export default function HomeReferenceSurface({
             beforeCrowd={beforeCrowd}
             watchlist={watchlist}
             recents={recents}
-            currentSymbol={opportunity.ticker}
+            currentSymbol={symbol}
             onSelect={onSelect}
           />
         )}
@@ -436,7 +445,7 @@ export default function HomeReferenceSurface({
           beforeCrowd={beforeCrowd}
           watchlist={watchlist}
           recents={recents}
-          currentSymbol={opportunity.ticker}
+          currentSymbol={symbol}
           onSelect={onSelect}
           onNavigate={() => setMarketBrowserOpen(false)}
         />
@@ -445,7 +454,7 @@ export default function HomeReferenceSurface({
         open={compactLayout === "compact" && compactIntelligenceOpen}
         onOpenChange={setCompactIntelligenceOpen}
         title="HT Intelligence"
-        description={`${opportunity.ticker} Canonical decision context, levels, Pro X evidence, and Agent X.`}
+        description={`${symbol} Canonical decision context, levels, Pro X evidence, and Agent X.`}
         presentation="sheet"
         className="ht-home-intelligence-dialog"
       >

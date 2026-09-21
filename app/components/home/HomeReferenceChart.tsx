@@ -221,13 +221,14 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     <section
       className="htb-chart"
       aria-label={`${symbol} verified market chart`}
+      data-chart-symbol={symbol}
       data-chart-coverage-percent={visibleCoverage?.coveragePercentage}
       data-chart-expected-intervals={visibleCoverage?.expectedIntervalCount}
       data-chart-rendered-bars={visibleCoverage?.renderedProviderBarCount}
     >
       {marketView.error && !marketView.chart ? (
         <div className="htb-chart__state" style={{ height }} role="status">
-          <strong>Verified chart unavailable</strong>
+          <strong>Data unavailable for {symbol}</strong>
           <span>No estimated candles are shown.</span>
         </div>
       ) : bars.length === 0 ? (

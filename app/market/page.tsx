@@ -1,11 +1,23 @@
 import { Suspense } from "react";
+import { notFound } from "next/navigation";
 import HomeClient from "../HomeClient";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
 import { compactHomeInitialOpportunityPayload } from "@/lib/home-initial-payload";
+import { normalizeMarketWorkspaceSymbol } from "@/lib/market-workspace-route";
 
 export const dynamic = "force-dynamic";
 
-export default async function MarketPage() {
+export default async function MarketPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ticker?: string | string[] }>;
+}) {
+  const rawTicker = (await searchParams).ticker;
+  if (rawTicker !== undefined && (
+    Array.isArray(rawTicker) || !normalizeMarketWorkspaceSymbol(rawTicker)
+  )) {
+    notFound();
+  }
   const [momentumResult, beforeCrowdResult] = await Promise.allSettled([
     getRollingCanonicalDecisionFrame("momentum"),
     getRollingCanonicalDecisionFrame("before_crowd"),

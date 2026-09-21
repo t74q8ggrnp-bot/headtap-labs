@@ -1,19 +1,13 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-
-const SYMBOL_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
-
-function normalizeTicker(value: string) {
-  const symbol = value.trim().replace(/^\$/, "").toUpperCase();
-  return SYMBOL_PATTERN.test(symbol) ? symbol : null;
-}
+import { marketWorkspaceHref, normalizeMarketWorkspaceSymbol } from "@/lib/market-workspace-route";
 
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ ticker: string }>;
 }): Promise<Metadata> {
-  const symbol = normalizeTicker((await params).ticker);
+  const symbol = normalizeMarketWorkspaceSymbol((await params).ticker);
   return {
     title: symbol ? `${symbol} Trading Workspace | HT Labs` : "Trading Workspace | HT Labs",
     description: symbol
@@ -27,8 +21,7 @@ export default async function TradeTickerPage({
 }: {
   params: Promise<{ ticker: string }>;
 }) {
-  const symbol = normalizeTicker((await params).ticker);
+  const symbol = normalizeMarketWorkspaceSymbol((await params).ticker);
   if (!symbol) notFound();
-
-  redirect(`/market?ticker=${encodeURIComponent(symbol)}`);
+  redirect(marketWorkspaceHref(symbol)!);
 }

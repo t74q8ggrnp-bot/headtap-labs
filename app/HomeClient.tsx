@@ -4,7 +4,7 @@ declare global { interface Window { _htScannerLastFetch?: number } }
 
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import LiveStockValue from "./components/market/LiveStockValue";
@@ -43,6 +43,11 @@ import {
 } from "@/lib/opportunity-model";
 import { getRelativeVolume } from "@/app/lib/legacy-stock-scoring";
 import type { HomeAlert } from "@/lib/home-account";
+import {
+  marketWorkspaceHref,
+  normalizeMarketWorkspaceSymbol,
+  resolveMarketWorkspaceSymbol,
+} from "@/lib/market-workspace-route";
 
 type HomeClientProps = {
   surface: "intelligence" | "market";
@@ -180,6 +185,7 @@ export default function HomeClient({
   initialMomentumPayload,
   initialBeforeCrowdPayload,
 }: HomeClientProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { homeTab: mobileTab, setHomeTab: setMobileTab } = useMobileAppNavigation();
   // build: v150-canonical-frontend-authority
@@ -199,11 +205,6 @@ export default function HomeClient({
   const [selectedOpportunity, setSelectedOpportunity] = useState<APIOpportunity | null>(null);
   const [selectedOpportunityLoading, setSelectedOpportunityLoading] = useState(false);
   const [selectedOpportunityError, setSelectedOpportunityError] = useState("");
-  // Legacy deep-link support for existing inbound /?ticker=SYMBOL URLs.
-  // This opens that ticker's detail view on load, whether or not it's
-  // already in the currently loaded `stocks` universe. Runs once per
-  // page load — doesn't fight the user if they close the modal.
-  const deepLinkHandledRef = useRef(false);
   // "Other Active Reads" in the detail modal — backend-driven, same
   // engine as Home/Scanner. Replaces the old convictionLeaders-based
   // list, which had no ETF exclusion and no real-activity requirement.
@@ -269,7 +270,7 @@ export default function HomeClient({
       if (prevAlertTickers.current.has(alertKey)) continue;
 
       const title = type === "catalyst"
-        ? `⚡ Verified Catalyst — ${opportunity.ticker}`
+        ? `⚡ Model-detected catalyst activity — ${opportunity.ticker}`
         : type === "before_crowd"
           ? `👀 Before The Crowd — ${opportunity.ticker}`
           : `🔥 Spot Momentum — ${opportunity.ticker}`;
@@ -398,6 +399,7 @@ export default function HomeClient({
 
   const btcTickerForAnalysis = resolvedSpotMomentumTarget?.symbol ?? "";
   useEffect(() => {
+    if (surface !== "intelligence") return;
     if (!btcTickerForAnalysis || btcTickerForAnalysis === bullBearTicker) return;
     let cancelled = false;
     setBullBearLoading(true);
@@ -426,9 +428,10 @@ export default function HomeClient({
     return () => {
       cancelled = true;
     };
-  }, [btcTickerForAnalysis, bullBearTicker]);
+  }, [btcTickerForAnalysis, bullBearTicker, surface]);
 
   useEffect(() => {
+    if (surface !== "intelligence") return;
     if (!selectedStock || selectedStock.symbol === bullBearTicker) return;
     let cancelled = false;
     setBullBearLoading(true);
@@ -456,7 +459,7 @@ export default function HomeClient({
     return () => {
       cancelled = true;
     };
-  }, [selectedStock, bullBearTicker]);
+  }, [selectedStock, bullBearTicker, surface]);
 
   useEffect(() => {
     if (!selectedStock?.symbol) {
@@ -480,13 +483,11 @@ export default function HomeClient({
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) {
-          throw new Error(
-            payload?.detail || payload?.error || "Ticker evaluation failed.",
-          );
+          throw new Error(`Canonical context is unavailable for ${selectedStock.symbol}.`);
         }
         if (!payload?.opportunity) {
           throw new Error(
-            payload?.message || "No current canonical evaluation is available.",
+            payload?.message || `No current Canonical decision exists for ${selectedStock.symbol}.`,
           );
         }
         return normalizeOpportunity({
@@ -498,7 +499,7 @@ export default function HomeClient({
       .catch((error) => {
         if (error?.name !== "AbortError") {
           setSelectedOpportunityError(
-            error?.message || "No current canonical evaluation is available.",
+            error?.message || `No current Canonical decision exists for ${selectedStock.symbol}.`,
           );
         }
       })
@@ -565,16 +566,9 @@ export default function HomeClient({
           ? data.articles
           : [];
 
-      const newsVelocity =
-        typeof data?.newsVelocity === "number"
-          ? data.newsVelocity
-          : articles.length >= 5
-            ? 84
-            : articles.length >= 3
-              ? 72
-              : articles.length >= 1
-                ? 56
-                : 25;
+      const newsVelocity = typeof data?.newsVelocity === "number"
+        ? data.newsVelocity
+        : 0;
 
       setNews((prev) => ({
         ...prev,
@@ -586,23 +580,11 @@ export default function HomeClient({
         [symbol]: {
           articles,
           newsVelocity,
-          catalystStrength:
-            data?.catalystStrength ||
-            (articles.length >= 3
-              ? "Fresh catalyst activity"
-              : articles.length >= 1
-                ? "Light news activity"
-                : "No fresh catalyst"),
-          narrativeSignal:
-            data?.narrativeSignal ||
-            (articles.length >= 3
-              ? "Narrative pressure accelerating"
-              : articles.length >= 1
-                ? "Fresh headline detected"
-                : "Narrative still quiet"),
-          sentimentBias: data?.sentimentBias || "Neutral narrative",
-          sentimentScore: typeof data?.sentimentScore === "number" ? data.sentimentScore : 55,
-          hypeScore: typeof data?.hypeScore === "number" ? data.hypeScore : 35,
+          catalystStrength: data?.catalystStrength || "Catalyst analysis unavailable",
+          narrativeSignal: data?.narrativeSignal || "Narrative analysis unavailable",
+          sentimentBias: data?.sentimentBias || "Sentiment unavailable",
+          sentimentScore: typeof data?.sentimentScore === "number" ? data.sentimentScore : 0,
+          hypeScore: typeof data?.hypeScore === "number" ? data.hypeScore : 0,
           sourceCount: articles.length,
         },
       }));
@@ -618,12 +600,12 @@ export default function HomeClient({
         ...prev,
         [symbol]: {
           articles: [],
-          newsVelocity: 25,
-          catalystStrength: "No fresh catalyst",
-          narrativeSignal: "Narrative still quiet",
-          sentimentBias: "Neutral narrative",
-          sentimentScore: 50,
-          hypeScore: 25,
+          newsVelocity: 0,
+          catalystStrength: "Catalyst analysis unavailable",
+          narrativeSignal: "Narrative analysis unavailable",
+          sentimentBias: "Sentiment unavailable",
+          sentimentScore: 0,
+          hypeScore: 0,
           sourceCount: 0,
         },
       }));
@@ -873,49 +855,19 @@ export default function HomeClient({
     return () => clearInterval(interval);
   }, []);
 
-  // Legacy deep-link: open /?ticker=SYMBOL directly, whether or not that
-  // ticker is already in the currently loaded `stocks` universe.
+  const requestedMarketTicker = surface === "market"
+    ? normalizeMarketWorkspaceSymbol(searchParams?.get("ticker"))
+    : null;
+
+  // The URL is the universal workspace authority. Re-run on every URL change
+  // so refresh and browser Back/Forward cannot retain a different ticker.
   useEffect(() => {
-    if (deepLinkHandledRef.current) return;
-    const ticker = searchParams?.get("ticker");
-    if (!ticker) return;
-
-    const symbol = ticker.toUpperCase();
-    const existing = stocks.find(s => s.symbol === symbol);
-    if (existing) {
-      setSelectedStock(existing);
-      deepLinkHandledRef.current = true;
-      return;
-    }
-
-    // Not in the currently loaded universe (e.g. a fresh discovery from
-    // the full-market scan). Fetch its real scored read directly instead
-    // of silently doing nothing.
-    if (stocks.length === 0) return; // wait for first load before deciding it's "missing"
-
-    fetch(`/api/opportunity-ticker?ticker=${symbol}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        const o = data?.opportunity;
-        if (!o) { deepLinkHandledRef.current = true; return; }
-        setSelectedStock({
-          symbol: o.ticker,
-          price: Number(o.price || 0),
-          change: Number(o.change || 0),
-          relativeVolume: Number(o.relativeVolume || 0),
-          catalystScore: Number(o.catalystScore || 0),
-          htSignalScore: Number(o.confidence || o.opportunityScore || 0),
-          momentumScore: Number(o.momentumScore || 0),
-          crowdScore: Number(o.attentionScore || 0),
-          trapScore: Number(o.riskScore || 0),
-          signalState: o.stage,
-          signalPattern: o.signals?.[2] ?? o.stage,
-          changePercent: Number(o.change || 0),
-        } as Stock);
-        deepLinkHandledRef.current = true;
-      })
-      .catch(() => { deepLinkHandledRef.current = true; });
-  }, [searchParams, stocks]);
+    if (!requestedMarketTicker) return;
+    setSelectedStock((current) => current?.symbol === requestedMarketTicker
+      ? current
+      : { symbol: requestedMarketTicker, price: 0, change: 0 });
+    recordRecentlyViewed(requestedMarketTicker);
+  }, [recordRecentlyViewed, requestedMarketTicker]);
 
 
 
@@ -954,6 +906,7 @@ export default function HomeClient({
 
 
   useEffect(() => {
+    if (surface !== "intelligence") return;
     // Fetch news for top stocks so hero card always has context. The canonical
     // opportunity hook owns its own immediate load/refresh lifecycle.
     const topStocksForFetch = stocks.slice(0, 12);
@@ -983,7 +936,7 @@ export default function HomeClient({
         .catch(e => console.warn("Scanner expansion failed:", e));
     }
 
-  }, [stocks]);
+  }, [liveHeroTarget, stocks, surface]);
 
   const fetchStocksRef = useRef(fetchStocks);
   useEffect(() => {
@@ -991,6 +944,7 @@ export default function HomeClient({
   });
 
   useEffect(() => {
+    if (surface !== "intelligence") return;
     void fetchStocksRef.current();
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -998,7 +952,7 @@ export default function HomeClient({
       }
     }, 30_000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [surface]);
 
   const handleAuth = async (mode: "signin" | "signup") => {
     const email = authEmail.trim().toLowerCase();
@@ -1079,10 +1033,20 @@ export default function HomeClient({
   };
 
   const handleTickerSearch = async () => {
-    const cleanTicker = ticker.toUpperCase().trim();
+    const cleanTicker = normalizeMarketWorkspaceSymbol(ticker);
 
     if (!cleanTicker) {
-      setSearchStatus("Enter a ticker first.");
+      setSearchStatus("Enter a valid stock or ETF ticker first.");
+      return;
+    }
+
+    if (surface === "market") {
+      const href = marketWorkspaceHref(cleanTicker);
+      if (!href) return;
+      setSelectedStock({ symbol: cleanTicker, price: 0, change: 0 });
+      recordRecentlyViewed(cleanTicker);
+      setTicker("");
+      router.push(href);
       return;
     }
 
@@ -1125,11 +1089,20 @@ export default function HomeClient({
   // Secondary opportunity surfaces consume the canonical feed below; there is
   // intentionally no local fallback selector.
 
-  const referenceOpportunity = selectedStock
+  const referenceSymbol = resolveMarketWorkspaceSymbol({
+    requested: requestedMarketTicker,
+    selected: selectedStock?.symbol,
+    canonicalHero: apiMomentum?.ticker,
+  }) ?? "SPY";
+  const matchingSelectedOpportunity = selectedOpportunity?.ticker === referenceSymbol
     ? selectedOpportunity
-      ?? apiFullRankedList.find((opportunity) => opportunity.ticker === selectedStock.symbol)
-      ?? apiMomentum
-    : apiMomentum;
+    : null;
+  const matchingFrameOpportunity = apiFullRankedList.find(
+    (opportunity) => opportunity.ticker === referenceSymbol,
+  ) ?? apiBeforeCrowdList.find(
+    (opportunity) => opportunity.ticker === referenceSymbol,
+  ) ?? null;
+  const referenceOpportunity = matchingSelectedOpportunity ?? matchingFrameOpportunity;
   const referenceFramework = tradeFrameworkToDisplay(referenceOpportunity?.tradeFramework);
   const requestedAccountSurface = searchParams?.get("auth") === "signin"
     ? "signin"
@@ -1138,8 +1111,17 @@ export default function HomeClient({
       : null;
 
   if (surface === "market") {
+    const navigateMarketSymbol = (symbol: string) => {
+      const normalized = normalizeMarketWorkspaceSymbol(symbol);
+      const href = marketWorkspaceHref(normalized);
+      if (!normalized || !href) return;
+      setSelectedStock({ symbol: normalized, price: 0, change: 0 });
+      recordRecentlyViewed(normalized);
+      router.push(href);
+    };
     return (
       <HomeReferenceSurface
+        symbol={referenceSymbol}
         opportunity={referenceOpportunity}
         spotMomentum={apiFullRankedList}
         beforeCrowd={apiBeforeCrowdList}
@@ -1147,9 +1129,8 @@ export default function HomeClient({
         marketContext={marketCtx}
         watchlist={watchlist}
         recents={recentlyViewed}
-        watched={referenceOpportunity ? watchlist.includes(referenceOpportunity.ticker) : false}
+        watched={referenceSymbol ? watchlist.includes(referenceSymbol) : false}
         watchlistBusy={watchlistLoading}
-        loading={apiOpportunitiesLoading}
         selectionLoading={selectedOpportunityLoading}
         selectionError={selectedOpportunityError}
         authDestination={requestedAccountSurface}
@@ -1173,18 +1154,16 @@ export default function HomeClient({
           setAlerts((current) => current.map((item) => item.id === alert.id ? { ...item, read: true } : item));
           const canonical = apiFullRankedList.find((item) => item.ticker === alert.ticker);
           if (canonical) {
-            setSelectedStock(opportunityToStock(canonical));
+            navigateMarketSymbol(canonical.ticker);
           } else {
-            openReadTicker(alert.ticker);
+            navigateMarketSymbol(alert.ticker);
           }
-          recordRecentlyViewed(alert.ticker);
         }}
         onSelect={(opportunity) => {
-          setSelectedStock(opportunityToStock(opportunity));
-          recordRecentlyViewed(opportunity.ticker);
+          navigateMarketSymbol(opportunity.ticker);
         }}
         onToggleWatchlist={() => {
-          if (referenceOpportunity) void toggleWatchlistSymbol(referenceOpportunity.ticker);
+          if (referenceSymbol) void toggleWatchlistSymbol(referenceSymbol);
         }}
       />
     );

@@ -25,6 +25,7 @@ import {
   findTopMoverDisposition,
   type TopMoverDisposition,
 } from "@/lib/top-mover-disposition";
+import { normalizeMarketWorkspaceSymbol } from "@/lib/market-workspace-route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -80,12 +81,15 @@ async function getCanonicalSignalRow(
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const ticker = searchParams.get("ticker")?.toUpperCase().trim();
+  const ticker = normalizeMarketWorkspaceSymbol(searchParams.get("ticker"));
   const mode = searchParams.get("mode") ?? "full";
   const requestedStrategy = searchParams.get("strategy");
 
   if (!ticker) {
-    return NextResponse.json({ error: "Missing ticker param" }, { status: 400 });
+    return NextResponse.json({
+      error: "A valid stock or ETF ticker is required.",
+      code: "invalid_ticker",
+    }, { status: 400 });
   }
 
   try {
@@ -315,7 +319,8 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         error: "Failed to fetch opportunity",
-        detail: error instanceof Error ? error.message : "Unknown error",
+        code: "opportunity_unavailable",
+        ticker,
         engineVersion: CANONICAL_OPPORTUNITY_VERSION,
       },
       { status: 500 },

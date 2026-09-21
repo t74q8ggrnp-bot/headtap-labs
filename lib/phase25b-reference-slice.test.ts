@@ -38,7 +38,8 @@ test("Home reference composition is chart-led and keeps mobile information order
   assert.equal(positions.every((position) => position >= 0), true);
   assert.deepEqual([...positions].sort((left, right) => left - right), positions);
   assert.match(home, /No structured plan available\./);
-  assert.match(home, /<HomeReferenceChart symbol=\{opportunity\.ticker\}/);
+  assert.match(home, /<HomeReferenceChart symbol=\{symbol\}/);
+  assert.match(home, /const canonicalOpportunity = opportunity\?\.ticker === symbol/);
   assert.match(chart, /deriveMarketChartTimeframeBars/);
   assert.match(chart, /data-chart-provider-requests-on-switch="0"/);
   assert.match(chart, /preserveEngineOnLocalControls/);
