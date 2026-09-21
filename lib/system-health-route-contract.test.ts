@@ -9,7 +9,7 @@ const source = readFileSync(
 const handler = source.slice(source.indexOf("export async function GET"));
 
 test("deep health is rate-limited before database or provider work", () => {
-  assert.match(handler, /checkApiRateLimit\(request/);
+  assert.match(handler, /await checkDurableApiRateLimit\(request/);
   assert.ok(
     handler.indexOf("if (!rateLimit.allowed)") <
       handler.indexOf("const supabase = getSupabase()"),

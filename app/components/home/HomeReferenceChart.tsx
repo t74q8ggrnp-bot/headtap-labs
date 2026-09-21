@@ -366,10 +366,10 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
           data-chart-rendered-bars={visibleCoverage.renderedProviderBarCount}
         >
           <summary role="status" aria-live="polite">
-            Sparse tape · {visibleCoverage.renderedProviderBarCount}/{visibleCoverage.expectedIntervalCount} traded <span aria-hidden="true">ⓘ</span>
+            Sparse tape · {visibleCoverage.renderedProviderBarCount} of {visibleCoverage.expectedIntervalCount} minutes traded <span aria-hidden="true">ⓘ</span>
           </summary>
           <div className="htb-chart__sparse-detail">
-            <span>Blank intervals represent missing verified provider aggregates.</span>
+            <span>Blank intervals represent minutes with no verified provider aggregate.</span>
             <div className="htb-chart__sparse-actions" aria-label="Sparse chart alternatives">
               <button type="button" onClick={() => setTimeframe("5m")}>View 5m</button>
               <button type="button" onClick={() => selectVisibleRange("session")}>View session</button>

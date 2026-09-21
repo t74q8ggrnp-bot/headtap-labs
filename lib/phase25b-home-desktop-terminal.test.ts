@@ -39,7 +39,7 @@ test("Home terminal wires real Canonical lists and keeps required actions explic
   assert.match(home, /watchlist=\{watchlist\}/);
   assert.match(home, /recents=\{recentlyViewed\}/);
   assert.match(surface, />\{watched \? "Watching" : "Watch"\}</);
-  assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(opportunity\.ticker\)\}`\}/);
+  assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(symbol\)\}`\}/);
   assert.match(markets, /onSelect\(opportunity\)/);
   assert.match(markets, /href=\{`\/market\?ticker=\$\{encodeURIComponent\(symbol\)\}`\}/);
   assert.doesNotMatch(markets, /fetch\(|XMLHttpRequest/);

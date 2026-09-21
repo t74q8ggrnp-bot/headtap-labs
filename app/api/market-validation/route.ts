@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import { getMarketDataAgeMs } from "@/lib/market-data-time";
 import { authenticatePaperRequest } from "@/lib/paper-trading/server";
 import { getStockMarketClock } from "@/lib/stock-market-session";
@@ -53,7 +53,7 @@ function nearestAtOrBefore(
 }
 
 export async function GET(request: Request) {
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "authenticated-market-validation",
     limit: 30,
     windowMs: 60_000,

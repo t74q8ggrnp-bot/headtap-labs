@@ -26,6 +26,7 @@ import {
   type TopMoverDisposition,
 } from "@/lib/top-mover-disposition";
 import { normalizeMarketWorkspaceSymbol } from "@/lib/market-workspace-route";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -80,6 +81,17 @@ async function getCanonicalSignalRow(
 }
 
 export async function GET(req: Request) {
+  const rateLimit = await checkDurableApiRateLimit(req, {
+    namespace: "public-opportunity-ticker",
+    limit: 90,
+    windowMs: 60_000,
+  });
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many ticker intelligence requests. Please retry shortly.", code: "rate_limited" },
+      { status: 429, headers: rateLimit.headers },
+    );
+  }
   const { searchParams } = new URL(req.url);
   const ticker = normalizeMarketWorkspaceSymbol(searchParams.get("ticker"));
   const mode = searchParams.get("mode") ?? "full";
@@ -89,7 +101,21 @@ export async function GET(req: Request) {
     return NextResponse.json({
       error: "A valid stock or ETF ticker is required.",
       code: "invalid_ticker",
-    }, { status: 400 });
+    }, { status: 400, headers: rateLimit.headers });
+  }
+  if (!["full", "history", "explain"].includes(mode)) {
+    return NextResponse.json({
+      error: "Unsupported ticker intelligence mode.",
+      code: "invalid_mode",
+      ticker,
+    }, { status: 400, headers: rateLimit.headers });
+  }
+  if (requestedStrategy && !["spot_momentum", "before_the_crowd"].includes(requestedStrategy)) {
+    return NextResponse.json({
+      error: "Unsupported opportunity strategy.",
+      code: "invalid_strategy",
+      ticker,
+    }, { status: 400, headers: rateLimit.headers });
   }
 
   try {

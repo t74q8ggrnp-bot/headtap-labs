@@ -75,8 +75,9 @@ import {
   preflightStockDisplayFrameCoordination,
   StockDisplayFrameCoordinationError,
 } from "@/lib/stock-display-frame-server";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import { marketChartPollingState } from "@/lib/market-chart-polling";
+import { getReleaseProvenance, PRODUCT_SCHEMA_MIGRATION_LEVEL } from "@/lib/release-provenance";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -261,7 +262,8 @@ async function loadProxRoutedObservationHealthRows(
 }
 
 export async function GET(request: Request) {
-  const rateLimit = checkApiRateLimit(request, {
+  const releaseProvenance = getReleaseProvenance();
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "system-health-deep-audit",
     limit: 12,
     windowMs: 60_000,
@@ -278,6 +280,12 @@ export async function GET(request: Request) {
       auditComplete: false,
       checks: [],
       warnings: [],
+      releaseIntegrity: {
+        ...releaseProvenance,
+        observedSchemaMigrationLevel: null,
+        schemaVerified: false,
+        releaseReady: false,
+      },
       timestamp: new Date().toISOString(),
     }, { status: 429, headers: responseHeaders });
   }
@@ -321,8 +329,8 @@ export async function GET(request: Request) {
     name: "polygon_env",
     ok: hasPolygonKey,
     message: hasPolygonKey
-      ? "Polygon API key available."
-      : "Missing POLYGON_API_KEY.",
+      ? "Massive market-data credential is available through the Polygon-compatible API."
+      : "Massive market-data credential is unavailable.",
   });
 
   // This state is code-owned and remains verifiable even when the database is
@@ -371,6 +379,12 @@ export async function GET(request: Request) {
       status: "unhealthy",
       message: "System health failed before database check.",
       checks,
+      releaseIntegrity: {
+        ...releaseProvenance,
+        observedSchemaMigrationLevel: null,
+        schemaVerified: false,
+        releaseReady: false,
+      },
       timestamp: new Date().toISOString(),
     }, { status: 500, headers: responseHeaders });
   }
@@ -411,10 +425,46 @@ export async function GET(request: Request) {
       },
       checks,
       warnings: [],
+      releaseIntegrity: {
+        ...releaseProvenance,
+        observedSchemaMigrationLevel: null,
+        schemaVerified: false,
+        releaseReady: false,
+      },
       timestamp: new Date().toISOString(),
     }, {
       status: 503,
       headers: { ...responseHeaders, "Retry-After": "30" },
+    });
+  }
+
+  let productIntegrityGuardrailsVerified = false;
+  try {
+    const guardrailsResult = await supabase.rpc("ht_product_integrity_guardrails_health");
+    if (guardrailsResult.error) throw guardrailsResult.error;
+    const guardrails = guardrailsResult.data && typeof guardrailsResult.data === "object" && !Array.isArray(guardrailsResult.data)
+      ? guardrailsResult.data as Record<string, unknown>
+      : null;
+    productIntegrityGuardrailsVerified = guardrails?.verified === true &&
+      guardrails?.migrationLevel === PRODUCT_SCHEMA_MIGRATION_LEVEL &&
+      guardrails?.globalRateLimitReady === true &&
+      guardrails?.telemetryReady === true &&
+      guardrails?.scoringAuthorityChanged === false &&
+      guardrails?.executionAuthorityChanged === false;
+    checks.push({
+      name: "product_integrity_guardrails",
+      ok: productIntegrityGuardrailsVerified,
+      message: productIntegrityGuardrailsVerified
+        ? "Global public-endpoint rate limiting and external-request telemetry are service-only and active."
+        : "Product-integrity guardrails are not verified; apply migration 0060 before release.",
+      detail: guardrails,
+    });
+  } catch {
+    checks.push({
+      name: "product_integrity_guardrails",
+      ok: false,
+      message: "Product-integrity guardrails are unavailable; apply migration 0060 before release.",
+      detail: { requiredMigration: "0060_product_integrity_guardrails.sql" },
     });
   }
 
@@ -585,8 +635,8 @@ export async function GET(request: Request) {
       message: !dispositionReceiptsExpected
         ? "Top-mover disposition receipts activate with the next v10 promoted scan."
         : dispositionAudit.complete
-          ? "Every sampled Polygon top mover has an explicit canonical or exclusion outcome."
-          : "One or more sampled Polygon top movers disappeared without a complete disposition.",
+          ? "Every sampled Massive top mover has an explicit Canonical or exclusion outcome."
+          : "One or more sampled Massive top movers disappeared without a complete disposition.",
       detail: {
         writerVersion,
         expected: dispositionReceiptsExpected,
@@ -3580,6 +3630,18 @@ export async function GET(request: Request) {
 
   const hardFailures = checks.filter((check) => !check.ok);
   const ok = hardFailures.length === 0;
+  const researchObservabilityVerified = checks.some((check) =>
+    check.name === "ht_agent_target_path_research" && check.ok
+  );
+  const schemaVerified = researchObservabilityVerified && productIntegrityGuardrailsVerified;
+  const releaseIntegrity = {
+    ...releaseProvenance,
+    observedSchemaMigrationLevel: schemaVerified
+      ? PRODUCT_SCHEMA_MIGRATION_LEVEL
+      : null,
+    schemaVerified,
+    releaseReady: releaseProvenance.ok && schemaVerified,
+  };
 
   return NextResponse.json({
     ok,
@@ -3608,6 +3670,7 @@ export async function GET(request: Request) {
           providerRequests: 0 }];
       }),
     ],
+    releaseIntegrity,
     timestamp: new Date().toISOString(),
   }, { status: ok ? 200 : 500, headers: responseHeaders });
 }

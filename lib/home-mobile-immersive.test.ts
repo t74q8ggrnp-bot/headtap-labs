@@ -61,7 +61,7 @@ test("compact Market keeps discovery, Intelligence, Watch, and Paper review avai
   assert.match(surface, /className="ht-home-compact-action ht-home-markets-launcher"/);
   assert.match(surface, /className="ht-home-compact-action ht-home-intelligence-launcher"/);
   assert.match(surface, /onToggleWatchlist/);
-  assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(opportunity\.ticker\)\}`\}/);
-  assert.match(surface, /title="Explore markets"/);
-  assert.match(surface, /title="HT Intelligence"/);
+  assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(symbol\)\}`\}/);
+  assert.match(surface, /aria-label="Explore Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"/);
+  assert.match(surface, /aria-label="Open HT Intelligence"/);
 });

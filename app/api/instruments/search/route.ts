@@ -1,4 +1,4 @@
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import {
   INSTRUMENT_METADATA_TTL_MS,
   INSTRUMENT_SEARCH_MAX_RESULTS,
@@ -23,7 +23,7 @@ function errorStatus(error: InstrumentSearchError) {
 }
 
 export async function GET(request: Request) {
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "public-instrument-search",
     limit: 60,
     windowMs: 60_000,

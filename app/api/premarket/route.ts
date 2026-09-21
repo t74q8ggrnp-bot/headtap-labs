@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import { fetchMassiveMarketMovers } from "@/lib/massive-market-movers";
 import {
   resolveSnapshotChangePercent,
@@ -95,7 +95,7 @@ function classify(row: PolygonSnapshotRow, session: StockMarketSession): Premark
 }
 
 export async function GET(request: Request) {
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "premarket-observation",
     limit: 30,
     windowMs: 60_000,
@@ -140,7 +140,7 @@ export async function GET(request: Request) {
       dataMode: entitlement.dataMode,
       authority: "qa_observation_only",
       degraded,
-      degradedReasons: source.errors,
+      unavailableSourceCount: source.errors.length,
     }, { status: degraded && movers.length === 0 ? 503 : 200, headers });
   } catch (error) {
     console.error("[premarket] Massive mover read failed", {

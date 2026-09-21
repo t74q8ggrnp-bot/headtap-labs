@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import {
   buildMarketDataTimingReceipt,
   isActiveMarketTimestampUsable,
@@ -151,7 +151,7 @@ async function fetchSnapshotBatch(
 export async function POST(request: Request) {
   const requestStartedAt = new Date();
   let providerRequestsAttempted = 0;
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "public-bulk-quote",
     limit: 30,
     windowMs: 60_000,

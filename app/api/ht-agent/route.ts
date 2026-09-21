@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     console.error("[ht-agent] action failed", error);
     return response({
       ok: false,
-      error: error instanceof Error ? error.message : "HT Agent request failed.",
+      error: "HT Agent is temporarily unavailable.",
     }, 503);
   }
 }

@@ -1,7 +1,5 @@
 "use client";
 
-declare global { interface Window { _htScannerLastFetch?: number } }
-
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -101,12 +99,6 @@ type SignalFeedRow = {
   trap_score?: number;
   state?: string;
   pattern?: string;
-};
-
-type ScannerExpansionTicker = {
-  symbol: string;
-  price: number;
-  change?: number;
 };
 
 const defaultStarterTickers = [
@@ -240,7 +232,7 @@ export default function HomeClient({
     mood: string;
     moodColor: string;
     volumeEnv: string;
-    avgRvol: number;
+    avgRvol: number | null;
   };
   const [marketCtx, setMarketCtx] = useState<MarketContext | null>(null);
 
@@ -405,9 +397,14 @@ export default function HomeClient({
     setBullBearLoading(true);
     setBullBearExpanded(false);
 
-    const attempt = (retriesLeft: number) => {
-      fetch(`/api/bull-bear?ticker=${btcTickerForAnalysis}`)
-        .then((response) => response.json())
+    fetch(`/api/bull-bear?ticker=${btcTickerForAnalysis}`)
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok || data?.status !== "available") {
+            throw new Error("Bull/bear evidence is unavailable.");
+          }
+          return data;
+        })
         .then((data) => {
           if (cancelled) return;
           setBullBearData(data);
@@ -416,15 +413,10 @@ export default function HomeClient({
         })
         .catch((error) => {
           if (cancelled) return;
-          if (retriesLeft > 0) {
-            window.setTimeout(() => attempt(retriesLeft - 1), 1500);
-          } else {
-            console.warn("[Bull-Bear] fetch failed after retry:", error);
-            setBullBearLoading(false);
-          }
+          console.warn("[Bull-Bear] evidence unavailable:", error);
+          setBullBearData(null);
+          setBullBearLoading(false);
         });
-    };
-    attempt(1);
     return () => {
       cancelled = true;
     };
@@ -436,9 +428,14 @@ export default function HomeClient({
     let cancelled = false;
     setBullBearLoading(true);
 
-    const attempt = (retriesLeft: number) => {
-      fetch(`/api/bull-bear?ticker=${selectedStock.symbol}`)
-        .then((response) => response.json())
+    fetch(`/api/bull-bear?ticker=${selectedStock.symbol}`)
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok || data?.status !== "available") {
+            throw new Error("Bull/bear evidence is unavailable.");
+          }
+          return data;
+        })
         .then((data) => {
           if (cancelled) return;
           setBullBearData(data);
@@ -447,15 +444,10 @@ export default function HomeClient({
         })
         .catch((error) => {
           if (cancelled) return;
-          if (retriesLeft > 0) {
-            window.setTimeout(() => attempt(retriesLeft - 1), 1500);
-          } else {
-            console.warn("[Bull-Bear] selected ticker fetch failed after retry:", error);
-            setBullBearLoading(false);
-          }
+          console.warn("[Bull-Bear] selected ticker evidence unavailable:", error);
+          setBullBearData(null);
+          setBullBearLoading(false);
         });
-    };
-    attempt(1);
     return () => {
       cancelled = true;
     };
@@ -705,6 +697,31 @@ export default function HomeClient({
   };
 
   const fetchStocks = async () => {
+    // Product-integrity repair: the Canonical decision frame is the one shared
+    // discovery controller. The former browser-side movers + signal + bulk
+    // quote loop duplicated server work every 30 seconds and could reorder the
+    // board independently of Canonical. Keep the legacy implementation below
+    // isolated for rollback history, but do not execute it.
+    const legacyDiscoveryHydrationEnabled = false;
+    if (!legacyDiscoveryHydrationEnabled) {
+      const canonicalStocks = [...apiFullRankedList, ...apiBeforeCrowdList]
+        .filter((opportunity, index, rows) =>
+          rows.findIndex((candidate) => candidate.ticker === opportunity.ticker) === index,
+        )
+        .map(opportunityToStock);
+      setStocks(canonicalStocks);
+      setMarketScanStats((current) => ({
+        ...current,
+        scanned: canonicalStocks.length,
+        gainers: canonicalStocks.filter((stock) => stock.change > 0).length,
+        losers: canonicalStocks.filter((stock) => stock.change < 0).length,
+        highVolume: canonicalStocks.filter((stock) => getRelativeVolume(stock) >= 3).length,
+        lastFullScan: canonicalLastUpdated,
+      }));
+      setLastUpdated(canonicalLastUpdated);
+      setIsRefreshing(false);
+      return;
+    }
     try {
       setIsRefreshing(true);
 
@@ -907,36 +924,10 @@ export default function HomeClient({
 
   useEffect(() => {
     if (surface !== "intelligence") return;
-    // Fetch news for top stocks so hero card always has context. The canonical
-    // opportunity hook owns its own immediate load/refresh lifecycle.
-    const topStocksForFetch = stocks.slice(0, 12);
-    if (liveHeroTarget && !topStocksForFetch.find(s => s.symbol === liveHeroTarget.symbol)) {
-      topStocksForFetch.push(liveHeroTarget);
-    }
-    topStocksForFetch.forEach((stock) => {
-      fetchNews(stock.symbol);
-    });
-
-    // Fetch expanded scanner universe every 5 minutes
-    if (!window._htScannerLastFetch || Date.now() - window._htScannerLastFetch > 5 * 60 * 1000) {
-      window._htScannerLastFetch = Date.now();
-      fetch("/api/scanner_expansion?type=all")
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (!data?.tickers?.length) return;
-          const existing = new Set(stocks.map(s => s.symbol));
-          const scannerTickers = data.tickers as ScannerExpansionTicker[];
-          const newTickers: Stock[] = scannerTickers
-            .filter((scannerTicker) => !existing.has(scannerTicker.symbol) && scannerTicker.price > 0)
-            .map((scannerTicker) => ({ symbol: scannerTicker.symbol, price: scannerTicker.price, change: scannerTicker.change || 0, volume: 0, prevVolume: 0 }));
-          if (newTickers.length > 0) {
-            setStocks(prev => [...prev, ...newTickers].slice(0, 50));
-          }
-        })
-        .catch(e => console.warn("Scanner expansion failed:", e));
-    }
-
-  }, [liveHeroTarget, stocks, surface]);
+    // News enrichment is on-demand for the visible Canonical hero. It is no
+    // longer multiplied across twelve hidden cards or coupled to Scanner.
+    if (liveHeroTarget) void fetchNews(liveHeroTarget.symbol);
+  }, [liveHeroTarget, surface]);
 
   const fetchStocksRef = useRef(fetchStocks);
   useEffect(() => {
@@ -1404,7 +1395,7 @@ export default function HomeClient({
                     marketCtx.volumeEnv === "Normal" ? "text-zinc-400" : "text-zinc-600"
                   }`}>{marketCtx.volumeEnv}</span>
                 </div>
-                <span className="text-[8px] font-semibold text-zinc-800 ml-1">Market context · updates every 5 min</span>
+                <span className="text-[8px] font-semibold text-zinc-800 ml-1">Market context · refreshes every minute</span>
               </>
             ) : (
               // Loading state — visible while API fetches

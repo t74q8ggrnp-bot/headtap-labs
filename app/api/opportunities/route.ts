@@ -5,7 +5,7 @@ import {
   type OpportunityFeedRequestType,
 } from "@/lib/canonical-opportunity-feed";
 import { getRollingCanonicalDecisionFrame } from "@/lib/canonical-decision-frame";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -23,7 +23,7 @@ const OPPORTUNITY_CACHE_HEADERS = {
 };
 
 export async function GET(req: Request) {
-  const rateLimit = checkApiRateLimit(req, {
+  const rateLimit = await checkDurableApiRateLimit(req, {
     namespace: "public-opportunities",
     limit: 180,
     windowMs: 60_000,
@@ -75,12 +75,12 @@ export async function GET(req: Request) {
       headers: responseHeaders,
     });
   } catch (error: unknown) {
+    console.error("[opportunities] canonical feed unavailable", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to produce opportunities.",
+        error: "Canonical opportunities are temporarily unavailable.",
         opportunities: [],
         engineVersion: CANONICAL_OPPORTUNITY_VERSION,
       },

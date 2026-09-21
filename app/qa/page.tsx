@@ -6,7 +6,7 @@ import { resolveQaHealth } from "@/lib/checkpoint-a-ui-state";
 import { getErrorMessage } from "@/lib/error-message";
 import { Control, PanelHeader } from "@/app/components/ui/ApplicationPrimitives";
 
-type SystemStatus = "operational" | "degraded" | "offline" | "checking";
+type SystemStatus = "operational" | "degraded" | "offline" | "unavailable" | "not_tested" | "checking";
 
 type SystemCheck = {
   name: string;
@@ -19,8 +19,8 @@ type SystemCheck = {
 };
 
 const SYSTEMS: { name: string; category: string; critical: boolean }[] = [
-  { name: "Polygon (Bulk Quote)", category: "Data", critical: true },
-  { name: "Polygon (Single Quote)", category: "Data", critical: true },
+  { name: "Massive (Bulk Quote)", category: "Data", critical: true },
+  { name: "Massive (Single Quote)", category: "Data", critical: true },
   { name: "Opportunities API", category: "Intelligence", critical: true },
   { name: "AI Analysis", category: "Intelligence", critical: true },
   { name: "Supabase", category: "Database", critical: true },
@@ -35,6 +35,8 @@ function StatusDot({ status }: { status: SystemStatus }) {
   if (status === "operational") return <span className="inline-flex h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.8)]" />;
   if (status === "degraded") return <span className="inline-flex h-2.5 w-2.5 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.8)]" />;
   if (status === "offline") return <span className="inline-flex h-2.5 w-2.5 rounded-full bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.8)]" />;
+  if (status === "unavailable") return <span className="inline-flex h-2.5 w-2.5 rounded-full bg-orange-300" />;
+  if (status === "not_tested") return <span className="inline-flex h-2.5 w-2.5 rounded-full bg-zinc-600" />;
   return <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-zinc-500" />;
 }
 
@@ -43,12 +45,16 @@ function StatusBadge({ status }: { status: SystemStatus }) {
     operational: "🟢 Operational",
     degraded: "🟡 Degraded",
     offline: "🔴 Offline",
+    unavailable: "🟠 Unavailable",
+    not_tested: "— Not Tested",
     checking: "⬜ Checking...",
   };
   const colors = {
     operational: "text-green-300 bg-green-500/10 border-green-400/20",
     degraded: "text-yellow-300 bg-yellow-500/10 border-yellow-400/20",
     offline: "text-red-300 bg-red-500/10 border-red-400/20",
+    unavailable: "text-orange-200 bg-orange-500/10 border-orange-400/20",
+    not_tested: "text-zinc-400 bg-white/5 border-white/10",
     checking: "text-zinc-400 bg-white/5 border-white/10",
   };
   return (
@@ -74,7 +80,7 @@ function LatencyBar({ latency }: { latency?: number }) {
 
 export default function QAPage() {
   const [systems, setSystems] = useState<SystemCheck[]>(
-    SYSTEMS.map(s => ({ ...s, status: "checking" as SystemStatus }))
+    SYSTEMS.map(s => ({ ...s, status: "not_tested" as SystemStatus, message: "Not tested. Run diagnostics to collect a receipt." }))
   );
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<Date | null>(null);
@@ -111,7 +117,7 @@ export default function QAPage() {
           const latency = Date.now() - start;
           const count = Object.keys(data.quotes || {}).length;
           const nvda = data.quotes?.NVDA;
-          updateSystem("Polygon (Bulk Quote)", {
+          updateSystem("Massive (Bulk Quote)", {
             status: res.ok && count > 0 ? getStatus(true, latency) : "offline",
             latency,
             message: res.ok && count > 0
@@ -119,7 +125,7 @@ export default function QAPage() {
               : `Failed — ${count} tickers returned`,
           });
         } catch (error: unknown) {
-          updateSystem("Polygon (Bulk Quote)", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Bulk quote check failed") });
+          updateSystem("Massive (Bulk Quote)", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Bulk quote check failed") });
         }
       },
 
@@ -130,7 +136,7 @@ export default function QAPage() {
           const res = await fetch("/api/quote?symbol=AAPL");
           const data = await res.json();
           const latency = Date.now() - start;
-          updateSystem("Polygon (Single Quote)", {
+          updateSystem("Massive (Single Quote)", {
             status: res.ok && data.c > 0 ? getStatus(true, latency) : "offline",
             latency,
             message: res.ok
@@ -138,7 +144,7 @@ export default function QAPage() {
               : `HTTP ${res.status}`,
           });
         } catch (error: unknown) {
-          updateSystem("Polygon (Single Quote)", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Single quote check failed") });
+          updateSystem("Massive (Single Quote)", { status: "offline", latency: Date.now() - start, message: getErrorMessage(error, "Single quote check failed") });
         }
       },
 
@@ -215,17 +221,18 @@ export default function QAPage() {
           });
           const latency = Date.now() - start;
           updateSystem("Authentication", {
-            status: res.ok || res.status === 200 ? getStatus(true, latency) : "degraded",
+            status: res.ok ? getStatus(true, latency) : "unavailable",
             latency,
-            message: res.ok ? `Supabase Auth reachable · Login/Signup/Signout functional` : `Status ${res.status} — auth may be limited`,
+            message: res.ok
+              ? "Supabase Auth settings receipt succeeded. Credential flows were not exercised."
+              : `Auth settings unavailable · HTTP ${res.status}`,
           });
         } catch {
-          // Auth might not be directly testable — mark as operational if supabase worked
           const latency = Date.now() - start;
           updateSystem("Authentication", {
-            status: "operational",
+            status: "unavailable",
             latency,
-            message: `Auth via Supabase — login/logout tested manually`,
+            message: "Supabase Auth could not be tested. No pass was inferred.",
           });
         }
       },
@@ -314,11 +321,6 @@ export default function QAPage() {
     setLastRun(new Date());
     setRunning(false);
   }, []);
-
-  useEffect(() => {
-    const initialCheck = window.setTimeout(() => void runChecks(), 0);
-    return () => window.clearTimeout(initialCheck);
-  }, [runChecks]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -463,11 +465,11 @@ export default function QAPage() {
           <h2 id="qa-architecture-heading" className="mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300">Data Architecture</h2>
           <dl className="space-y-2">
             {[
-              ["Primary Data", "Polygon.io Stocks Basic — real-time prices, volume, grouped daily bars"],
-              ["Fallback Chain", "Polygon → Finnhub → Yahoo Finance for all quote endpoints"],
-              ["Scanner", "133 tickers · Polygon snapshot (live) → grouped daily bars (weekend) → Yahoo"],
+              ["Primary Data", "Massive stock market data with provider timestamps and explicit availability states"],
+              ["Display Frames", "Shared server-coordinated quote and chart frames; no client-invented fallback prices"],
+              ["Scanner", "Canonical run-scoped opportunities; operator diagnostics are separate from public ranking authority"],
               ["Signal Memory", "Supabase ht_signal_memory — requires user auth · graded every scan"],
-              ["AI", "Claude Sonnet via /api/ai · 5-15s response time expected"],
+              ["AI", "OpenAI synthesis is on-demand, bounded, and unavailable when supporting evidence cannot be verified"],
               ["Social", "Stocktwits API · lower signal on weekends"],
               ["Premarket", "Active pre/after market hours only · returns empty during weekend"],
             ].map(([label, note]) => (

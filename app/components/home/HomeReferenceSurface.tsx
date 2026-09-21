@@ -23,7 +23,7 @@ export type HomeMarketContext = {
   mood: string;
   moodColor: string;
   volumeEnv: string;
-  avgRvol: number;
+  avgRvol: number | null;
 };
 
 type Props = {

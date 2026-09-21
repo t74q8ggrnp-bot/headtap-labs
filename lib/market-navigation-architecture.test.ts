@@ -44,5 +44,5 @@ test("Market retains both Canonical discovery lanes and hands execution review t
   assert.match(market, /getRollingCanonicalDecisionFrame\("before_crowd"\)/);
   assert.match(market, /initialMomentumPayload=\{initialMomentumPayload\}/);
   assert.match(market, /initialBeforeCrowdPayload=\{initialBeforeCrowdPayload\}/);
-  assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(opportunity\.ticker\)\}`\}/);
+  assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(symbol\)\}`\}/);
 });

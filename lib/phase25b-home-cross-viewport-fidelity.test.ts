@@ -93,8 +93,8 @@ test("portrait actions stay compact and accessible while collapsed Intelligence 
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const css = source("app/globals.css");
 
-  assert.match(surface, /aria-label=\{watched \? `Remove \$\{opportunity\.ticker\} from watchlist` : `Add \$\{opportunity\.ticker\} to watchlist`\}/);
-  assert.match(surface, /aria-label=\{`Review \$\{opportunity\.ticker\} in Paper Trading`\}/);
+  assert.match(surface, /aria-label=\{watched \? `Remove \$\{symbol\} from watchlist` : `Add \$\{symbol\} to watchlist`\}/);
+  assert.match(surface, /aria-label=\{`Review \$\{symbol\} in Paper Trading`\}/);
   assert.match(surface, /ht-home-action-label--mobile">Paper/);
   assert.match(surface, /ht-home-action-label--desktop">Review in Paper/);
   assert.match(chart, /Math\.min\(620, Math\.max\(330, window\.innerHeight - 302\)\)/);

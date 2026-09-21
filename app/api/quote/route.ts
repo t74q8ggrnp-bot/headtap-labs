@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import {
   ACTIVE_MARKET_DATA_MAX_AGE_MS,
   buildMarketDataTimingReceipt,
@@ -38,7 +38,7 @@ const NO_STORE_HEADERS = {
 };
 
 export async function GET(request: Request) {
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "public-stock-quote",
     limit: 120,
     windowMs: 60_000,

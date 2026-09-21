@@ -1,4 +1,4 @@
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import {
   createProviderRequestInstrumentation,
   marketBarsAtOrBeforeProviderTimestamp,
@@ -154,7 +154,7 @@ function secondDeltaIsCacheable(
 }
 
 export async function GET(request: Request) {
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "public-market-chart-delta",
     limit: 180,
     windowMs: 60_000,

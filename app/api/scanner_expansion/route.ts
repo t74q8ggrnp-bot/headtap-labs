@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import { fetchMassiveMarketMovers } from "@/lib/massive-market-movers";
 import {
   resolveSnapshotChangePercent,
@@ -51,7 +51,7 @@ function normalize(row: PolygonSnapshotRow): ScannedTicker | null {
 }
 
 export async function GET(request: Request) {
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "scanner-expansion",
     limit: 30,
     windowMs: 60_000,
@@ -100,7 +100,7 @@ export async function GET(request: Request) {
       dataMode: entitlement.dataMode,
       authority: "secondary_discovery_only",
       degraded,
-      degradedReasons: movers.errors,
+      unavailableSourceCount: movers.errors.length,
     }, { status: degraded && tickers.length === 0 ? 503 : 200, headers });
   } catch (error) {
     console.error("[scanner-expansion] Massive mover read failed", {

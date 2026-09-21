@@ -10,7 +10,7 @@ import {
   type MarketChartBar,
   type MarketChartResponse,
 } from "@/lib/market-chart";
-import { checkApiRateLimit } from "@/lib/api-rate-limit";
+import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import {
   fetchMassiveLastTradeResult,
   fetchMassiveStockSnapshotResult,
@@ -471,7 +471,7 @@ export async function GET(request: Request) {
   const requestStartedAt = new Date();
   const requestId = crypto.randomUUID();
   let providerRequestsAttempted = 0;
-  const rateLimit = checkApiRateLimit(request, {
+  const rateLimit = await checkDurableApiRateLimit(request, {
     namespace: "public-market-chart",
     limit: 60,
     windowMs: 60_000,

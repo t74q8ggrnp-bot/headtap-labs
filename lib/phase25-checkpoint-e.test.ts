@@ -4,19 +4,16 @@ import test from "node:test";
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("Checkpoint E preserves request endpoints and polling contracts", () => {
+test("Checkpoint E routes retain their contracts while Home no longer duplicates hidden discovery requests", () => {
   const home = source("app/HomeClient.tsx");
   const scanner = source("app/scanner/page.tsx");
   const signals = source("app/signals/page.tsx");
   const news = source("app/news-feed/page.tsx");
   const prox = source("app/prox/page.tsx");
 
-  for (const endpoint of [
-    "/api/market-context",
-    "/api/scanner_expansion?type=all",
-    "/api/market-movers",
-    "/api/ht-signals-feed",
-  ]) assert.match(home, new RegExp(endpoint.replace(/[?]/g, "\\?")));
+  assert.match(home, /\/api\/market-context/);
+  assert.doesNotMatch(home, /fetch\("\/api\/scanner_expansion\?type=all"/);
+  assert.match(home, /legacyDiscoveryHydrationEnabled = false/);
   assert.match(home, /setInterval\(\(\) => \{[\s\S]*?fetchCtx\(\);[\s\S]*?60 \* 1000\)/);
 
   assert.equal(scanner.match(/fetch\("\/api\/opportunities\?limit=100"\)/g)?.length, 1);

@@ -67,8 +67,8 @@ test("Home discloses sparse one-minute tape from the existing chart frame", () =
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const canvas = source("app/components/market/MarketChartCanvas.tsx");
 
-  assert.match(chart, /Sparse tape · \{visibleCoverage\.renderedProviderBarCount\}\/\{visibleCoverage\.expectedIntervalCount\} traded/);
-  assert.match(chart, /Blank intervals represent missing verified provider aggregates\./);
+  assert.match(chart, /Sparse tape · \{visibleCoverage\.renderedProviderBarCount\} of \{visibleCoverage\.expectedIntervalCount\} minutes traded/);
+  assert.match(chart, /Blank intervals represent minutes with no verified provider aggregate/);
   assert.match(chart, /aria-label="Visible chart coverage"/);
   assert.match(chart, /coveragePercentage\}% coverage/);
   assert.match(chart, />View 5m</);

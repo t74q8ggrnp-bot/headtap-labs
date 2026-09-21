@@ -45,6 +45,10 @@ export type NewsIntel = {
   // route's hardcoded stub). Callers that treat this as scoring evidence
   // (ProX) must gate on this, not on the numbers alone.
   dataAvailable: boolean;
+  status: "available" | "unavailable";
+  collectedAt: string;
+  newestArticleAt: string | null;
+  providerRequests: number;
 };
 
 const clampScore = (value: number, min = 0, max = 99) =>
@@ -70,7 +74,9 @@ const HYPE_WORDS = ["meme","retail","short squeeze","squeeze","reddit","wallstre
 export function buildNewsIntel(
   symbol: string,
   articles: NormalizedArticle[],
+  providerRequests = 0,
 ): NewsIntel {
+  if (articles.length === 0) return emptyNewsIntel(symbol, providerRequests);
   const nowSeconds = Math.floor(Date.now() / 1000);
   const text = articles.map((a) => `${a.headline} ${a.summary}`).join(" ").toLowerCase();
   const sourceCount = new Set(articles.map((a) => a.source)).size;
@@ -95,21 +101,31 @@ export function buildNewsIntel(
     hypeScore,
     sourceCount,
     dataAvailable: articles.length > 0,
+    status: articles.length > 0 ? "available" : "unavailable",
+    collectedAt: new Date().toISOString(),
+    newestArticleAt: articles.length > 0
+      ? new Date(Math.max(...articles.map((article) => article.datetime * 1_000))).toISOString()
+      : null,
+    providerRequests,
   };
 }
 
-export function emptyNewsIntel(symbol: string): NewsIntel {
+export function emptyNewsIntel(symbol: string, providerRequests = 0): NewsIntel {
   return {
     symbol,
     articles: [],
-    newsVelocity: 25,
-    catalystStrength: "No fresh catalyst",
-    narrativeSignal: "Narrative still quiet",
-    sentimentBias: "Neutral narrative",
-    sentimentScore: 50,
-    hypeScore: 25,
+    newsVelocity: 0,
+    catalystStrength: "Catalyst evidence unavailable",
+    narrativeSignal: "Narrative evidence unavailable",
+    sentimentBias: "Sentiment unavailable",
+    sentimentScore: 0,
+    hypeScore: 0,
     sourceCount: 0,
     dataAvailable: false,
+    status: "unavailable",
+    collectedAt: new Date().toISOString(),
+    newestArticleAt: null,
+    providerRequests,
   };
 }
 
@@ -135,8 +151,8 @@ async function fetchFinnhubArticles(
       summary: item.summary || "",
       source: item.source || "Finnhub",
       url: item.url || "",
-      datetime: item.datetime || Math.floor(Date.now() / 1000),
-    }));
+      datetime: Number.isFinite(item.datetime) && Number(item.datetime) > 0 ? Number(item.datetime) : 0,
+    })).filter((article) => article.datetime > 0);
   } catch (err) {
     console.warn(`Finnhub news failed for ${symbol}:`, err);
     return [];
@@ -162,8 +178,8 @@ async function fetchNewsApiArticles(
       url: a.url || "",
       datetime: a.publishedAt
         ? Math.floor(new Date(a.publishedAt).getTime() / 1000)
-        : Math.floor(Date.now() / 1000),
-    }));
+        : 0,
+    })).filter((article) => Number.isFinite(article.datetime) && article.datetime > 0);
   } catch (err) {
     console.warn(`NewsAPI failed for ${symbol}:`, err);
     return [];
@@ -177,7 +193,7 @@ export async function fetchNewsIntel(symbolInput: string): Promise<NewsIntel> {
 
   if (!finnhubKey && !newsApiKey) {
     console.warn("NEWS INTEL: No API keys configured. Returning empty intel.");
-    return emptyNewsIntel(symbol);
+    return emptyNewsIntel(symbol, 0);
   }
 
   const [finnhubArticles, newsApiArticles] = await Promise.all([
@@ -188,5 +204,7 @@ export async function fetchNewsIntel(symbolInput: string): Promise<NewsIntel> {
   const cleaned = uniqueArticles([...finnhubArticles, ...newsApiArticles])
     .sort((a, b) => b.datetime - a.datetime)
     .slice(0, 10);
-  return buildNewsIntel(symbol, cleaned);
+  return cleaned.length > 0
+    ? buildNewsIntel(symbol, cleaned, Number(Boolean(finnhubKey)) + Number(Boolean(newsApiKey)))
+    : emptyNewsIntel(symbol, Number(Boolean(finnhubKey)) + Number(Boolean(newsApiKey)));
 }

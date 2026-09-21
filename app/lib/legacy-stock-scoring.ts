@@ -31,7 +31,8 @@ export const getRiskLabel = (stock: Stock) => {
 };
 
 export const getRelativeVolume = (stock: Stock) => {
-  // Priority 1: Use pre-computed relativeVolume from ht_signals (Polygon data)
+  // Priority 1: Use pre-computed relative volume from the verified Massive/
+  // Canonical signal frame.
   if (stock.relativeVolume && stock.relativeVolume > 0) {
     return Number(Math.min(10, Math.max(0.1, stock.relativeVolume)).toFixed(1));
   }
@@ -42,9 +43,10 @@ export const getRelativeVolume = (stock: Stock) => {
     return Number(Math.min(10, Math.max(0.1, rvol)).toFixed(1));
   }
 
-  // Priority 3: Estimate from price change (last resort — no Polygon data available)
-  const move = Math.abs(stock.change);
-  return Number(Math.max(0.8, 1 + move / 3).toFixed(1));
+  // Price movement is not volume evidence. Zero is the legacy numeric sentinel
+  // for unavailable; user-facing surfaces must render it as an em dash rather
+  // than calling it measured RVOL.
+  return 0;
 };
 
 export const getVolumeAcceleration = (stock: Stock) => {
