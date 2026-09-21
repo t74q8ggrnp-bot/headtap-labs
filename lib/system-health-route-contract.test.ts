@@ -52,3 +52,20 @@ test("partial ProX source coverage is classified as market evidence, not a colle
   assert.match(handler, /collectorFault:\s*false/);
   assert.match(handler, /original provider times are preserved/);
 });
+
+test("independent ProX health requires a complete zero-authority theory-challenger receipt", () => {
+  assert.match(source, /PROX_EDGE_THEORY_CHALLENGER_VERSION/);
+  assert.match(source, /challengerCoverageValid/);
+  assert.match(source, /challengerMissingCount/);
+  assert.match(source, /authority\.canonicalRanking === false/);
+  assert.match(source, /authority\.agentDecision === false/);
+  assert.match(source, /authority\.paperExecution === false/);
+  assert.match(source, /authority\.liveExecution === false/);
+});
+
+test("long closures do not make a valid prior Agent success falsely stale", () => {
+  assert.match(
+    source,
+    /const maxCycleAgeHours = longMarketClosure\s*\? Infinity/,
+  );
+});

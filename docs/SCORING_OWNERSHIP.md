@@ -85,6 +85,12 @@ after owner review and forward out-of-sample evaluation; direct feedback from
 Agent-generated targets into the live Canonical score is prohibited as
 circular.
 
+The prospective observability receipt for this ledger proves expected versus
+persisted episode coverage and records seed exceptions. It does not add a new
+score, alter an existing decision, or grant authority. Likewise, paired
+current-v2 versus ProX theory-challenger summaries are read-only diagnostics on
+identical outcomes; they cannot auto-promote either theory.
+
 ## Bounded ProX Market Pulse consumer
 
 `lib/prox/public-authority.ts` owns the separate, established ProX Market Pulse

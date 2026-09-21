@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getErrorMessage } from "@/lib/error-message";
 import {
   buildProxCanonicalPairedScorecard,
+  PROX_EDGE_THEORY_CHALLENGER_VERSION,
   type CanonicalPairCandidate,
   type ProxPairCandidate,
 } from "@/lib/prox/paired-scorecard";
@@ -209,7 +210,7 @@ export async function GET(request: Request) {
     const memberRows = await readInBatches(memberIds, async (batch) => {
       const { data, error } = await supabase
         .from("prox_shadow_board_members")
-        .select("id,run_id,decision_at,ticker,decision_price,edge_score,continuation_probability,evidence_confidence,readiness,disposition,role,rank,input_provenance")
+        .select("id,run_id,decision_at,ticker,decision_price,edge_score,continuation_probability,evidence_confidence,readiness,disposition,role,rank,input_provenance,edge_assessment")
         .in("id", batch);
       if (error) throw error;
       return (data ?? []) as Array<Record<string, unknown>>;
@@ -385,6 +386,8 @@ export async function GET(request: Request) {
       const outcome = outcomeById.get(String(episode.member_outcome_id));
       const run = member ? runById.get(String(member.run_id)) : null;
       const provenance = record(member?.input_provenance);
+      const edgeAssessment = record(member?.edge_assessment);
+      const challenger = record(edgeAssessment.researchChallenger);
       const session = marketSession(episode.market_session);
       const disposition = proxDisposition(episode.disposition);
       const role = proxRole(episode.role);
@@ -395,6 +398,20 @@ export async function GET(request: Request) {
       const evidenceConfidence = number(member?.evidence_confidence);
       const maxGainPercent = number(episode.max_gain_percent);
       const maxDrawdownPercent = number(episode.max_drawdown_percent);
+      const challengerReadiness = readiness(challenger.readiness);
+      const challengerScore = number(challenger.score);
+      const researchChallenger: ProxPairCandidate["researchChallenger"] =
+        challenger.version === PROX_EDGE_THEORY_CHALLENGER_VERSION &&
+        challengerReadiness !== null && challengerScore !== null &&
+        challengerScore >= 0 && challengerScore <= 100 &&
+        typeof challenger.researchQualified === "boolean"
+          ? {
+              version: PROX_EDGE_THEORY_CHALLENGER_VERSION,
+              score: challengerScore,
+              researchQualified: challenger.researchQualified,
+              readiness: challengerReadiness,
+            }
+          : null;
       if (
         !member || !run || !outcome || !session || !disposition || !role || !state ||
         price === null || edgeScore === null || continuationProbability === null ||
@@ -418,6 +435,7 @@ export async function GET(request: Request) {
         rank: number(member.rank),
         engineVersion: string(run.engine_version),
         edgeScoreVersion: string(run.edge_score_version),
+        researchChallenger,
         outcomeComplete: outcome.status === "complete" &&
           string(outcome.completed_at) !== null,
         maxGainPercent,

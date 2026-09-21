@@ -17,6 +17,9 @@ test("paired scorecard is internal, paginated, read-only, and provider-free", ()
   assert.match(route, /source rows exceeded the bounded research window/);
   assert.match(route, /Historical research chunks cannot exceed seven days/);
   assert.match(route, /prox_shadow_board_member_outcomes/);
+  assert.match(route, /edge_assessment/);
+  assert.match(route, /researchChallenger/);
+  assert.match(route, /PROX_EDGE_THEORY_CHALLENGER_VERSION/);
   assert.match(route, /outcomeComplete: outcome\.status === "complete"/);
   assert.match(route, /\.lt\("observed_at", windowEnd\)/);
   assert.match(route, /\.lt\("decision_at", windowEnd\)/);

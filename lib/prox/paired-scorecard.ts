@@ -4,6 +4,11 @@ export const PROX_CANONICAL_PAIRED_SCORECARD_VERSION =
 export const PROX_CANONICAL_PROVIDER_ALIGNMENT_SECONDS = 120;
 export const PROX_CANONICAL_DECISION_ALIGNMENT_SECONDS = 180;
 
+// Kept equal to the producer's frozen version and covered by route/health
+// contract tests; this module stays directly executable under Node strip-types.
+export const PROX_EDGE_THEORY_CHALLENGER_VERSION =
+  "prox-edge-theory-challenger-v1" as const;
+
 export type CanonicalPairCandidate = {
   id: string;
   ticker: string;
@@ -36,6 +41,12 @@ export type ProxPairCandidate = {
   rank: number | null;
   engineVersion: string | null;
   edgeScoreVersion: string | null;
+  researchChallenger: {
+    version: typeof PROX_EDGE_THEORY_CHALLENGER_VERSION;
+    score: number;
+    researchQualified: boolean;
+    readiness: "insufficient" | "live_only" | "emerging" | "calibrated";
+  } | null;
   outcomeComplete: boolean;
   maxGainPercent: number;
   maxDrawdownPercent: number;
@@ -312,6 +323,48 @@ function buildMissPatternAnalysis(pairs: PairedDecision[]) {
   };
 }
 
+function buildTheoryChallengerComparison(pairs: PairedDecision[]) {
+  const observed = pairs.filter((pair) =>
+    pair.prox.researchChallenger?.version ===
+      PROX_EDGE_THEORY_CHALLENGER_VERSION);
+  const bothQualified = observed.filter((pair) =>
+    pair.selection.proxSelected &&
+    pair.prox.researchChallenger?.researchQualified === true);
+  const currentOnly = observed.filter((pair) =>
+    pair.selection.proxSelected &&
+    pair.prox.researchChallenger?.researchQualified === false);
+  const challengerOnly = observed.filter((pair) =>
+    !pair.selection.proxSelected &&
+    pair.prox.researchChallenger?.researchQualified === true);
+  const bothWithheld = observed.filter((pair) =>
+    !pair.selection.proxSelected &&
+    pair.prox.researchChallenger?.researchQualified === false);
+  return {
+    version: PROX_EDGE_THEORY_CHALLENGER_VERSION,
+    authority: "read_only_research" as const,
+    automaticAuthorityChange: false,
+    pairedEpisodeCount: pairs.length,
+    challengerObservedCount: observed.length,
+    challengerMissingCount: pairs.length - observed.length,
+    qualificationAgreement: {
+      bothQualified: summarizePairs(bothQualified),
+      currentOnly: summarizePairs(currentOnly),
+      challengerOnly: summarizePairs(challengerOnly),
+      bothWithheld: summarizePairs(bothWithheld),
+    },
+    outcomeComparison: {
+      currentV2Selected: summarizePairs(
+        observed.filter((pair) => pair.selection.proxSelected),
+      ),
+      challengerQualified: summarizePairs(
+        observed.filter((pair) =>
+          pair.prox.researchChallenger?.researchQualified === true),
+      ),
+    },
+    note: "This compares frozen opinions on identical paired episodes. It is observational only and cannot change ProX, Canonical, Agent X, Paper, or execution authority.",
+  };
+}
+
 export function buildProxCanonicalPairedScorecard(
   canonicalCandidates: CanonicalPairCandidate[],
   proxCandidates: ProxPairCandidate[],
@@ -496,6 +549,7 @@ export function buildProxCanonicalPairedScorecard(
     comparisons: {
       allPairs: summarizePairs(pairs),
       byAgreement,
+      edgeTheoryChallenger: buildTheoryChallengerComparison(pairs),
     },
     missAnalysis: buildMissPatternAnalysis(pairs),
     pairs,

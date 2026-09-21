@@ -9,6 +9,13 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const observabilityMigration = readFileSync(
+  new URL(
+    "../../supabase/migrations/0059_research_observability_receipts.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const healthRoute = readFileSync(
   new URL("../../app/api/system-health/route.ts", import.meta.url),
   "utf8",
@@ -102,5 +109,38 @@ test("research collection failures cannot block the existing outcome worker", ()
   assert.doesNotMatch(
     outcomeWorker,
     /if \(targetResearchWrite\.error\) throw targetResearchWrite\.error/,
+  );
+});
+
+test("prospective target research exposes deterministic expected-versus-persisted coverage", () => {
+  assert.match(observabilityMigration, /ht_agent_target_research_observability/);
+  assert.match(observabilityMigration, /coverage_started_at/);
+  assert.match(observabilityMigration, /expected_episode_count/);
+  assert.match(observabilityMigration, /persisted_episode_count/);
+  assert.match(observabilityMigration, /missing_episode_count/);
+  assert.match(observabilityMigration, /'coverageComplete',coverage\.missing_episode_count=0/);
+  assert.match(observabilityMigration, /'seedFailureCount',failures\.total/);
+});
+
+test("target research seeds once per horizon from the full Agent cohort and records exceptions", () => {
+  assert.match(observabilityMigration, /cohort_name is distinct from 'ht_agent_full'/);
+  assert.match(observabilityMigration, /ht_agent_target_research_seed_failures/);
+  assert.match(observabilityMigration, /on conflict\(outcome_id\) do nothing/);
+  assert.match(observabilityMigration, /'triggerAttemptsPerEligibleDecision',3/);
+  assert.match(observabilityMigration, /'providerRequestsAdded',0/);
+  assert.doesNotMatch(
+    observabilityMigration,
+    /update public\.(?:ht_agent_decisions|ht_agent_decision_frames|ht_agent_profiles|prox_|canonical)/i,
+  );
+});
+
+test("system health fails closed on missing target-research receipts without granting authority", () => {
+  assert.match(healthRoute, /observabilityVersion/);
+  assert.match(healthRoute, /coverageComplete === true/);
+  assert.match(healthRoute, /missingEpisodeCount/);
+  assert.match(healthRoute, /seedFailureCount/);
+  assert.doesNotMatch(
+    healthRoute.slice(healthRoute.indexOf("ht_agent_target_research_health")),
+    /canonicalEntryChallengerReady\s*===\s*true/,
   );
 });

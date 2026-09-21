@@ -36,6 +36,12 @@ const prox = (overrides: Partial<ProxPairCandidate> = {}): ProxPairCandidate => 
   rank: 1,
   engineVersion: "prox-board-v1",
   edgeScoreVersion: "prox-edge-v1",
+  researchChallenger: {
+    version: "prox-edge-theory-challenger-v1",
+    score: 70,
+    researchQualified: true,
+    readiness: "calibrated",
+  },
   outcomeComplete: true,
   maxGainPercent: 8,
   maxDrawdownPercent: -2,
@@ -122,6 +128,35 @@ test("reports disagreements and measured outcomes without changing authority", (
   assert.equal(report.authority, "read_only_research");
   assert.equal(report.automaticAuthorityChange, false);
   assert.equal(report.promotionReview.status, "insufficient_evidence");
+});
+
+test("compares the frozen theory challenger on identical outcomes without promotion authority", () => {
+  const report = buildProxCanonicalPairedScorecard(
+    [canonical()],
+    [prox({
+      disposition: "blocked",
+      role: "radar",
+      rank: null,
+      researchChallenger: {
+        version: "prox-edge-theory-challenger-v1",
+        score: 71,
+        researchQualified: true,
+        readiness: "calibrated",
+      },
+    })],
+  );
+  const comparison = report.comparisons.edgeTheoryChallenger;
+  assert.equal(comparison.challengerObservedCount, 1);
+  assert.equal(comparison.challengerMissingCount, 0);
+  assert.equal(comparison.qualificationAgreement.challengerOnly.pairCount, 1);
+  assert.equal(
+    comparison.outcomeComparison.challengerQualified.byHorizon.find(
+      (row) => row.horizon === "1h",
+    )?.medianReturnPercent,
+    6,
+  );
+  assert.equal(comparison.authority, "read_only_research");
+  assert.equal(comparison.automaticAuthorityChange, false);
 });
 
 test("segments misses without treating missing outcomes as losses or changing scores", () => {

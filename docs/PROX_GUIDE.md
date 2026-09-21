@@ -347,6 +347,13 @@ It cannot be promoted unless the normal evidence floor, date-based holdout,
 owner review, version bump, deterministic tests, and rollback requirements are
 all satisfied.
 
+System health requires every member of the latest completed board to carry the
+versioned challenger receipt, a bounded score, its frozen qualification, and
+the complete all-false authority map. The internal paired scorecard may compare
+current-v2 selection and challenger qualification on the same de-correlated
+outcomes. Missing challenger evidence is counted as missing, never as a zero or
+loss, and the comparison remains provider-free and read-only.
+
 Five-minute decision frames remain append-only audit evidence, but they are
 not independent performance samples. Shadow scorecards use the first decision
 for each ticker, trading date, market session, and disposition as the episode

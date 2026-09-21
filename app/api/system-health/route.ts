@@ -43,6 +43,7 @@ import {
   PROX_EDGE_SCORE_VERSION,
   assertNoForbiddenProxInputs,
 } from "@/lib/prox/edge-score";
+import { PROX_EDGE_THEORY_CHALLENGER_VERSION } from "@/lib/prox/edge-theory-challenger";
 import { PROX_SHADOW_BOARD_VERSION } from "@/lib/prox/shadow-board";
 import {
   PROX_OUTCOME_UNAVAILABLE_AFTER_MS,
@@ -1332,6 +1333,42 @@ export async function GET(request: Request) {
         );
         return Math.abs(expected - Number(member.edge_score)) <= 0.2;
       });
+      const challengerRows = rows.filter((member) => {
+        const edge = member.edge_assessment &&
+          typeof member.edge_assessment === "object" &&
+          !Array.isArray(member.edge_assessment)
+          ? member.edge_assessment as Record<string, unknown>
+          : {};
+        const challenger = edge.researchChallenger &&
+          typeof edge.researchChallenger === "object" &&
+          !Array.isArray(edge.researchChallenger)
+          ? edge.researchChallenger as Record<string, unknown>
+          : {};
+        const authority = challenger.authority &&
+          typeof challenger.authority === "object" &&
+          !Array.isArray(challenger.authority)
+          ? challenger.authority as Record<string, unknown>
+          : {};
+        const provenance = member.input_provenance &&
+          typeof member.input_provenance === "object" &&
+          !Array.isArray(member.input_provenance)
+          ? member.input_provenance as Record<string, unknown>
+          : {};
+        const score = Number(challenger.score);
+        return challenger.version === PROX_EDGE_THEORY_CHALLENGER_VERSION &&
+          challenger.mode === "prospective_shadow_research_only" &&
+          Number.isFinite(score) && score >= 0 && score <= 100 &&
+          typeof challenger.researchQualified === "boolean" &&
+          provenance.edgeTheoryChallengerVersion ===
+            PROX_EDGE_THEORY_CHALLENGER_VERSION &&
+          authority.canonicalDecision === false &&
+          authority.canonicalRanking === false &&
+          authority.publicDisplay === false &&
+          authority.agentDecision === false &&
+          authority.paperExecution === false &&
+          authority.liveExecution === false;
+      });
+      const challengerCoverageValid = challengerRows.length === rows.length;
       let forbiddenInputCount = 0;
       for (const member of rows) {
         try {
@@ -1394,6 +1431,7 @@ export async function GET(request: Request) {
         independentInputValid &&
         frameAtomic &&
         scoreMathValid &&
+        challengerCoverageValid &&
         fresh;
       checks.push({
         name: "prox_independent_shadow_board",
@@ -1406,6 +1444,8 @@ export async function GET(request: Request) {
               ? "ProX score, rank, price, and disposition do not share one atomic frame."
               : !scoreMathValid
                 ? "A persisted ProX Edge Score does not match the versioned 60/30/10 contract."
+                : !challengerCoverageValid
+                  ? "A ProX member is missing the versioned zero-authority theory-challenger receipt."
                 : !boardShapeValid || !versionValid
                   ? "The ProX board role, version, or shadow-authority contract is invalid."
                   : !fresh
@@ -1434,6 +1474,11 @@ export async function GET(request: Request) {
           canonicalInputsConsumed,
           frameAtomic,
           scoreMathValid,
+          challengerVersion: PROX_EDGE_THEORY_CHALLENGER_VERSION,
+          challengerExpectedCount: rows.length,
+          challengerPersistedCount: challengerRows.length,
+          challengerMissingCount: rows.length - challengerRows.length,
+          challengerCoverageValid,
           authority: boardRun.authority,
         },
       });
@@ -3303,7 +3348,11 @@ export async function GET(request: Request) {
     const activeProfiles = profiles.filter((profile) => profile.status === "active" && profile.kill_switch === false);
     const cycleRequired = activeProfiles.length > 0;
     const runs = runsResult.data ?? [];
-    const maxCycleAgeHours = activeMarketSession ? 10 / 60 : 24;
+    const maxCycleAgeHours = longMarketClosure
+      ? Infinity
+      : activeMarketSession
+        ? 10 / 60
+        : 24;
     const runHealth = assessHtAgentRunHealth(activeProfiles, runs, {
       maximumSuccessAgeMs: maxCycleAgeHours * 60 * 60_000,
     });
@@ -3411,22 +3460,29 @@ export async function GET(request: Request) {
       : null;
     const boundaryReady =
       research?.version === "ht-agent-target-path-research-v1" &&
+      research?.observabilityVersion ===
+        "ht-agent-target-research-observability-v1" &&
       research?.authority === "research_only" &&
       Number(research?.providerRequestsAdded) === 0 &&
       research?.executionAuthority === "none";
+    const coverageReady = research?.coverageComplete === true &&
+      Number(research?.missingEpisodeCount) === 0 &&
+      Number(research?.seedFailureCount) === 0;
     checks.push({
       name: "ht_agent_target_path_research",
-      ok: boundaryReady,
-      message: boundaryReady
-        ? `Agent target-path research is isolated and prospective: ${Number(research?.measured ?? 0)} measured, ${Number(research?.ambiguous ?? 0)} ambiguous, ${Number(research?.pending ?? 0)} pending.`
-        : "Agent target-path research is missing its zero-authority boundary; apply migration 0058 before deploying the matching worker.",
+      ok: boundaryReady && coverageReady,
+      message: !boundaryReady
+        ? "Agent target-path research is missing its zero-authority observability boundary; apply migrations 0058 and 0059."
+        : !coverageReady
+          ? `Agent target-path research has ${Number(research?.missingEpisodeCount ?? 0)} missing expected episodes and ${Number(research?.seedFailureCount ?? 0)} seed failures.`
+          : `Agent target-path research is isolated, complete, and prospective: ${Number(research?.measured ?? 0)} measured, ${Number(research?.ambiguous ?? 0)} ambiguous, ${Number(research?.pending ?? 0)} pending.`,
       detail: research,
     });
   } catch (err: unknown) {
     checks.push({
       name: "ht_agent_target_path_research",
       ok: false,
-      message: "Agent target-path research is unavailable; apply migration 0058 before deploying the matching worker.",
+      message: "Agent target-path research is unavailable; apply migrations 0058 and 0059 before deploying the matching worker.",
       detail: err instanceof Error ? err.message : String(err),
     });
   }

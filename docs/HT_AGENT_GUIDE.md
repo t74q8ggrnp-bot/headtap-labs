@@ -175,6 +175,15 @@ the owner may review a separately versioned, read-only Canonical entry-timing
 challenger trained only from frozen decision-time facts and evaluated on unseen
 forward sessions. Crossing that evidence floor never auto-promotes a rule.
 
+Migration `0059` adds a prospective observability boundary around this ledger.
+Only the `ht_agent_full` cohort attempts a seed for each research horizon,
+eliminating three-way duplicate trigger work. Health independently computes the
+eligible, de-correlated episode keys created after that boundary and compares
+them with persisted episodes. Missing episodes or immutable exception receipts
+fail health explicitly; a legitimate zero-eligible interval remains visibly
+zero rather than being confused with a silent collector failure. These checks
+reuse database evidence and add no provider requests.
+
 `ht-agent-cohorts-v2-mode-independent` determines full-Agent research
 qualification from Canonical eligibility, no ProX veto, no existing symbol
 position, and every deterministic risk rule passing. It does not use action
