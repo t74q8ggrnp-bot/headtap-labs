@@ -1143,6 +1143,20 @@ textarea {
   );
 }
 
+/* iOS can expose a zero safe-area inset while the WKWebView is changing
+   orientation. Keep the focused target below the status area even before the
+   native bridge class hydrates; the visual-viewport value still wins when it
+   is larger. */
+@media (max-width: 1179px) {
+  .ht-skip-link {
+    top: max(
+      calc(env(safe-area-inset-top, 0px) + 0.75rem),
+      calc(var(--ht-visual-viewport-top, 0px) + 0.75rem),
+      3.5rem
+    );
+  }
+}
+
 .ht-responsive-shell :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--ht-focus-color);
   outline-offset: 3px;

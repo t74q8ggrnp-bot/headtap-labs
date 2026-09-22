@@ -3505,18 +3505,19 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
-    const [researchResult, failureReceiptsResult] = await Promise.all([
-      supabase.rpc("ht_agent_target_research_health"),
-      supabase
-        .from("ht_agent_target_research_seed_failures")
-        .select("error_code,error_message,horizon,failed_at")
-        .order("failed_at", { ascending: false })
-        .limit(1_000),
-    ]);
+    // Read the bounded health receipt first. Running the deep failure-receipt
+    // scan concurrently can contend with the RPC statement timeout and make a
+    // healthy, non-authoritative collector look unavailable.
+    const researchResult = await supabase.rpc("ht_agent_target_research_health");
     if (researchResult.error) throw researchResult.error;
     const research = researchResult.data && typeof researchResult.data === "object"
       ? researchResult.data as Record<string, unknown>
       : null;
+    const failureReceiptsResult = await supabase
+      .from("ht_agent_target_research_seed_failures")
+      .select("error_code,error_message,horizon,failed_at")
+      .order("failed_at", { ascending: false })
+      .limit(1_000);
     const boundaryReady =
       research?.version === "ht-agent-target-path-research-v1" &&
       research?.observabilityVersion ===
@@ -3560,7 +3561,10 @@ export async function GET(request: Request) {
       ok: false,
       blocking: false,
       message: "Agent target-path research is unavailable; apply migrations 0058 and 0059 before deploying the matching worker.",
-      detail: err instanceof Error ? err.message : String(err),
+      detail: getErrorMessage(
+        err,
+        "Agent target-path research health query failed.",
+      ),
     });
   }
 

@@ -82,6 +82,7 @@ test("shell focus and safe-area rules cover desktop and required mobile edges", 
   assert.match(css, /\.ht-skip-link:focus/);
   assert.match(css, /--ht-visual-viewport-top/);
   assert.match(css, /--ht-visual-viewport-width/);
+  assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-skip-link[\s\S]*3\.5rem/);
   assert.match(shell, /window\.visualViewport/);
   assert.match(shell, /removeEventListener\("scroll", updateViewportOrigin\)/);
 });
