@@ -3505,29 +3505,15 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
-    // Read the bounded health receipt first. Running the deep failure-receipt
-    // scan concurrently can contend with the RPC statement timeout and make a
-    // healthy, non-authoritative collector look unavailable.
-    const researchResult = await supabase.rpc("ht_agent_target_research_health");
-    if (researchResult.error) throw researchResult.error;
-    const research = researchResult.data && typeof researchResult.data === "object"
-      ? researchResult.data as Record<string, unknown>
-      : null;
+    // Read immutable exception receipts independently from the aggregate
+    // coverage RPC. The aggregate can exceed its own statement timeout as the
+    // research ledger grows; that must not hide the already-recorded cause
+    // distribution or make the primary product unhealthy.
     const failureReceiptsResult = await supabase
       .from("ht_agent_target_research_seed_failures")
       .select("error_code,error_message,horizon,failed_at")
       .order("failed_at", { ascending: false })
       .limit(1_000);
-    const boundaryReady =
-      research?.version === "ht-agent-target-path-research-v1" &&
-      research?.observabilityVersion ===
-        "ht-agent-target-research-observability-v1" &&
-      research?.authority === "research_only" &&
-      Number(research?.providerRequestsAdded) === 0 &&
-      research?.executionAuthority === "none";
-    const coverageReady = research?.coverageComplete === true &&
-      Number(research?.missingEpisodeCount) === 0 &&
-      Number(research?.seedFailureCount) === 0;
     const failureReceiptObservability = failureReceiptsResult.error
       ? {
           authority: "research_only",
@@ -3539,8 +3525,38 @@ export async function GET(request: Request) {
         }
       : summarizeHtAgentTargetResearchSeedFailures(
           failureReceiptsResult.data ?? [],
-          Number(research?.seedFailureCount ?? 0),
+          failureReceiptsResult.data?.length ?? 0,
         );
+    const researchResult = await supabase.rpc("ht_agent_target_research_health");
+    if (researchResult.error) {
+      checks.push({
+        name: "ht_agent_target_path_research",
+        ok: false,
+        blocking: false,
+        message:
+          "Agent target-path aggregate coverage timed out; immutable seed-failure receipts remain available below.",
+        detail: {
+          rpcError: getErrorMessage(
+            researchResult.error,
+            "Agent target-path research health query failed.",
+          ),
+          failureReceiptObservability,
+        },
+      });
+    } else {
+      const research = researchResult.data && typeof researchResult.data === "object"
+        ? researchResult.data as Record<string, unknown>
+        : null;
+    const boundaryReady =
+      research?.version === "ht-agent-target-path-research-v1" &&
+      research?.observabilityVersion ===
+        "ht-agent-target-research-observability-v1" &&
+      research?.authority === "research_only" &&
+      Number(research?.providerRequestsAdded) === 0 &&
+      research?.executionAuthority === "none";
+    const coverageReady = research?.coverageComplete === true &&
+      Number(research?.missingEpisodeCount) === 0 &&
+      Number(research?.seedFailureCount) === 0;
     checks.push({
       name: "ht_agent_target_path_research",
       ok: boundaryReady && coverageReady,
@@ -3555,6 +3571,7 @@ export async function GET(request: Request) {
         failureReceiptObservability,
       },
     });
+    }
   } catch (err: unknown) {
     checks.push({
       name: "ht_agent_target_path_research",
