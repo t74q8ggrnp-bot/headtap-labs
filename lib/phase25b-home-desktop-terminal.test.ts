@@ -60,7 +60,7 @@ test("desktop chart controls render below the chart and expose only functional D
   assert.match(chart, /Trendline/);
   assert.match(chart, /Price range/);
   assert.match(chart, /mobileQuery\.matches \? "1h" : "2h"/);
-  assert.match(chart, /terminalQuery\.matches[\s\S]*window\.innerHeight - 125/);
+  assert.match(chart, /terminalQuery\.matches[\s\S]*viewportHeight - 125/);
   assert.equal(chart.match(/aria-label="Visible chart range"/g)?.length, 1);
   assert.equal(chart.match(/<summary>Layers<\/summary>/g)?.length, 1);
   assert.match(chart, /Candles/);
@@ -77,6 +77,7 @@ test("pane controls are persistent, keyboard usable, and clean up global listene
   assert.match(frame, /requestAnimationFrame/);
   assert.match(frame, /aria-label="Expand Markets pane"/);
   assert.match(frame, /aria-label="Expand HT Intelligence pane"/);
+  assert.match(frame, /onPointerDown=\{\(event\) => expandFromPointer\(event, "intelligence"\)\}/);
   assert.match(hook, /localStorage/);
   assert.match(hook, /resetLayout/);
   assert.match(navigation, />\s*Reset layout\s*</);

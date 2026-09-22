@@ -134,6 +134,16 @@ export default function DesktopTerminalFrame({
     window.requestAnimationFrame(() => (pane === "markets" ? marketsCollapseRef : intelligenceCollapseRef).current?.focus());
   };
 
+  const expandFromPointer = (
+    event: PointerEvent<HTMLButtonElement>,
+    pane: "markets" | "intelligence",
+  ) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    // Expand on pointer-down so a persisted collapsed handle cannot disappear
+    // or lose the click target between pointer-down and click after hydration.
+    expand(pane);
+  };
+
   const style = {
     "--ht-terminal-markets-width": `${layout.marketsOpen ? layout.marketsWidth : 30}px`,
     "--ht-terminal-intelligence-width": `${layout.intelligenceOpen ? layout.intelligenceWidth : 30}px`,
@@ -164,7 +174,7 @@ export default function DesktopTerminalFrame({
         <ResizeHandle label="Resize Markets pane" value={layout.marketsWidth} minimum={210} maximum={260} direction={1} onChange={(value) => setPaneWidth("markets", value)} />
       </aside>
       {layout.terminal && !layout.marketsOpen ? (
-        <button ref={marketsHandleRef} type="button" className="ht-terminal-pane-handle ht-terminal-pane-handle--markets" aria-label="Expand Markets pane" aria-controls={`${prefix}-markets-pane`} aria-expanded="false" onClick={() => expand("markets")}>
+        <button ref={marketsHandleRef} type="button" className="ht-terminal-pane-handle ht-terminal-pane-handle--markets" aria-label="Expand Markets pane" aria-controls={`${prefix}-markets-pane`} aria-expanded="false" onPointerDown={(event) => expandFromPointer(event, "markets")} onClick={() => expand("markets")}>
           <span aria-hidden="true">▦</span>
         </button>
       ) : null}
@@ -188,7 +198,7 @@ export default function DesktopTerminalFrame({
         <div className="ht-terminal-pane__body">{intelligence}</div>
       </aside>
       {layout.terminal && !layout.intelligenceOpen ? (
-        <button ref={intelligenceHandleRef} type="button" className="ht-terminal-pane-handle ht-terminal-pane-handle--intelligence" aria-label="Expand HT Intelligence pane" aria-controls={`${prefix}-intelligence-pane`} aria-expanded="false" onClick={() => expand("intelligence")}>
+        <button ref={intelligenceHandleRef} type="button" className="ht-terminal-pane-handle ht-terminal-pane-handle--intelligence" aria-label="Expand HT Intelligence pane" aria-controls={`${prefix}-intelligence-pane`} aria-expanded="false" onPointerDown={(event) => expandFromPointer(event, "intelligence")} onClick={() => expand("intelligence")}>
           <span aria-hidden="true">HT</span>
         </button>
       ) : null}

@@ -74,11 +74,16 @@ test("the root shell shares desktop route identity without adding data requests"
 
 test("shell focus and safe-area rules cover desktop and required mobile edges", () => {
   const css = source("app/globals.css");
+  const shell = source("app/components/ResponsiveApplicationShell.tsx");
   assert.match(css, /\.ht-responsive-shell :where\(a, button, input, select, textarea, summary, \[tabindex\]\):focus-visible/);
   assert.match(css, /padding-left: env\(safe-area-inset-left, 0px\)/);
   assert.match(css, /padding-right: env\(safe-area-inset-right, 0px\)/);
   assert.match(css, /padding-bottom: env\(safe-area-inset-bottom, 0px\)/);
   assert.match(css, /\.ht-skip-link:focus/);
+  assert.match(css, /--ht-visual-viewport-top/);
+  assert.match(css, /--ht-visual-viewport-width/);
+  assert.match(shell, /window\.visualViewport/);
+  assert.match(shell, /removeEventListener\("scroll", updateViewportOrigin\)/);
 });
 
 test("authentication and failure surfaces are announced and do not expose raw backend messages", () => {

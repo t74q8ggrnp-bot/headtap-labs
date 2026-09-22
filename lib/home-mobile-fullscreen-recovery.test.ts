@@ -25,7 +25,8 @@ test("mobile Home uses a pure-black chart-led composition in portrait and landsc
 
   assert.match(recovery, /background: #000;/);
   assert.doesNotMatch(recovery, /radial-gradient|linear-gradient/);
-  assert.match(recovery, /\.ht-mobile-global-nav\[data-application-route="home"\][\s\S]*box-shadow: none/);
+  assert.match(recovery, /\.ht-mobile-global-nav:is\(\[data-application-route="home"\], \[data-application-route="discovery"\]\)[\s\S]*box-shadow: none/);
+  assert.match(recovery, /\.ht-responsive-shell:is\(\[data-application-route="home"\], \[data-application-route="discovery"\]\) > \.ht-desktop-global-header/);
   assert.match(recovery, /orientation: landscape/);
   assert.match(recovery, /\.ht-home-terminal-surface \.ht-terminal-nav \{ display: none; \}/);
   assert.match(recovery, /grid-template-columns: minmax\(0, 1fr\)/);

@@ -78,6 +78,7 @@ import {
 import { checkDurableApiRateLimit } from "@/lib/durable-api-guard";
 import { marketChartPollingState } from "@/lib/market-chart-polling";
 import { getReleaseProvenance, PRODUCT_SCHEMA_MIGRATION_LEVEL } from "@/lib/release-provenance";
+import { summarizeHtAgentTargetResearchSeedFailures } from "@/lib/ht-agent/target-research-observability";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -111,6 +112,7 @@ type HealthCheck = {
   ok: boolean;
   message: string;
   detail?: unknown;
+  blocking?: boolean;
 };
 
 function hoursSince(value: unknown) {
@@ -3503,7 +3505,14 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
-    const researchResult = await supabase.rpc("ht_agent_target_research_health");
+    const [researchResult, failureReceiptsResult] = await Promise.all([
+      supabase.rpc("ht_agent_target_research_health"),
+      supabase
+        .from("ht_agent_target_research_seed_failures")
+        .select("error_code,error_message,horizon,failed_at")
+        .order("failed_at", { ascending: false })
+        .limit(1_000),
+    ]);
     if (researchResult.error) throw researchResult.error;
     const research = researchResult.data && typeof researchResult.data === "object"
       ? researchResult.data as Record<string, unknown>
@@ -3518,20 +3527,38 @@ export async function GET(request: Request) {
     const coverageReady = research?.coverageComplete === true &&
       Number(research?.missingEpisodeCount) === 0 &&
       Number(research?.seedFailureCount) === 0;
+    const failureReceiptObservability = failureReceiptsResult.error
+      ? {
+          authority: "research_only",
+          primaryProductImpact: false,
+          receiptReadError: getErrorMessage(
+            failureReceiptsResult.error,
+            "Target research failure receipts are unavailable.",
+          ),
+        }
+      : summarizeHtAgentTargetResearchSeedFailures(
+          failureReceiptsResult.data ?? [],
+          Number(research?.seedFailureCount ?? 0),
+        );
     checks.push({
       name: "ht_agent_target_path_research",
       ok: boundaryReady && coverageReady,
+      blocking: false,
       message: !boundaryReady
         ? "Agent target-path research is missing its zero-authority observability boundary; apply migrations 0058 and 0059."
         : !coverageReady
           ? `Agent target-path research has ${Number(research?.missingEpisodeCount ?? 0)} missing expected episodes and ${Number(research?.seedFailureCount ?? 0)} seed failures.`
           : `Agent target-path research is isolated, complete, and prospective: ${Number(research?.measured ?? 0)} measured, ${Number(research?.ambiguous ?? 0)} ambiguous, ${Number(research?.pending ?? 0)} pending.`,
-      detail: research,
+      detail: {
+        ...research,
+        failureReceiptObservability,
+      },
     });
   } catch (err: unknown) {
     checks.push({
       name: "ht_agent_target_path_research",
       ok: false,
+      blocking: false,
       message: "Agent target-path research is unavailable; apply migrations 0058 and 0059 before deploying the matching worker.",
       detail: err instanceof Error ? err.message : String(err),
     });
@@ -3628,7 +3655,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const hardFailures = checks.filter((check) => !check.ok);
+  const hardFailures = checks.filter((check) => !check.ok && check.blocking !== false);
   const ok = hardFailures.length === 0;
   // Release provenance answers whether the deployed binary and required schema
   // match. Research collection health stays a separate product-health signal;
@@ -3659,7 +3686,17 @@ export async function GET(request: Request) {
     checks,
     warnings: [
       ...cryptoWarnings,
-      ...checks.flatMap((check) => {
+      ...checks.flatMap<Record<string, unknown>>((check) => {
+        if (check.name === "ht_agent_target_path_research" && !check.ok) {
+          return [{
+            name: "ht_agent_target_path_research_observability",
+            message: check.message,
+            classification: "research_only",
+            primaryProductImpact: false,
+            executionAuthority: "none",
+            detail: check.detail,
+          }];
+        }
         if (check.name !== "prox_realtime_microstructure_observations") return [];
         const detail = check.detail as { activeMarketSession?: boolean; sourceCoverage?: ReturnType<typeof describeProxMicrostructureCoverage> } | undefined;
         if (!detail?.sourceCoverage || detail.activeMarketSession !== true || detail.sourceCoverage.coverageState === "complete") return [];

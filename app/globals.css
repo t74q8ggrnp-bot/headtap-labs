@@ -1106,10 +1106,19 @@ textarea {
 
 .ht-skip-link {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
-  left: calc(env(safe-area-inset-left, 0px) + 0.75rem);
+  top: max(
+    calc(env(safe-area-inset-top, 0px) + 0.75rem),
+    calc(var(--ht-visual-viewport-top, 0px) + 0.75rem)
+  );
+  left: max(
+    calc(env(safe-area-inset-left, 0px) + 0.75rem),
+    calc(var(--ht-visual-viewport-left, 0px) + 0.75rem)
+  );
   z-index: 3000;
-  transform: translateY(-180%);
+  max-width: calc(var(--ht-visual-viewport-width, 100dvw) - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  opacity: 0;
+  clip-path: inset(50%);
+  pointer-events: none;
   border: 1px solid var(--ht-color-accent);
   border-radius: var(--ht-radius-control);
   padding: 0.65rem 0.9rem;
@@ -1117,10 +1126,22 @@ textarea {
   color: white;
   font-size: 0.8rem;
   font-weight: 850;
-  transition: transform var(--ht-motion-fast) var(--ht-motion-ease);
+  white-space: nowrap;
 }
 
-.ht-skip-link:focus { transform: translateY(0); }
+.ht-skip-link:focus {
+  opacity: 1;
+  clip-path: none;
+  pointer-events: auto;
+}
+
+.ht-native-ios .ht-skip-link {
+  top: max(
+    calc(env(safe-area-inset-top, 0px) + 0.75rem),
+    calc(var(--ht-visual-viewport-top, 0px) + 0.75rem),
+    3.5rem
+  );
+}
 
 .ht-responsive-shell :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--ht-focus-color);
@@ -3458,8 +3479,8 @@ body:has(.ht-dialog-sheet[open]) {
   .ht-home-intelligence-dialog {
     background: #000;
   }
-  .ht-responsive-shell[data-application-route="home"] > .ht-desktop-global-header,
-  .ht-mobile-global-nav[data-application-route="home"] {
+  .ht-responsive-shell:is([data-application-route="home"], [data-application-route="discovery"]) > .ht-desktop-global-header,
+  .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) {
     background: #000;
     box-shadow: none;
     backdrop-filter: none;
@@ -3555,7 +3576,7 @@ body:has(.ht-dialog-sheet[open]) {
   (max-width: 1179px) and
   (max-height: 600px) and
   (orientation: landscape) {
-  .ht-responsive-shell[data-application-route="home"] > .ht-desktop-global-header,
+  .ht-responsive-shell:is([data-application-route="home"], [data-application-route="discovery"]) > .ht-desktop-global-header,
   .ht-simplified-ui > .relative.z-10 {
     display: none;
   }
@@ -3633,17 +3654,17 @@ body:has(.ht-dialog-sheet[open]) {
     background: #000;
   }
 
-  .ht-mobile-global-nav[data-application-route="home"] {
+  .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) {
     min-height: calc(48px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid rgba(255, 255, 255, 0.07);
     background: #000;
   }
-  .ht-mobile-global-nav[data-application-route="home"] > div > div { padding-top: 0; }
-  .ht-mobile-global-nav[data-application-route="home"] :is(a, button) {
+  .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) > div > div { padding-top: 0; }
+  .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) :is(a, button) {
     min-height: 48px;
     gap: 0.05rem;
     padding-block: 0.15rem;
   }
-  .ht-mobile-global-nav[data-application-route="home"] svg { width: 17px; height: 17px; }
-  .ht-mobile-global-nav[data-application-route="home"] :is(a, button) span:last-child { font-size: 0.54rem; }
+  .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) svg { width: 17px; height: 17px; }
+  .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) :is(a, button) span:last-child { font-size: 0.54rem; }
 }

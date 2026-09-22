@@ -21,7 +21,7 @@ import {
 } from "@/lib/market-chart-timeframes";
 import type { MarketChartVisibleRange } from "@/lib/market-chart-visible-range";
 import {
-  MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT,
+  marketChartCoverageIsSparse,
   type MarketChartVisibleCoverage,
 } from "@/lib/market-chart-rendering";
 
@@ -85,13 +85,14 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     const terminalQuery = window.matchMedia("(min-width: 1180px)");
     const landscapeQuery = window.matchMedia("(min-width: 768px) and (max-width: 1179px) and (orientation: landscape)");
     const apply = () => {
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
       setHeight(
         landscapeQuery.matches
-          ? Math.max(210, window.innerHeight - 140)
+          ? Math.max(180, viewportHeight - 164)
           : mobileQuery.matches
-          ? Math.min(620, Math.max(330, window.innerHeight - 302))
+          ? Math.min(620, Math.max(330, viewportHeight - 302))
           : terminalQuery.matches
-            ? Math.max(620, window.innerHeight - 125)
+            ? Math.max(620, viewportHeight - 125)
             : 500,
       );
       if (!rangeInitializedRef.current) {
@@ -104,11 +105,13 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     terminalQuery.addEventListener("change", apply);
     landscapeQuery.addEventListener("change", apply);
     window.addEventListener("resize", apply);
+    window.visualViewport?.addEventListener("resize", apply);
     return () => {
       mobileQuery.removeEventListener("change", apply);
       terminalQuery.removeEventListener("change", apply);
       landscapeQuery.removeEventListener("change", apply);
       window.removeEventListener("resize", apply);
+      window.visualViewport?.removeEventListener("resize", apply);
     };
   }, []);
 
@@ -164,9 +167,11 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
     },
     [],
   );
-  const showSparseTape = timeframe === "1m" &&
-    visibleCoverage !== null &&
-    visibleCoverage.coveragePercentage < MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT;
+  const sparseCoverage = timeframe === "1m" &&
+    visibleCoverage &&
+    marketChartCoverageIsSparse(visibleCoverage)
+    ? visibleCoverage
+    : null;
 
   const selectVisibleRange = (range: MarketChartVisibleRange) => {
     setVisibleRange(range);
@@ -357,16 +362,16 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
         </button>
       </div>
 
-      {showSparseTape ? (
+      {sparseCoverage ? (
         <details
           className="htb-chart__sparse-status"
           aria-label="Sparse chart coverage"
-          data-chart-coverage-percent={visibleCoverage.coveragePercentage}
-          data-chart-expected-intervals={visibleCoverage.expectedIntervalCount}
-          data-chart-rendered-bars={visibleCoverage.renderedProviderBarCount}
+          data-chart-coverage-percent={sparseCoverage.coveragePercentage}
+          data-chart-expected-intervals={sparseCoverage.expectedIntervalCount}
+          data-chart-rendered-bars={sparseCoverage.renderedProviderBarCount}
         >
           <summary role="status" aria-live="polite">
-            Sparse tape · {visibleCoverage.renderedProviderBarCount} of {visibleCoverage.expectedIntervalCount} minutes traded <span aria-hidden="true">ⓘ</span>
+            Sparse tape · {sparseCoverage.renderedProviderBarCount} of {sparseCoverage.expectedIntervalCount} minutes traded <span aria-hidden="true">ⓘ</span>
           </summary>
           <div className="htb-chart__sparse-detail">
             <span>Blank intervals represent minutes with no verified provider aggregate.</span>

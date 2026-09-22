@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
-import { MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT, resolveMarketChartVisibleCoverage } from "./market-chart-rendering.ts";
+import { MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT, marketChartCoverageIsSparse, resolveMarketChartVisibleCoverage } from "./market-chart-rendering.ts";
 import type { MarketChartTimeSlot } from "./market-chart";
 
 const slots = (count: number, populated: Set<number>): MarketChartTimeSlot[] =>
@@ -31,7 +31,29 @@ test("visible coverage counts provider bars and preserves blank intervals", () =
     renderedProviderBarCount: 34,
     coveragePercentage: 57,
   });
-  assert.equal(MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT, 60);
+  assert.equal(MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT, 70);
+});
+
+test("39 of 60 visible provider intervals immediately disclose sparse tape", () => {
+  const coverage = resolveMarketChartVisibleCoverage(
+    slots(60, new Set(Array.from({ length: 39 }, (_, index) => index))),
+    { from: 0, to: 60 },
+  );
+
+  assert.deepEqual(coverage, {
+    expectedIntervalCount: 60,
+    renderedProviderBarCount: 39,
+    coveragePercentage: 65,
+  });
+  assert.equal(marketChartCoverageIsSparse(coverage), true);
+});
+
+test("liquid visible ranges do not display sparse tape", () => {
+  assert.equal(marketChartCoverageIsSparse({
+    expectedIntervalCount: 60,
+    renderedProviderBarCount: 60,
+    coveragePercentage: 100,
+  }), false);
 });
 
 test("visible coverage follows a panned viewport without altering chart slots", () => {

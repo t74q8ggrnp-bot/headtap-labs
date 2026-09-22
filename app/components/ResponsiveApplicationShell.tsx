@@ -17,6 +17,7 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
   const [ticker, setTicker] = useState("");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchToggleRef = useRef<HTMLButtonElement>(null);
   const primaryRoutes = APPLICATION_ROUTES.filter((route) => primaryRouteIds.has(route.id));
@@ -37,6 +38,35 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
     if (mobileSearchOpen) searchInputRef.current?.focus();
   }, [mobileSearchOpen]);
 
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const updateViewportOrigin = () => {
+      const shell = shellRef.current;
+      if (!shell) return;
+      shell.style.setProperty(
+        "--ht-visual-viewport-top",
+        `${Math.max(0, viewport?.offsetTop ?? 0)}px`,
+      );
+      shell.style.setProperty(
+        "--ht-visual-viewport-left",
+        `${Math.max(0, viewport?.offsetLeft ?? 0)}px`,
+      );
+      shell.style.setProperty(
+        "--ht-visual-viewport-width",
+        `${Math.max(0, viewport?.width ?? window.innerWidth)}px`,
+      );
+    };
+    updateViewportOrigin();
+    viewport?.addEventListener("resize", updateViewportOrigin);
+    viewport?.addEventListener("scroll", updateViewportOrigin);
+    window.addEventListener("orientationchange", updateViewportOrigin);
+    return () => {
+      viewport?.removeEventListener("resize", updateViewportOrigin);
+      viewport?.removeEventListener("scroll", updateViewportOrigin);
+      window.removeEventListener("orientationchange", updateViewportOrigin);
+    };
+  }, []);
+
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
     if (event.key !== "Escape" || !mobileSearchOpen) return;
     event.preventDefault();
@@ -48,6 +78,7 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
 
   return (
     <div
+      ref={shellRef}
       className="ht-responsive-shell"
       data-application-route={currentRoute?.id ?? "unknown"}
       data-route-audience={currentRoute?.audience ?? "unknown"}

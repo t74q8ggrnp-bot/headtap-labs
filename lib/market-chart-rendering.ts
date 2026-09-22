@@ -31,7 +31,19 @@ export type MarketChartVisibleCoverage = {
   coveragePercentage: number;
 };
 
-export const MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT = 60;
+// A visible hour with more than eighteen missing provider minutes is sparse
+// enough to look broken without an explicit explanation. Keep this strictly
+// presentational: it never fills a bar or changes provider evidence.
+export const MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT = 70;
+
+export function marketChartCoverageIsSparse(
+  coverage: MarketChartVisibleCoverage | null | undefined,
+) {
+  return Boolean(
+    coverage &&
+    coverage.coveragePercentage < MARKET_CHART_SPARSE_COVERAGE_THRESHOLD_PERCENT,
+  );
+}
 
 /**
  * Measure only the intervals currently visible on the chart. Whitespace slots

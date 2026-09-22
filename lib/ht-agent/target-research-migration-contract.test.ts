@@ -134,11 +134,14 @@ test("target research seeds once per horizon from the full Agent cohort and reco
   );
 });
 
-test("system health fails closed on missing target-research receipts without granting authority", () => {
+test("system health reports missing target-research receipts without making research primary health", () => {
   assert.match(healthRoute, /observabilityVersion/);
   assert.match(healthRoute, /coverageComplete === true/);
   assert.match(healthRoute, /missingEpisodeCount/);
   assert.match(healthRoute, /seedFailureCount/);
+  assert.match(healthRoute, /blocking: false/);
+  assert.match(healthRoute, /primaryProductImpact: false/);
+  assert.match(healthRoute, /failureReceiptObservability/);
   assert.doesNotMatch(
     healthRoute.slice(healthRoute.indexOf("ht_agent_target_research_health")),
     /canonicalEntryChallengerReady\s*===\s*true/,

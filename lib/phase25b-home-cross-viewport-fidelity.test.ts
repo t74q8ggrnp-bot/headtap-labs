@@ -82,7 +82,8 @@ test("compact portrait and landscape keep content inside the visual viewport", (
   const chart = source("app/components/home/HomeReferenceChart.tsx");
   const css = source("app/globals.css");
 
-  assert.match(chart, /landscapeQuery\.matches[\s\S]*window\.innerHeight - 140[\s\S]*mobileQuery\.matches[\s\S]*window\.innerHeight - 302/);
+  assert.match(chart, /const viewportHeight = window\.visualViewport\?\.height \?\? window\.innerHeight/);
+  assert.match(chart, /landscapeQuery\.matches[\s\S]*viewportHeight - 164[\s\S]*mobileQuery\.matches[\s\S]*viewportHeight - 302/);
   assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1179px\) and \(orientation: landscape\)[\s\S]*\.ht-home-terminal-surface \{ height: 100dvh; min-height: 0; overflow: hidden; \}/);
   assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.ht-terminal-pane--intelligence[\s\S]*display: none/);
   assert.match(css, /\.ht-home-intelligence-dialog \.ht-dialog-sheet__content \{ min-height: 0; overflow-y: auto;/);
@@ -97,7 +98,7 @@ test("portrait actions stay compact and accessible while collapsed Intelligence 
   assert.match(surface, /aria-label=\{`Review \$\{symbol\} in Paper Trading`\}/);
   assert.match(surface, /ht-home-action-label--mobile">Paper/);
   assert.match(surface, /ht-home-action-label--desktop">Review in Paper/);
-  assert.match(chart, /Math\.min\(620, Math\.max\(330, window\.innerHeight - 302\)\)/);
+  assert.match(chart, /Math\.min\(620, Math\.max\(330, viewportHeight - 302\)\)/);
   assert.match(css, /\.ht-home-terminal-surface \.ht-home-action-label--desktop \{ display: none; \}/);
   assert.match(css, /\.htb-home \{ padding-bottom: calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\); \}/);
 });
