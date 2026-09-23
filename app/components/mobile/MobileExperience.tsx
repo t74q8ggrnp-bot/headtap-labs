@@ -210,6 +210,7 @@ export default function MobileExperience({
                   <OpportunityStateCard loading compact />
                 ) : apiMomentum ? (
                   <MobileSpotMomentumCard
+                    key={apiMomentum.ticker}
                     opportunity={apiMomentum}
                     framework={smFramework}
                     trace={smTrace}

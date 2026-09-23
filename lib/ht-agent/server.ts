@@ -1216,15 +1216,26 @@ export async function loadHtAgentDashboard(context: PaperServerContext) {
   };
 }
 
-export async function loadHtAgentTradePlans(context: PaperServerContext) {
+export async function loadHtAgentTradePlans(
+  context: PaperServerContext,
+  requestedSymbol: string | null = null,
+) {
   const profile = await getOrCreateHtAgentProfile(context);
+  let decisionQuery = context.service.from("ht_agent_decisions")
+    .select("symbol,decision_version,trade_plan,decided_at")
+    .eq("profile_id", profile.id)
+    .order("decided_at", { ascending: false });
+  if (requestedSymbol) {
+    // Home asks for one exact Canonical symbol. Query it directly instead of
+    // downloading a cross-symbol window and hoping the requested ticker is
+    // among the 100 most recent decisions.
+    decisionQuery = decisionQuery.eq("symbol", requestedSymbol).limit(1);
+  } else {
+    decisionQuery = decisionQuery.limit(100);
+  }
   const [control, decisions] = await Promise.all([
     globalControl(context.service),
-    context.service.from("ht_agent_decisions")
-      .select("symbol,decision_version,trade_plan,decided_at")
-      .eq("profile_id", profile.id)
-      .order("decided_at", { ascending: false })
-      .limit(100),
+    decisionQuery,
   ]);
   if (decisions.error) throw decisions.error;
   const activeSession = getEasternMarketSession();

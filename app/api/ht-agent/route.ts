@@ -13,6 +13,8 @@ import { checkApiRateLimit } from "@/lib/api-rate-limit";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/;
+
 const response = (body: Record<string, unknown>, status = 200, headers: Record<string, string> = {}) =>
   NextResponse.json({ contractVersion: "ht-agent-api-v1", ...body }, {
     status,
@@ -25,8 +27,14 @@ export async function GET(request: Request) {
   try {
     const context = await authenticatePaperRequest(request);
     if (!context) return response({ ok: false, error: "Authentication required." }, 401);
-    if (new URL(request.url).searchParams.get("view") === "trade_plans") {
-      return response({ ok: true, tradePlans: await loadHtAgentTradePlans(context) });
+    const searchParams = new URL(request.url).searchParams;
+    if (searchParams.get("view") === "trade_plans") {
+      const rawSymbol = searchParams.get("symbol");
+      const symbol = rawSymbol?.trim().toUpperCase() ?? null;
+      if (symbol !== null && !SYMBOL.test(symbol)) {
+        return response({ ok: false, error: "A valid symbol is required." }, 400);
+      }
+      return response({ ok: true, tradePlans: await loadHtAgentTradePlans(context, symbol) });
     }
     return response({ ok: true, dashboard: await loadHtAgentDashboard(context) });
   } catch (error) {

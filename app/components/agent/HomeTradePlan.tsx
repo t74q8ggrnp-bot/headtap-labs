@@ -16,20 +16,30 @@ type TradePlanFeed = {
   }>;
 };
 
+export type HomeTradePlanState =
+  | "loading"
+  | "available"
+  | "signed_out"
+  | "unavailable"
+  | "error";
+
 export default function HomeTradePlan({
   symbol,
   compact = false,
   onPlanChange,
+  onPlanStateChange,
   showCard = true,
 }: {
   symbol: string;
   compact?: boolean;
   onPlanChange?: (plan: HtTradePlan | null) => void;
+  onPlanStateChange?: (state: HomeTradePlanState) => void;
   showCard?: boolean;
 }) {
   const [feed, setFeed] = useState<TradePlanFeed | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [error, setError] = useState("");
+  const [planState, setPlanState] = useState<HomeTradePlanState>("loading");
 
   const refresh = useCallback(async () => {
     const session = await supabase.auth.getSession();
@@ -37,12 +47,17 @@ export default function HomeTradePlan({
     setSignedIn(Boolean(token));
     if (!token) {
       setFeed(null);
+      setPlanState("signed_out");
+      setError("");
       return;
     }
-    const response = await fetch("/api/ht-agent?view=trade_plans", {
-      cache: "no-store",
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await fetch(
+      `/api/ht-agent?view=trade_plans&symbol=${encodeURIComponent(symbol)}`,
+      {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
     const body = await response.json() as { ok?: boolean; tradePlans?: TradePlanFeed; error?: string };
     if (!response.ok || !body.ok || !body.tradePlans) {
       throw new Error(
@@ -52,13 +67,19 @@ export default function HomeTradePlan({
       );
     }
     setFeed(body.tradePlans);
+    setPlanState(body.tradePlans.plans.some((item) => item.symbol === symbol)
+      ? "available"
+      : "unavailable");
     setError("");
-  }, []);
+  }, [symbol]);
 
   useEffect(() => {
     let mounted = true;
     const run = () => void refresh().catch((reason) => {
-      if (mounted) setError(reason instanceof Error ? reason.message : "HT Trade Plan is unavailable.");
+      if (mounted) {
+        setPlanState("error");
+        setError(reason instanceof Error ? reason.message : "HT Trade Plan is unavailable.");
+      }
     });
     run();
     const timer = window.setInterval(run, 30_000);
@@ -75,6 +96,10 @@ export default function HomeTradePlan({
   useEffect(() => {
     onPlanChange?.(selected?.plan ?? null);
   }, [onPlanChange, selected?.plan]);
+
+  useEffect(() => {
+    onPlanStateChange?.(planState);
+  }, [onPlanStateChange, planState]);
 
   // Mobile Home already presents verified Agent targets beside the quote.
   // Keep the same single feed subscription without duplicating the card below

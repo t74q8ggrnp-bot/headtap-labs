@@ -38,11 +38,12 @@ test("Scanner opens the selected ticker in Market while legacy Workspace links r
 
 test("Market retains both Canonical discovery lanes and hands execution review to Paper", () => {
   const market = source("app/market/page.tsx");
+  const feed = source("app/hooks/useOpportunityFeed.ts");
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
 
-  assert.match(market, /getRollingCanonicalDecisionFrame\("momentum"\)/);
-  assert.match(market, /getRollingCanonicalDecisionFrame\("before_crowd"\)/);
-  assert.match(market, /initialMomentumPayload=\{initialMomentumPayload\}/);
-  assert.match(market, /initialBeforeCrowdPayload=\{initialBeforeCrowdPayload\}/);
+  assert.match(market, /initialMomentumPayload=\{null\}/);
+  assert.match(market, /initialBeforeCrowdPayload=\{null\}/);
+  assert.match(feed, /\/api\/opportunities\?type=momentum&limit=100/);
+  assert.match(feed, /\/api\/opportunities\?type=before_crowd&limit=100/);
   assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(symbol\)\}`\}/);
 });

@@ -16,7 +16,7 @@ import OpportunityWindow from "./OpportunityWindow";
 import PriceDiscoveryWindow from "./PriceDiscoveryWindow";
 import ProxPulse from "./ProxPulse";
 import HeroPriceChart from "@/app/components/market/HeroPriceChart";
-import HomeTradePlan from "@/app/components/agent/HomeTradePlan";
+import HomeTradePlan, { type HomeTradePlanState } from "@/app/components/agent/HomeTradePlan";
 
 type MobileSpotMomentumCardProps = {
   opportunity: Opportunity;
@@ -47,6 +47,7 @@ export default function MobileSpotMomentumCard({
   const displayChange = displayQuote?.changePercent ?? opportunity.change;
   const displayLive = marketView.live;
   const [agentPlan, setAgentPlan] = useState<HtTradePlan | null>(null);
+  const [agentPlanState, setAgentPlanState] = useState<HomeTradePlanState>("loading");
 
   return (
     <article className="ht-mobile-home-card ht-mobile-home-card--edge mb-3 w-full flex-shrink-0 overflow-hidden" aria-labelledby={`mobile-home-${opportunity.ticker}`}>
@@ -54,6 +55,7 @@ export default function MobileSpotMomentumCard({
         symbol={opportunity.ticker}
         compact
         onPlanChange={setAgentPlan}
+        onPlanStateChange={setAgentPlanState}
         showCard={false}
       />
       <div className="ht-mobile-spot-summary">
@@ -97,7 +99,17 @@ export default function MobileSpotMomentumCard({
                   </div>
                 </div>
               ) : (
-                <p className="mt-2 text-[10px] font-bold leading-4 text-zinc-500">Targets forming with the verified plan</p>
+                <p className="mt-2 text-[10px] font-bold leading-4 text-zinc-500">
+                  {agentPlanState === "loading"
+                    ? "Loading verified Agent X targets…"
+                    : agentPlanState === "signed_out"
+                      ? "Sign in to load your verified Agent X targets."
+                      : agentPlanState === "error"
+                        ? "Verified Agent X targets are temporarily unavailable."
+                        : agentPlanState === "available"
+                          ? "Targets forming with the verified plan."
+                          : `No verified Agent X targets are available for ${opportunity.ticker} yet.`}
+                </p>
               )}
               <p className="mt-1.5 text-[7px] leading-3 text-zinc-700">Verified Agent X plan levels only.</p>
             </div>
