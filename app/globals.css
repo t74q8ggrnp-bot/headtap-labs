@@ -231,6 +231,140 @@ body {
   }
 }
 
+/* Home desktop now uses the same native terminal shell as Market. Mobile Home
+   remains on its dedicated immersive composition below 1180px. */
+@media (min-width: 1180px) {
+  .ht-responsive-shell[data-application-route="discovery"] > .ht-desktop-global-header { display: none; }
+  .ht-responsive-shell[data-application-route="discovery"] .ht-app-content {
+    max-width: none;
+    padding: 0;
+  }
+  .ht-home-terminal-surface .ht-terminal {
+    --ht-terminal-pane-seam: rgba(161, 166, 176, 0.085);
+    background:
+      radial-gradient(circle at 0 0, rgba(165, 61, 9, 0.22), transparent 29rem),
+      radial-gradient(circle at 100% 100%, rgba(129, 45, 10, 0.12), transparent 34rem),
+      #07090b;
+  }
+  .ht-home-terminal-surface .ht-terminal-nav {
+    border-right-color: var(--ht-terminal-pane-seam);
+    background: rgba(8, 10, 12, 0.58);
+  }
+  .ht-home-terminal-surface .ht-terminal-pane--markets {
+    border-right-color: var(--ht-terminal-pane-seam);
+    background:
+      radial-gradient(circle at 0 0, rgba(130, 47, 8, 0.1), transparent 18rem),
+      rgba(10, 12, 15, 0.76);
+  }
+  .ht-home-terminal-surface .ht-terminal-pane--intelligence {
+    border-left-color: var(--ht-terminal-pane-seam);
+    background:
+      radial-gradient(circle at 100% 100%, rgba(135, 46, 9, 0.13), transparent 24rem),
+      rgba(10, 12, 15, 0.76);
+  }
+}
+
+.ht-home-spot-intelligence {
+  min-height: 100%;
+  padding: 0.85rem 0.8rem 1.4rem;
+  color: #b4b7bf;
+  font-family: var(--font-ht-terminal), Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.ht-home-spot-intelligence__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+.ht-home-spot-intelligence__header p {
+  margin: 0;
+  color: #b59cff;
+  font-size: 0.68rem;
+  font-weight: 820;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.ht-home-spot-intelligence__header span { color: #717680; font-size: 0.58rem; font-weight: 680; }
+.ht-home-spot-intelligence__quote {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  padding: 1.15rem 0 0.9rem;
+}
+.ht-home-spot-intelligence__quote h2 {
+  width: 100%;
+  margin: 0;
+  color: #f7f7f8;
+  font-size: clamp(2rem, 3vw, 2.7rem);
+  font-weight: 830;
+  letter-spacing: -0.055em;
+  line-height: 0.95;
+}
+.ht-home-spot-intelligence__quote > strong { color: #f4f4f5; font-size: 1rem; font-weight: 780; }
+.ht-home-spot-intelligence__quote > span { font-size: 0.75rem; font-weight: 780; }
+.ht-home-spot-intelligence__quote small { color: #727780; font-size: 0.56rem; font-weight: 760; letter-spacing: 0.08em; text-transform: uppercase; }
+.ht-home-spot-intelligence__facts {
+  display: grid;
+  grid-template-columns: 0.78fr 1.22fr;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.8rem 0;
+  border-top: 1px solid rgba(161, 166, 176, 0.08);
+  border-bottom: 1px solid rgba(161, 166, 176, 0.08);
+}
+.ht-home-spot-intelligence__facts div { min-width: 0; }
+.ht-home-spot-intelligence__facts dt,
+.ht-home-spot-targets h3 { color: #777c86; font-size: 0.58rem; font-weight: 780; letter-spacing: 0.12em; text-transform: uppercase; }
+.ht-home-spot-intelligence__facts dd { margin: 0.25rem 0 0; color: #e4e4e7; font-size: 0.76rem; font-weight: 760; text-transform: capitalize; }
+.ht-home-spot-intelligence__facts div:first-child dd { color: #b59cff; font-size: 1.35rem; font-weight: 830; }
+.ht-home-spot-targets { padding: 0.9rem 0; }
+.ht-home-spot-targets h3 { margin: 0; color: #79b5ff; }
+.ht-home-spot-targets > div { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-top: 0.55rem; }
+.ht-home-spot-targets p { display: grid; gap: 0.18rem; margin: 0; }
+.ht-home-spot-targets p span { color: #747984; font-size: 0.58rem; font-weight: 690; }
+.ht-home-spot-targets p strong { color: #ff8a16; font-size: 0.86rem; font-weight: 820; }
+.ht-home-spot-targets > small { display: block; margin-top: 0.5rem; color: #6f747e; font-size: 0.59rem; font-weight: 620; line-height: 1.35; }
+.ht-home-spot-intelligence__read,
+.ht-home-spot-intelligence__withheld { margin: 0 0 0.85rem; color: #8f949e; font-size: 0.67rem; font-weight: 620; line-height: 1.55; }
+.ht-home-spot-intelligence__withheld { color: #777c85; }
+.ht-home-spot-market {
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.7rem;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.ht-home-spot-market strong { color: #d0d2d6; font-size: 0.64rem; font-weight: 760; }
+.ht-home-spot-market div { display: flex; gap: 0.7rem; margin-top: 0.3rem; font-size: 0.61rem; font-weight: 740; }
+.ht-home-spot-intelligence__actions { display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; margin: 0.2rem 0 0.8rem; }
+.ht-home-spot-intelligence__actions :is(a, button) {
+  min-height: 30px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #fb923c;
+  font: 740 0.65rem/30px var(--font-ht-terminal), sans-serif;
+}
+.ht-home-spot-intelligence__actions button { color: #a8acb4; }
+.ht-home-spot-intelligence__actions button[aria-pressed="true"] { color: #fb923c; }
+.ht-home-spot-intelligence__disclosure { border-top: 1px solid rgba(161, 166, 176, 0.08); }
+.ht-home-spot-intelligence__disclosure > summary {
+  min-height: 38px;
+  color: #c3c6cb;
+  font-size: 0.65rem;
+  font-weight: 750;
+  line-height: 38px;
+  cursor: pointer;
+}
+.ht-home-spot-intelligence__disclosure > div { padding: 0 0 0.75rem; color: #858a94; font-size: 0.62rem; line-height: 1.45; }
+.ht-home-spot-intelligence__disclosure p { margin: 0.25rem 0 0; }
+.ht-home-spot-intelligence__disclosure strong { color: #e4e4e7; text-transform: capitalize; }
+.ht-home-spot-intelligence__disclosure dl { display: grid; gap: 0.25rem; margin: 0.55rem 0 0; }
+.ht-home-spot-intelligence__disclosure dl div { display: flex; justify-content: space-between; gap: 0.6rem; }
+.ht-home-spot-intelligence__disclosure dd { margin: 0; color: #d4d4d8; }
+.ht-home-spot-intelligence__disclosure ul { margin: 0; padding-left: 1rem; }
+
 /* Phase 2.5B Home visual-fidelity checkpoint: one identity, three compositions. */
 .ht-responsive-shell[data-application-route="home"],
 .ht-responsive-shell[data-application-route="home"] button,

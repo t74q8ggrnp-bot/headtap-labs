@@ -9,7 +9,8 @@ test("Market URL state is the exact ticker authority without a Canonical hero fa
   const home = source("app/HomeClient.tsx");
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
 
-  assert.match(home, /requested: requestedMarketTicker/);
+  assert.match(home, /surface === "market"\s*\? requestedMarketTicker \?\? "SPY"/);
+  assert.doesNotMatch(home, /surface === "market"[\s\S]{0,100}selectedStock\?\.symbol/);
   assert.match(home, /router\.push\(href\)/);
   assert.doesNotMatch(home, /selectedOpportunity\s*\?\?\s*apiMomentum/);
   assert.match(surface, /opportunity\?\.ticker === symbol/);

@@ -4,20 +4,20 @@ import test from "node:test";
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("desktop Home prioritizes a single large chart and moves contenders below Pro X", () => {
+test("desktop Home reuses the Market terminal shell with a Canonical Spot Momentum rail", () => {
   const home = source("app/HomeClient.tsx");
-  const workspace = source("app/components/opportunity/DesktopSpotMomentumWorkspace.tsx");
+  const surface = source("app/components/home/HomeReferenceSurface.tsx");
+  const intelligence = source("app/components/home/HomeSpotMomentumIntelligence.tsx");
   const css = source("app/globals.css");
 
-  assert.equal(home.match(/<DesktopSpotMomentumWorkspace/g)?.length, 1);
-  assert.equal(workspace.match(/<HeroPriceChart/g)?.length, 1);
-  assert.match(workspace, /fillAvailableHeight/);
-  assert.equal(workspace.match(/\n\s*<HomeTradePlan/g)?.length, 1);
-  assert.ok(workspace.indexOf("ht-desktop-spot-workspace__hero") < workspace.indexOf("ht-desktop-spot-workspace__evidence"));
-  assert.ok(workspace.indexOf("ht-desktop-spot-workspace__evidence") < workspace.indexOf("ht-desktop-spot-workspace__contenders"));
-  assert.match(css, /grid-template-columns: minmax\(300px, 24%\) minmax\(0, 1fr\)/);
-  assert.match(css, /height: calc\(100dvh - 58px\)/);
-  assert.match(workspace, /Risk and R\/R are withheld until verified support/);
+  assert.match(home, /homeComposition === "desktop"/);
+  assert.match(home, /terminalSurface\("spot-momentum"\)/);
+  assert.match(surface, /experience === "spot-momentum"/);
+  assert.equal(surface.match(/<HomeReferenceChart/g)?.length, 1);
+  assert.match(intelligence, /HT Agent X targets/);
+  assert.match(intelligence, /Pro X evidence/);
+  assert.match(intelligence, /Risk and R\/R are withheld until verified support/);
+  assert.match(css, /data-application-route="discovery"[^\n]*> \.ht-desktop-global-header/);
 });
 
 test("desktop Home relies on the global shell without a duplicate dashboard header", () => {
@@ -45,12 +45,11 @@ test("desktop first paint reserves the final workspace geometry", () => {
 
 test("market context is compact, provider-timestamped, and shares one 15-second snapshot", () => {
   const home = source("app/HomeClient.tsx");
-  const workspace = source("app/components/opportunity/DesktopSpotMomentumWorkspace.tsx");
+  const intelligence = source("app/components/home/HomeSpotMomentumIntelligence.tsx");
   const route = source("app/api/market-context/route.ts");
 
   assert.doesNotMatch(home, /ht-home-market-context/);
-  assert.match(workspace, /Broad market:/);
-  assert.match(workspace, /Provider snapshot/);
+  assert.match(intelligence, /Broad market:/);
   assert.match(route, /tickers", "SPY,QQQ,IWM,VIXY"/);
   assert.match(route, /providerRequests: 1/);
   assert.match(route, /revalidate: 15/);

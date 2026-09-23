@@ -8,11 +8,11 @@ import { APPLICATION_ROUTES, resolveApplicationRoute } from "@/lib/application-n
 
 const routes = [
   { href: "/", label: "Home", icon: "⌂", exact: true },
-  { href: "/scanner", label: "Scan", icon: "⌕", exact: true },
-  { href: "/trade", label: "Trade", icon: "▥", exact: false },
+  { href: "/market", label: "Market", icon: "▥", exact: true },
   { href: "/paper", label: "Paper", icon: "▤", exact: true },
+  { href: "/agent", label: "Agent", icon: "◇", exact: true },
 ] as const;
-const primaryRouteIds = new Set(["home", "scanner", "workspace", "paper"]);
+const primaryRouteIds = new Set(["discovery", "home", "paper", "agent"]);
 
 export default function DesktopTerminalNavigation({
   onResetLayout,
@@ -56,7 +56,7 @@ export default function DesktopTerminalNavigation({
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return;
     setTicker("");
     setSearchOpen(false);
-    router.push(`/trade/${encodeURIComponent(symbol)}`);
+    router.push(`/market?ticker=${encodeURIComponent(symbol)}`);
   };
 
   return (

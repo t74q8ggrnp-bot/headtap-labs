@@ -38,7 +38,6 @@ import type { HomeAlert } from "@/lib/home-account";
 import {
   marketWorkspaceHref,
   normalizeMarketWorkspaceSymbol,
-  resolveMarketWorkspaceSymbol,
 } from "@/lib/market-workspace-route";
 
 type HomeClientProps = {
@@ -211,6 +210,7 @@ export default function HomeClient({
   } = useWatchlist({ userId: session?.user?.id ?? null });
   const { symbols: recentlyViewed, record: recordRecentlyViewed } = useRecentlyViewed();
   const [mounted, setMounted] = useState(false);
+  const [homeComposition, setHomeComposition] = useState<"pending" | "compact" | "desktop">("pending");
   const [mobileCardIndex, setMobileCardIndex] = useState(0);
 
   // Morning Market Context
@@ -829,6 +829,15 @@ export default function HomeClient({
 
   }, []);
 
+  useEffect(() => {
+    if (surface !== "intelligence") return;
+    const query = window.matchMedia("(min-width: 1180px)");
+    const apply = () => setHomeComposition(query.matches ? "desktop" : "compact");
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, [surface]);
+
   // Market context is a shared provider snapshot. The selected ticker itself
   // stays on the existing five-second display-frame path.
   useEffect(() => {
@@ -1053,11 +1062,9 @@ export default function HomeClient({
   // Secondary opportunity surfaces consume the canonical feed below; there is
   // intentionally no local fallback selector.
 
-  const referenceSymbol = resolveMarketWorkspaceSymbol({
-    requested: requestedMarketTicker,
-    selected: selectedStock?.symbol,
-    canonicalHero: apiMomentum?.ticker,
-  }) ?? "SPY";
+  const referenceSymbol = surface === "market"
+    ? requestedMarketTicker ?? "SPY"
+    : apiMomentum?.ticker ?? "SPY";
   const matchingSelectedOpportunity = selectedOpportunity?.ticker === referenceSymbol
     ? selectedOpportunity
     : null;
@@ -1066,7 +1073,9 @@ export default function HomeClient({
   ) ?? apiBeforeCrowdList.find(
     (opportunity) => opportunity.ticker === referenceSymbol,
   ) ?? null;
-  const referenceOpportunity = matchingSelectedOpportunity ?? matchingFrameOpportunity;
+  const referenceOpportunity = surface === "intelligence"
+    ? apiMomentum
+    : matchingSelectedOpportunity ?? matchingFrameOpportunity;
   const referenceFramework = tradeFrameworkToDisplay(referenceOpportunity?.tradeFramework);
   const requestedAccountSurface = searchParams?.get("auth") === "signin"
     ? "signin"
@@ -1074,17 +1083,18 @@ export default function HomeClient({
       ? "profile"
       : null;
 
-  if (surface === "market") {
-    const navigateMarketSymbol = (symbol: string) => {
+  const navigateMarketSymbol = (symbol: string) => {
       const normalized = normalizeMarketWorkspaceSymbol(symbol);
       const href = marketWorkspaceHref(normalized);
       if (!normalized || !href) return;
       setSelectedStock({ symbol: normalized, price: 0, change: 0 });
       recordRecentlyViewed(normalized);
       router.push(href);
-    };
-    return (
+  };
+
+  const terminalSurface = (experience: "market" | "spot-momentum") => (
       <HomeReferenceSurface
+        experience={experience}
         symbol={referenceSymbol}
         opportunity={referenceOpportunity}
         spotMomentum={apiFullRankedList}
@@ -1095,8 +1105,8 @@ export default function HomeClient({
         recents={recentlyViewed}
         watched={referenceSymbol ? watchlist.includes(referenceSymbol) : false}
         watchlistBusy={watchlistLoading}
-        selectionLoading={selectedOpportunityLoading}
-        selectionError={selectedOpportunityError}
+        selectionLoading={experience === "market" ? selectedOpportunityLoading : false}
+        selectionError={experience === "market" ? selectedOpportunityError : ""}
         authDestination={requestedAccountSurface}
         authReady={authReady}
         session={session}
@@ -1116,21 +1126,27 @@ export default function HomeClient({
         onSignOut={() => void handleSignOut()}
         onSelectAlert={(alert) => {
           setAlerts((current) => current.map((item) => item.id === alert.id ? { ...item, read: true } : item));
-          const canonical = apiFullRankedList.find((item) => item.ticker === alert.ticker);
-          if (canonical) {
-            navigateMarketSymbol(canonical.ticker);
-          } else {
-            navigateMarketSymbol(alert.ticker);
-          }
+          navigateMarketSymbol(alert.ticker);
         }}
-        onSelect={(opportunity) => {
-          navigateMarketSymbol(opportunity.ticker);
-        }}
+        onSelect={(opportunity) => navigateMarketSymbol(opportunity.ticker)}
         onToggleWatchlist={() => {
           if (referenceSymbol) void toggleWatchlistSymbol(referenceSymbol);
         }}
       />
+  );
+
+  if (surface === "market") {
+    return (
+      terminalSurface("market")
     );
+  }
+
+  if (homeComposition === "pending" || (homeComposition === "desktop" && apiOpportunitiesLoading && !apiMomentum)) {
+    return <OpportunityStateCard loading workspace />;
+  }
+
+  if (homeComposition === "desktop") {
+    return terminalSurface("spot-momentum");
   }
 
   return (

@@ -12,6 +12,7 @@ import { formatMarketPrice } from "@/lib/market-price-format";
 import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-model";
 import { HomeAccountSurface, HomeAlertsSurface } from "./HomeAccountAlerts";
 import HomeReferenceChart from "./HomeReferenceChart";
+import HomeSpotMomentumIntelligence from "./HomeSpotMomentumIntelligence";
 import HomeTerminalMarkets from "./HomeTerminalMarkets";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 
@@ -28,6 +29,7 @@ export type HomeMarketContext = {
 };
 
 type Props = {
+  experience?: "market" | "spot-momentum";
   symbol: string;
   opportunity: Opportunity | null;
   spotMomentum: Opportunity[];
@@ -76,6 +78,7 @@ function providerTime(timestamp: string | null | undefined) {
 }
 
 export default function HomeReferenceSurface({
+  experience = "market",
   symbol,
   opportunity,
   spotMomentum,
@@ -329,7 +332,7 @@ export default function HomeReferenceSurface({
     </>
   );
 
-  const intelligence = compactLayout === "pending" ? null : (
+  const marketIntelligence = compactLayout === "pending" ? null : (
     <section
       className="htb-intelligence-shell"
       data-home-priority="4-intelligence"
@@ -388,11 +391,24 @@ export default function HomeReferenceSurface({
       </div>
     </section>
   );
+  const intelligence = experience === "spot-momentum" && canonicalOpportunity ? (
+    <HomeSpotMomentumIntelligence
+      opportunity={canonicalOpportunity}
+      framework={framework}
+      marketContext={marketContext}
+      displayPrice={displayPrice}
+      displayChange={displayChange}
+      liveLabel={marketView.live ? "Live quote" : marketView.label}
+      watched={watched}
+      watchlistBusy={watchlistBusy}
+      onToggleWatchlist={onToggleWatchlist}
+    />
+  ) : marketIntelligence;
 
   return (
     <main
       className="htb-home ht-home-terminal-surface"
-      aria-label="HT Labs Market workspace"
+      aria-label={experience === "spot-momentum" ? "HT Labs Spot Momentum workspace" : "HT Labs Market workspace"}
       data-workspace-symbol={symbol}
     >
       <DesktopTerminalFrame
