@@ -1107,6 +1107,12 @@ textarea {
   overflow-x: clip;
 }
 
+/* Prevent WKWebView's sub-16px focus zoom from shifting the application
+   viewport while a compact header control retains focus across rotation. */
+.ht-native-ios .ht-shell-search input {
+  font-size: 16px;
+}
+
 .ht-route-content {
   min-width: 0;
 }

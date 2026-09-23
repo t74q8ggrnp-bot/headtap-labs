@@ -92,6 +92,10 @@ test("shell focus and safe-area rules cover desktop and required mobile edges", 
   assert.match(shell, /window\.requestAnimationFrame/);
   assert.match(shell, /window\.clearTimeout\(settleTimer\)/);
   assert.match(css, /\.ht-native-ios body,[\s\S]*overflow-x: clip/);
+  assert.match(
+    css,
+    /\.ht-native-ios \.ht-shell-search input\s*\{[\s\S]*font-size:\s*16px/,
+  );
 });
 
 test("Home exposes one page heading and repeated contender regions use unique ARIA ids", () => {
