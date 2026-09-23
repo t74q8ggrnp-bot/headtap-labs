@@ -34,9 +34,12 @@ test("desktop first paint reserves the final workspace geometry", () => {
   const css = source("app/globals.css");
 
   assert.match(home, /<OpportunityStateCard loading workspace \/>/);
-  assert.match(stateCard, /ht-desktop-spot-workspace__hero ht-home-workspace-loading/);
+  assert.match(stateCard, /ht-home-workspace-loading/);
   assert.match(stateCard, /aria-busy="true"/);
-  assert.match(css, /\.ht-home-workspace-loading__plot/);
+  assert.match(stateCard, /src="\/app-icon\.png"/);
+  assert.match(stateCard, /Syncing verified market intelligence/);
+  assert.match(css, /\.ht-home-workspace-loading__card/);
+  assert.match(css, /height: calc\(100dvh - 58px\)/);
   assert.match(css, /prefers-reduced-motion: reduce/);
 });
 
