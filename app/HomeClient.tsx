@@ -183,10 +183,6 @@ export default function HomeClient({
 
   const [stocks, setStocks] = useState<Stock[]>(initialStocks);
   const [ticker, setTicker] = useState("");
-  const normalizedWorkspaceTicker = ticker.trim().toUpperCase();
-  const workspaceSearchTicker = /^[A-Z][A-Z0-9.-]{0,9}$/.test(normalizedWorkspaceTicker)
-    ? normalizedWorkspaceTicker
-    : null;
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [selectedOpportunity, setSelectedOpportunity] = useState<APIOpportunity | null>(null);
   const [selectedOpportunityLoading, setSelectedOpportunityLoading] = useState(false);
@@ -1327,138 +1323,14 @@ export default function HomeClient({
 
 
 
-        <section id="conviction-engine" className="ht-home-conviction mx-auto max-w-[1488px] px-3 pb-3 pt-3 md:px-6 md:pb-4 md:pt-4" aria-label="Top convictions">
+        <section id="conviction-engine" className="ht-home-conviction w-full" aria-label="Top convictions">
           <motion.div
             initial={false}
-            className="ht-home-conviction__frame relative overflow-hidden rounded-[1.65rem] border border-white/10 bg-[#04080b] p-3 shadow-[0_28px_90px_rgba(0,0,0,0.52)] md:p-4"
+            className="ht-home-conviction__frame relative overflow-hidden bg-[#04080b]"
           >
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(255,106,0,0.11),transparent_28%),radial-gradient(circle_at_76%_28%,rgba(34,211,238,0.055),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.018),transparent_42%)]" />
 
-            <div className="relative space-y-4">
-              <div className="flex flex-col gap-3 border-b border-white/10 pb-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-7">
-                  <div className="flex items-center gap-2">
-                    <Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-8 w-auto" />
-                  </div>
-                  <nav className="hidden items-center gap-7 text-xs font-bold text-zinc-500 lg:flex">
-                    <button
-                      type="button"
-                      onClick={() => document.getElementById("conviction-engine")?.scrollIntoView({ behavior: "smooth" })}
-                      className="transition hover:text-white"
-                    >
-                      Dashboard
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => document.getElementById("conviction-engine")?.scrollIntoView({ behavior: "smooth" })}
-                      className="text-orange-400 transition hover:text-white"
-                    >
-                      Top Convictions
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => document.getElementById("watchlist")?.scrollIntoView({ behavior: "smooth" })}
-                      className="transition hover:text-white"
-                    >
-                      Watchlist
-                    </button>
-                  </nav>
-                </div>
-
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <div className="flex min-w-[240px] items-center gap-2 rounded-xl border border-white/10 bg-black/40 px-3 py-2.5">
-                    <span className="text-zinc-600">⌕</span>
-                    <input
-                      type="text"
-                      placeholder="Search ticker..."
-                      aria-label="Search ticker"
-                      value={ticker}
-                      onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleTickerSearch();
-                      }}
-                      className="min-w-0 flex-1 bg-transparent text-xs font-black uppercase text-white outline-none placeholder:normal-case placeholder:text-zinc-600"
-                    />
-                  </div>
-                  {workspaceSearchTicker && (
-                    <Link
-                      href={`/market?ticker=${encodeURIComponent(workspaceSearchTicker)}`}
-                      className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.05] px-3 py-2.5 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-300 transition hover:border-cyan-400/40 hover:text-cyan-200"
-                    >
-                      Workspace ↗
-                    </Link>
-                  )}
-                  {session?.user ? (
-                    <div className="flex items-center gap-2">
-                      <span className="max-w-[180px] truncate rounded-full border border-green-400/20 bg-green-500/10 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-green-300">
-                        {mounted ? (session.user.email || "HT Account") : ""}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => { setAlertsOpen(true); setAlerts(prev => prev.map(a => ({ ...a, read: true }))); }}
-                        className="relative rounded-full border border-white/10 bg-white/[0.04] px-3 py-2.5 text-zinc-300 hover:text-white transition"
-                      >
-                        <span className="text-base">🔔</span>
-                        {alerts.filter(a => !a.read).length > 0 && (
-                          <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] font-black text-black">
-                            {alerts.filter(a => !a.read).length}
-                          </span>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSignOut}
-                        className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-300 hover:text-white"
-                      >
-                        Sign Out
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          type="email"
-                          placeholder="Email"
-                          aria-label="Email address"
-                          value={authEmail}
-                          onChange={(e) => setAuthEmail(e.target.value)}
-                          className="w-36 rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-orange-500/60"
-                        />
-                        <input
-                          type="password"
-                          placeholder="Password"
-                          aria-label="Password"
-                          value={authPassword}
-                          onChange={(e) => setAuthPassword(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleAuth("signin"); }}
-                          className="w-32 rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-bold text-white outline-none transition placeholder:text-zinc-600 focus:border-orange-500/60"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleAuth("signin")}
-                          disabled={authLoading}
-                          className="rounded-full border border-white/10 bg-white/[0.06] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-200 transition hover:border-orange-400/40 hover:text-orange-300 disabled:opacity-50"
-                        >
-                          {authLoading ? "..." : "Login"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleAuth("signup")}
-                          disabled={authLoading}
-                          className="rounded-full bg-orange-500 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-black shadow-[0_0_22px_rgba(249,115,22,0.22)] disabled:opacity-50"
-                        >
-                          {authLoading ? "..." : "Sign Up"}
-                        </button>
-                      </div>
-                      {authMessage && (
-                        <p className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-[10px] font-bold text-zinc-300">
-                          {authMessage}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+            <div className="relative">
 
               {/* ═══════════════════════════════════════════════════
                   SPOT MOMENTUM — Primary Hero Experience

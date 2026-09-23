@@ -11,11 +11,21 @@ test("desktop Home prioritizes a single large chart and moves contenders below P
 
   assert.equal(home.match(/<DesktopSpotMomentumWorkspace/g)?.length, 1);
   assert.equal(workspace.match(/<HeroPriceChart/g)?.length, 1);
+  assert.match(workspace, /fillAvailableHeight/);
   assert.equal(workspace.match(/\n\s*<HomeTradePlan/g)?.length, 1);
   assert.ok(workspace.indexOf("ht-desktop-spot-workspace__hero") < workspace.indexOf("ht-desktop-spot-workspace__evidence"));
   assert.ok(workspace.indexOf("ht-desktop-spot-workspace__evidence") < workspace.indexOf("ht-desktop-spot-workspace__contenders"));
   assert.match(css, /grid-template-columns: minmax\(250px, 30%\) minmax\(0, 70%\)/);
+  assert.match(css, /height: calc\(100dvh - 58px\)/);
   assert.match(workspace, /Risk and R\/R are withheld until verified support/);
+});
+
+test("desktop Home relies on the global shell without a duplicate dashboard header", () => {
+  const home = source("app/HomeClient.tsx");
+
+  assert.doesNotMatch(home, />\s*Dashboard\s*</);
+  assert.doesNotMatch(home, />\s*Top Convictions\s*</);
+  assert.doesNotMatch(home, /className="ht-home-conviction mx-auto max-w/);
 });
 
 test("market context is compact, provider-timestamped, and shares one 15-second snapshot", () => {

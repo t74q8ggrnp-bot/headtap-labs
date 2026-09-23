@@ -213,6 +213,7 @@ export default function DesktopSpotMomentumWorkspace({
             height="clamp(390px, 51vh, 555px)"
             title="Live price history"
             visibleRange="2h"
+            fillAvailableHeight
           />
         </div>
       </section>

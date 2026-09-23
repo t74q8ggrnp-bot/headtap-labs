@@ -1905,7 +1905,8 @@ textarea {
 .ht-desktop-spot-workspace__hero {
   display: grid;
   grid-template-columns: minmax(250px, 30%) minmax(0, 70%);
-  min-height: clamp(500px, 62vh, 650px);
+  height: calc(100dvh - 58px);
+  min-height: 560px;
   padding: 0 !important;
 }
 
@@ -1919,7 +1920,8 @@ textarea {
 
 .ht-desktop-spot-workspace__chart {
   min-width: 0;
-  padding: 0.9rem;
+  min-height: 0;
+  padding: 0;
   background: #020303;
 }
 
@@ -1961,10 +1963,10 @@ textarea {
   }
 }
 .ht-home-conviction__frame {
-  border-color: var(--ht-border-subtle) !important;
-  border-radius: var(--ht-radius-shell) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
   background: var(--ht-color-surface) !important;
-  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.38) !important;
+  box-shadow: none !important;
 }
 .ht-home-conviction__frame > .pointer-events-none { opacity: 0.2; }
 .ht-home-watchlist > div {

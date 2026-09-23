@@ -22,6 +22,7 @@ type HeroPriceChartProps = {
   title?: string;
   presentation?: "standard" | "feature";
   visibleRange?: MarketChartVisibleRange;
+  fillAvailableHeight?: boolean;
 };
 
 export default function HeroPriceChart({
@@ -34,6 +35,7 @@ export default function HeroPriceChart({
   title = "Verified price history",
   presentation = "standard",
   visibleRange,
+  fillAvailableHeight = false,
 }: HeroPriceChartProps) {
   const marketView = useLiveMarketView(symbol, { asset, productId, chart: true });
   const [chartMode, setChartMode] = useState<MarketChartMode>("candles");
@@ -68,7 +70,7 @@ export default function HeroPriceChart({
     <section
       className={feature
         ? "relative overflow-hidden bg-black"
-        : `overflow-hidden rounded-2xl border ${palette.border} bg-black/35`}
+        : `${fillAvailableHeight ? "flex h-full min-h-0 flex-col" : ""} overflow-hidden rounded-2xl border ${palette.border} bg-black/35`}
       aria-label={`${symbol} ${title.toLowerCase()} chart`}
       data-market-symbol={symbol}
       data-market-as-of={marketView.quote?.asOf ?? ""}
@@ -144,13 +146,19 @@ export default function HeroPriceChart({
       )}
 
       {failed ? (
-        <div className="flex items-center justify-center px-4 text-center" style={{ height: resolvedHeight }}>
+        <div
+          className={`flex items-center justify-center px-4 text-center ${fillAvailableHeight ? "min-h-0 flex-1" : ""}`}
+          style={{ height: fillAvailableHeight ? undefined : resolvedHeight }}
+        >
           <p className="text-[10px] font-semibold text-zinc-600">
             Verified chart temporarily unavailable. No estimated data is shown.
           </p>
         </div>
       ) : !data ? (
-        <div className="flex animate-pulse flex-col items-center justify-center gap-3" style={{ height: resolvedHeight }}>
+        <div
+          className={`flex animate-pulse flex-col items-center justify-center gap-3 ${fillAvailableHeight ? "min-h-0 flex-1" : ""}`}
+          style={{ height: fillAvailableHeight ? undefined : resolvedHeight }}
+        >
           <div className="h-1.5 w-2/3 rounded-full bg-white/7" />
           <p className="text-[8px] font-black uppercase tracking-[0.16em] text-zinc-700">
             Loading verified price history
@@ -158,18 +166,20 @@ export default function HeroPriceChart({
         </div>
       ) : (
         <>
-          <MarketChartCanvas
-            bars={data.bars}
-            intervalSeconds={data.intervalSeconds ?? 60}
-            mode={chartMode}
-            accent={accent}
-            compact={compact}
-            height={resolvedHeight}
-            timeZone={timeZone}
-            viewportKey={viewportKey}
-            tightPriceScale={feature}
-            visibleRange={visibleRange}
-          />
+          <div className={fillAvailableHeight ? "min-h-0 flex-1" : ""}>
+            <MarketChartCanvas
+              bars={data.bars}
+              intervalSeconds={data.intervalSeconds ?? 60}
+              mode={chartMode}
+              accent={accent}
+              compact={compact}
+              height={fillAvailableHeight ? "100%" : resolvedHeight}
+              timeZone={timeZone}
+              viewportKey={viewportKey}
+              tightPriceScale={feature}
+              visibleRange={visibleRange}
+            />
+          </div>
           {!feature ? <div className="flex flex-wrap items-center justify-between gap-1 border-t border-white/7 px-3 py-1.5">
             <p className="text-[7px] font-semibold text-zinc-700">
               {chartMode === "candles"
