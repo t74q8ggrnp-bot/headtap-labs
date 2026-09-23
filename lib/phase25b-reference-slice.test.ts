@@ -74,8 +74,9 @@ test("visible-range controls remain local and cannot remount or refetch the Home
   const canvas = source("app/components/market/MarketChartCanvas.tsx");
   const css = source("app/globals.css");
 
-  for (const label of ["1H", "2H", "Session"]) assert.match(chart, new RegExp(`label: "${label}"`));
-  assert.match(chart, /mobileQuery\.matches \? "1h" : "2h"/);
+  for (const label of ["1H", "90M", "2H", "Session"]) assert.match(chart, new RegExp(`label: "${label}"`));
+  assert.match(chart, /mobileQuery\.matches \? "1h" : defaultVisibleRange/);
+  assert.match(chart, /presentation === "spot-momentum" \? "90m" : "2h"/);
   assert.match(chart, /aria-label="Latest \/ reset visible chart range"/);
   assert.match(chart, /data-chart-range-provider-requests-on-switch="0"/);
   assert.match(chart, /preserveEngineOnLocalControls/);

@@ -36,8 +36,15 @@ const layerLabels = {
 
 type Layer = keyof typeof layerLabels;
 
-const visibleRanges = [
+const standardVisibleRanges = [
   { id: "1h", label: "1H" },
+  { id: "2h", label: "2H" },
+  { id: "session", label: "Session" },
+] as const satisfies ReadonlyArray<{ id: MarketChartVisibleRange; label: string }>;
+
+const spotMomentumVisibleRanges = [
+  { id: "1h", label: "1H" },
+  { id: "90m", label: "90M" },
   { id: "2h", label: "2H" },
   { id: "session", label: "Session" },
 ] as const satisfies ReadonlyArray<{ id: MarketChartVisibleRange; label: string }>;
@@ -63,12 +70,20 @@ function validStoredDrawings(value: unknown): MarketChartUserDrawing[] {
   });
 }
 
-export default function HomeReferenceChart({ symbol }: { symbol: string }) {
+export default function HomeReferenceChart({
+  symbol,
+  presentation = "market",
+}: {
+  symbol: string;
+  presentation?: "market" | "spot-momentum";
+}) {
   const marketView = useLiveMarketView(symbol, { chart: true });
+  const defaultVisibleRange: MarketChartVisibleRange = presentation === "spot-momentum" ? "90m" : "2h";
+  const visibleRanges = presentation === "spot-momentum" ? spotMomentumVisibleRanges : standardVisibleRanges;
   const [timeframe, setTimeframe] = useState<MarketChartTimeframe>("1m");
   const [mode, setMode] = useState<MarketChartMode>("candles");
   const [height, setHeight] = useState(500);
-  const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>("2h");
+  const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>(defaultVisibleRange);
   const [latestResetToken, setLatestResetToken] = useState(0);
   const [visibleCoverage, setVisibleCoverage] = useState<MarketChartVisibleCoverage | null>(null);
   const [drawingHistory, setDrawingHistory] = useState<DrawingHistory>(EMPTY_DRAWING_HISTORY);
@@ -96,7 +111,7 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
             : 500,
       );
       if (!rangeInitializedRef.current) {
-        setVisibleRange(mobileQuery.matches ? "1h" : "2h");
+        setVisibleRange(mobileQuery.matches ? "1h" : defaultVisibleRange);
         rangeInitializedRef.current = true;
       }
     };
@@ -113,7 +128,7 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
       window.removeEventListener("resize", apply);
       window.visualViewport?.removeEventListener("resize", apply);
     };
-  }, []);
+  }, [defaultVisibleRange]);
 
   useEffect(() => {
     const storageKey = `htlabs:user-drawings:v1:${symbol}`;
@@ -256,6 +271,7 @@ export default function HomeReferenceChart({ symbol }: { symbol: string }) {
             showVolume={layers.volume}
             layerHost={EMPTY_LAYER_HOST}
             preserveEngineOnLocalControls
+            candlePresentation={presentation === "spot-momentum" ? "refined" : "standard"}
             visibleRange={visibleRange}
             latestResetToken={latestResetToken}
             onVisibleCoverageChange={handleVisibleCoverageChange}

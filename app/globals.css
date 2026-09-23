@@ -329,14 +329,15 @@ body {
 .ht-home-spot-intelligence__read,
 .ht-home-spot-intelligence__withheld { margin: 0 0 0.85rem; color: #8f949e; font-size: 0.67rem; font-weight: 620; line-height: 1.55; }
 .ht-home-spot-intelligence__withheld { color: #777c85; }
-.ht-home-spot-market {
+.ht-home-spot-prox-pulse {
   margin-bottom: 0.85rem;
   padding: 0.65rem 0.7rem;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(38, 104, 87, 0.09);
 }
-.ht-home-spot-market strong { color: #d0d2d6; font-size: 0.64rem; font-weight: 760; }
-.ht-home-spot-market div { display: flex; gap: 0.7rem; margin-top: 0.3rem; font-size: 0.61rem; font-weight: 740; }
+.ht-home-spot-prox-pulse strong { color: #d7f1e7; font-size: 0.64rem; font-weight: 780; }
+.ht-home-spot-prox-pulse strong span { color: #42d89a; text-transform: capitalize; }
+.ht-home-spot-prox-pulse p { margin: 0.3rem 0 0; color: #858d92; font-size: 0.61rem; font-weight: 620; line-height: 1.4; }
 .ht-home-spot-intelligence__actions { display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; margin: 0.2rem 0 0.8rem; }
 .ht-home-spot-intelligence__actions :is(a, button) {
   min-height: 30px;

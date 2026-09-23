@@ -70,6 +70,7 @@ export type { MarketChartIndicatorOverlays } from "@/lib/market-chart-rendering"
 
 export type MarketChartMode = "graph" | "candles";
 export type MarketChartAccent = "violet" | "orange" | "cyan";
+export type MarketChartCandlePresentation = "standard" | "refined";
 
 export type ChartLayerAuthority = "user" | "prox" | "agent" | "auto";
 export type ChartLayerSlots = Partial<Record<ChartLayerAuthority, ReactNode>>;
@@ -89,6 +90,7 @@ export type MarketChartCanvasProps = {
   layerHost?: ChartLayerSlots;
   preserveEngineOnLocalControls?: boolean;
   tightPriceScale?: boolean;
+  candlePresentation?: MarketChartCandlePresentation;
   visibleRange?: MarketChartVisibleRange;
   latestResetToken?: number;
   onVisibleCoverageChange?: (coverage: MarketChartVisibleCoverage | null) => void;
@@ -120,6 +122,26 @@ export const MARKET_CHART_ACCENTS = {
     text: "text-cyan-300",
   },
 } as const;
+
+const MARKET_CHART_CANDLE_PALETTES = {
+  standard: {
+    up: "#22c55e",
+    down: "#ef4444",
+    wickUp: "#86efac",
+    wickDown: "#fca5a5",
+  },
+  refined: {
+    up: "#20d77a",
+    down: "#ff5964",
+    wickUp: "#7cebb0",
+    wickDown: "#ff98a0",
+  },
+} as const satisfies Record<MarketChartCandlePresentation, {
+  up: string;
+  down: string;
+  wickUp: string;
+  wickDown: string;
+}>;
 
 export const CHART_LAYER_AUTHORITIES = [
   "user",
@@ -434,6 +456,7 @@ export function MarketChartCanvas({
   layerSlots,
   preserveEngineOnLocalControls = false,
   tightPriceScale = false,
+  candlePresentation = "standard",
   visibleRange,
   latestResetToken = 0,
   onVisibleCoverageChange,
@@ -471,6 +494,7 @@ export function MarketChartCanvas({
   const [drawingRenderVersion, setDrawingRenderVersion] = useState(0);
   const [drawingRuntime, setDrawingRuntime] = useState<DrawingRuntime>({ chart: null, series: null });
   const palette = MARKET_CHART_ACCENTS[accent];
+  const candlePalette = MARKET_CHART_CANDLE_PALETTES[candlePresentation];
   const resolvedTimeZone = timeZone || "America/New_York";
   const resolvedIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0
     ? intervalSeconds
@@ -590,14 +614,14 @@ export function MarketChartCanvas({
       minMove: priceResolution.minMove,
     };
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e",
-      downColor: "#ef4444",
+      upColor: candlePalette.up,
+      downColor: candlePalette.down,
       borderVisible: true,
-      borderUpColor: "#4ade80",
-      borderDownColor: "#f87171",
+      borderUpColor: candlePalette.up,
+      borderDownColor: candlePalette.down,
       wickVisible: true,
-      wickUpColor: "#86efac",
-      wickDownColor: "#fca5a5",
+      wickUpColor: candlePalette.wickUp,
+      wickDownColor: candlePalette.wickDown,
       priceLineVisible: false,
       priceLineColor: `${palette.line}66`,
       lastValueVisible: true,
@@ -770,6 +794,12 @@ export function MarketChartCanvas({
       visible: mode === "graph",
     });
     priceSeriesRef.current?.candles.applyOptions({
+      upColor: candlePalette.up,
+      downColor: candlePalette.down,
+      borderUpColor: candlePalette.up,
+      borderDownColor: candlePalette.down,
+      wickUpColor: candlePalette.wickUp,
+      wickDownColor: candlePalette.wickDown,
       priceLineColor: `${palette.line}66`,
       priceLineVisible: false,
       priceFormat,
@@ -783,7 +813,7 @@ export function MarketChartCanvas({
       series.applyOptions({ priceFormat });
     }
     return () => window.cancelAnimationFrame(drawingModeFrame);
-  }, [mode, palette.line, priceResolution.minMove, tightPriceScale]);
+  }, [candlePalette.down, candlePalette.up, candlePalette.wickDown, candlePalette.wickUp, mode, palette.line, priceResolution.minMove, tightPriceScale]);
 
   useEffect(() => {
     const locale = navigator.language || "en-US";

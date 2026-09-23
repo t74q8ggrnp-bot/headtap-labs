@@ -319,7 +319,7 @@ export default function HomeReferenceSurface({
       </div>
       {selectionLoading ? <div className="htb-selection-state" role="status">Loading {symbol} Canonical context…</div> : null}
       {selectionError ? <div className="htb-selection-state htb-selection-state--error" role="status">{selectionError}</div> : null}
-      <div data-home-priority="3-chart"><HomeReferenceChart symbol={symbol} /></div>
+      <div data-home-priority="3-chart"><HomeReferenceChart symbol={symbol} presentation={experience} /></div>
       <button
         type="button"
         className="ht-home-discovery-strip"
@@ -395,7 +395,6 @@ export default function HomeReferenceSurface({
     <HomeSpotMomentumIntelligence
       opportunity={canonicalOpportunity}
       framework={framework}
-      marketContext={marketContext}
       displayPrice={displayPrice}
       displayChange={displayChange}
       liveLabel={marketView.live ? "Live quote" : marketView.label}

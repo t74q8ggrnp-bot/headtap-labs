@@ -7,12 +7,10 @@ import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
 import type { HtTradePlan } from "@/lib/ht-agent/contracts";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-model";
-import type { HomeMarketContext } from "./HomeReferenceSurface";
 
 type Props = {
   opportunity: Opportunity;
   framework: TradeFrameworkDisplay | null;
-  marketContext: HomeMarketContext | null;
   displayPrice: number | null;
   displayChange: number | null;
   liveLabel: string;
@@ -24,12 +22,11 @@ type Props = {
 const targetPrice = (value: number | null | undefined) =>
   typeof value === "number" && Number.isFinite(value) ? formatMarketPrice(value) : "Forming";
 
-const marketChange = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+const percentChange = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 
 export default function HomeSpotMomentumIntelligence({
   opportunity,
   framework,
-  marketContext,
   displayPrice,
   displayChange,
   liveLabel,
@@ -41,6 +38,9 @@ export default function HomeSpotMomentumIntelligence({
   const [planState, setPlanState] = useState<HomeTradePlanState>("loading");
   const view = getOpportunityPresentation(opportunity);
   const prox = opportunity.proxIntelligence;
+  const proxState = prox && prox.status !== "unavailable"
+    ? (prox.pulse?.state ?? prox.status).replaceAll("_", " ")
+    : "Unavailable";
   const evidence = opportunity.signals.slice(0, 5);
   const riskMeasured = framework !== null || opportunity.explosionAssessment?.scenarioBands?.structuralRisk !== null;
 
@@ -55,7 +55,7 @@ export default function HomeSpotMomentumIntelligence({
         <h2>{opportunity.ticker}</h2>
         <strong className="ht-tabular-numbers">{displayPrice === null ? "—" : formatMarketPrice(displayPrice)}</strong>
         {displayChange === null ? null : (
-          <span className={`ht-tabular-numbers ${displayChange >= 0 ? "is-positive" : "is-negative"}`}>{marketChange(displayChange)}</span>
+          <span className={`ht-tabular-numbers ${displayChange >= 0 ? "is-positive" : "is-negative"}`}>{percentChange(displayChange)}</span>
         )}
         <small>{liveLabel}</small>
       </div>
@@ -90,14 +90,13 @@ export default function HomeSpotMomentumIntelligence({
 
       <p className="ht-home-spot-intelligence__read">{opportunity.whyItMatters}</p>
 
-      <section className="ht-home-spot-market" aria-label="Broad market context">
-        <strong>Broad market: {marketContext?.mood ?? "Updating"}</strong>
-        {marketContext ? (
-          <div>
-            <span className={marketContext.spy.change >= 0 ? "is-positive" : "is-negative"}>SPY {marketChange(marketContext.spy.change)}</span>
-            <span className={marketContext.qqq.change >= 0 ? "is-positive" : "is-negative"}>QQQ {marketChange(marketContext.qqq.change)}</span>
-          </div>
-        ) : null}
+      <section className="ht-home-spot-prox-pulse" aria-label="Pro X pulse">
+        <strong>Pro X pulse <span>· {proxState}</span></strong>
+        <p>
+          {prox && prox.status !== "unavailable"
+            ? "Bounded live-tape evidence supports the current Canonical read."
+            : "No fresh bounded Pro X pulse is attached. Canonical remains the decision authority."}
+        </p>
       </section>
 
       {!riskMeasured ? (
@@ -110,7 +109,7 @@ export default function HomeSpotMomentumIntelligence({
         <Link href={`/paper?symbol=${encodeURIComponent(opportunity.ticker)}`}>Review in Paper</Link>
       </nav>
 
-      <details className="ht-home-spot-intelligence__disclosure" open>
+      <details className="ht-home-spot-intelligence__disclosure">
         <summary>Pro X evidence</summary>
         <div>
           {prox && prox.status !== "unavailable" ? (

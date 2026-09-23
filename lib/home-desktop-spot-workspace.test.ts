@@ -43,15 +43,30 @@ test("desktop first paint reserves the final workspace geometry", () => {
   assert.match(css, /prefers-reduced-motion: reduce/);
 });
 
-test("market context is compact, provider-timestamped, and shares one 15-second snapshot", () => {
+test("Home replaces broad-market context with bounded Pro X support while the shared snapshot remains cached", () => {
   const home = source("app/HomeClient.tsx");
   const intelligence = source("app/components/home/HomeSpotMomentumIntelligence.tsx");
   const route = source("app/api/market-context/route.ts");
 
   assert.doesNotMatch(home, /ht-home-market-context/);
-  assert.match(intelligence, /Broad market:/);
+  assert.doesNotMatch(intelligence, /Broad market:/);
+  assert.match(intelligence, /Pro X pulse/);
+  assert.match(intelligence, /Bounded live-tape evidence supports the current Canonical read/);
   assert.match(route, /tickers", "SPY,QQQ,IWM,VIXY"/);
   assert.match(route, /providerRequests: 1/);
   assert.match(route, /revalidate: 15/);
   assert.match(route, /s-maxage=15/);
+});
+
+test("Spot Momentum uses an honest 90-minute default and refined candles without changing Market defaults", () => {
+  const surface = source("app/components/home/HomeReferenceSurface.tsx");
+  const chart = source("app/components/home/HomeReferenceChart.tsx");
+  const canvas = source("app/components/market/MarketChartCanvas.tsx");
+
+  assert.match(surface, /presentation=\{experience\}/);
+  assert.match(chart, /presentation === "spot-momentum" \? "90m" : "2h"/);
+  assert.match(chart, /\{ id: "90m", label: "90M" \}/);
+  assert.match(chart, /candlePresentation=\{presentation === "spot-momentum" \? "refined" : "standard"\}/);
+  assert.match(canvas, /MARKET_CHART_CANDLE_PALETTES\[candlePresentation\]/);
+  assert.match(canvas, /preserveEngineOnLocalControls/);
 });
