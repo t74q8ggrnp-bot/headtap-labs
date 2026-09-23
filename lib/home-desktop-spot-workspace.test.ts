@@ -28,6 +28,18 @@ test("desktop Home relies on the global shell without a duplicate dashboard head
   assert.doesNotMatch(home, /className="ht-home-conviction mx-auto max-w/);
 });
 
+test("desktop first paint reserves the final workspace geometry", () => {
+  const home = source("app/HomeClient.tsx");
+  const stateCard = source("app/components/OpportunityStateCard.tsx");
+  const css = source("app/globals.css");
+
+  assert.match(home, /<OpportunityStateCard loading workspace \/>/);
+  assert.match(stateCard, /ht-desktop-spot-workspace__hero ht-home-workspace-loading/);
+  assert.match(stateCard, /aria-busy="true"/);
+  assert.match(css, /\.ht-home-workspace-loading__plot/);
+  assert.match(css, /prefers-reduced-motion: reduce/);
+});
+
 test("market context is compact, provider-timestamped, and shares one 15-second snapshot", () => {
   const home = source("app/HomeClient.tsx");
   const workspace = source("app/components/opportunity/DesktopSpotMomentumWorkspace.tsx");

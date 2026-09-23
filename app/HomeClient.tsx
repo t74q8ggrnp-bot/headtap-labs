@@ -1354,7 +1354,7 @@ export default function HomeClient({
                 // the loading state. Do not render quote-board stats or any
                 // lower command modules underneath a still-loading decision.
                 if (!btcTarget && apiOpportunitiesLoading) {
-                  return <OpportunityStateCard loading />;
+                  return <OpportunityStateCard loading workspace />;
                 }
 
                 return (

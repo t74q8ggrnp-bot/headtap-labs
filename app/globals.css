@@ -1931,6 +1931,40 @@ textarea {
   padding: 0 !important;
 }
 
+.ht-home-workspace-loading__chart {
+  display: flex;
+  flex-direction: column;
+}
+
+.ht-home-workspace-loading__plot {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 20% 20%;
+}
+
+.ht-home-workspace-loading__trace {
+  position: absolute;
+  inset: 22% 8% 18% 7%;
+  display: block;
+  border-bottom: 2px solid rgba(167, 139, 250, 0.16);
+  transform: skewY(-5deg);
+  animation: ht-home-workspace-loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ht-home-workspace-loading-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.75; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ht-home-workspace-loading * { animation: none !important; }
+}
+
 .ht-desktop-spot-workspace__evidence {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
