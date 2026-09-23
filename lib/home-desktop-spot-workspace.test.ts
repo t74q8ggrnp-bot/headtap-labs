@@ -15,7 +15,7 @@ test("desktop Home prioritizes a single large chart and moves contenders below P
   assert.equal(workspace.match(/\n\s*<HomeTradePlan/g)?.length, 1);
   assert.ok(workspace.indexOf("ht-desktop-spot-workspace__hero") < workspace.indexOf("ht-desktop-spot-workspace__evidence"));
   assert.ok(workspace.indexOf("ht-desktop-spot-workspace__evidence") < workspace.indexOf("ht-desktop-spot-workspace__contenders"));
-  assert.match(css, /grid-template-columns: minmax\(250px, 30%\) minmax\(0, 70%\)/);
+  assert.match(css, /grid-template-columns: minmax\(300px, 24%\) minmax\(0, 1fr\)/);
   assert.match(css, /height: calc\(100dvh - 58px\)/);
   assert.match(workspace, /Risk and R\/R are withheld until verified support/);
 });

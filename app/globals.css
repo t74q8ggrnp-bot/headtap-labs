@@ -1904,7 +1904,7 @@ textarea {
 
 .ht-desktop-spot-workspace__hero {
   display: grid;
-  grid-template-columns: minmax(250px, 30%) minmax(0, 70%);
+  grid-template-columns: minmax(300px, 24%) minmax(0, 1fr);
   height: calc(100dvh - 58px);
   min-height: 560px;
   padding: 0 !important;
