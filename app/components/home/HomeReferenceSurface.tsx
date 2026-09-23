@@ -16,14 +16,15 @@ import HomeTerminalMarkets from "./HomeTerminalMarkets";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 
 export type HomeMarketContext = {
-  spy: { price: number; change: number; rvol: number };
-  qqq: { price: number; change: number; rvol: number };
-  iwm: { price: number; change: number; rvol: number };
+  spy: { price: number; change: number; rvol: number | null; asOf?: string };
+  qqq: { price: number; change: number; rvol: number | null; asOf?: string };
+  iwm: { price: number; change: number; rvol: number | null; asOf?: string };
   vix: { price: number; change: number } | null;
   mood: string;
   moodColor: string;
   volumeEnv: string;
   avgRvol: number | null;
+  sourceTimestamp?: string | null;
 };
 
 type Props = {

@@ -90,7 +90,7 @@ async function loadMarketContext() {
 }
 
 const cachedMarketContext = unstable_cache(loadMarketContext, ["market-context-v2"], {
-  revalidate: 60,
+  revalidate: 15,
   tags: ["market-context"],
 });
 
@@ -120,7 +120,7 @@ export async function GET(request: Request) {
     return NextResponse.json(payload, {
       headers: {
         ...rateLimit.headers,
-        "Cache-Control": "public, max-age=15, s-maxage=60, stale-while-revalidate=60",
+        "Cache-Control": "public, max-age=5, s-maxage=15, stale-while-revalidate=15",
         "X-HT-Provider-Requests": String(payload.providerRequests),
       },
     });

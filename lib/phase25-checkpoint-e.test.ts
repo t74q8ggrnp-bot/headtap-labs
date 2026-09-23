@@ -14,7 +14,7 @@ test("Checkpoint E routes retain their contracts while Home no longer duplicates
   assert.match(home, /\/api\/market-context/);
   assert.doesNotMatch(home, /fetch\("\/api\/scanner_expansion\?type=all"/);
   assert.match(home, /legacyDiscoveryHydrationEnabled = false/);
-  assert.match(home, /setInterval\(\(\) => \{[\s\S]*?fetchCtx\(\);[\s\S]*?60 \* 1000\)/);
+  assert.match(home, /setInterval\(\(\) => \{[\s\S]*?fetchCtx\(\);[\s\S]*?15 \* 1000\)/);
 
   assert.equal(scanner.match(/fetch\("\/api\/opportunities\?limit=100"\)/g)?.length, 1);
   assert.equal(scanner.match(/fetch\("\/api\/opportunities\?type=before_crowd&limit=100"\)/g)?.length, 1);

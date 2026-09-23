@@ -8,6 +8,7 @@ test("publishes the release-approved stock refresh cadences", () => {
     canonicalScan: 120_000,
     proxSensing: 60_000,
     homeDecisions: 30_000,
+    marketContext: 15_000,
     selectedQuotes: 5_000,
     selectedStockCharts: 5_000,
   });

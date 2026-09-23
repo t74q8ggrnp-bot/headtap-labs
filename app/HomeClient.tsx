@@ -9,16 +9,10 @@ import LiveStockValue from "./components/market/LiveStockValue";
 import OpportunityStateCard from "./components/OpportunityStateCard";
 import OpportunityWindow from "./components/opportunity/OpportunityWindow";
 import BullBearPanel from "./components/opportunity/BullBearPanel";
-import OpportunityStory from "./components/opportunity/OpportunityStory";
-import OpportunityBottomStats from "./components/opportunity/OpportunityBottomStats";
-import OpportunityScorePanel from "./components/opportunity/OpportunityScorePanel";
-import MomentumContenders, {
-  MomentumRadar,
-} from "./components/opportunity/MomentumContenders";
+import DesktopSpotMomentumWorkspace from "./components/opportunity/DesktopSpotMomentumWorkspace";
 import BeforeCrowdCard from "./components/opportunity/BeforeCrowdCard";
 import MobileExperience from "./components/mobile/MobileExperience";
 import { useMobileAppNavigation } from "./components/MobileAppNavigationContext";
-import HomeTradePlan from "./components/agent/HomeTradePlan";
 import HomeReferenceSurface from "./components/home/HomeReferenceSurface";
 import { supabase } from "@/lib/supabaseClient";
 import type { Session } from "@supabase/supabase-js";
@@ -225,14 +219,15 @@ export default function HomeClient({
 
   // Morning Market Context
   type MarketContext = {
-    spy: { price: number; change: number; rvol: number };
-    qqq: { price: number; change: number; rvol: number };
-    iwm: { price: number; change: number; rvol: number };
+    spy: { price: number; change: number; rvol: number | null; asOf?: string };
+    qqq: { price: number; change: number; rvol: number | null; asOf?: string };
+    iwm: { price: number; change: number; rvol: number | null; asOf?: string };
     vix: { price: number; change: number } | null;
     mood: string;
     moodColor: string;
     volumeEnv: string;
     avgRvol: number | null;
+    sourceTimestamp?: string | null;
   };
   const [marketCtx, setMarketCtx] = useState<MarketContext | null>(null);
 
@@ -838,7 +833,8 @@ export default function HomeClient({
 
   }, []);
 
-  // Market context — real-time Massive snapshots, refreshed once per minute.
+  // Market context is a shared provider snapshot. The selected ticker itself
+  // stays on the existing five-second display-frame path.
   useEffect(() => {
     const fetchCtx = () => {
       fetch("/api/market-context")
@@ -849,7 +845,7 @@ export default function HomeClient({
     fetchCtx();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") fetchCtx();
-    }, 60 * 1000);
+    }, 15 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1331,65 +1327,6 @@ export default function HomeClient({
 
 
 
-        {/* ── MORNING MARKET CONTEXT ── */}
-        <section className="ht-home-market-context mx-auto max-w-[1488px] px-3 pb-2 md:px-6" aria-label="Market context">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {marketCtx ? (
-              <>
-                <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 ${
-                  marketCtx.moodColor === "green"
-                    ? "border-green-400/20 bg-green-500/[0.05] text-green-400"
-                    : marketCtx.moodColor === "red"
-                    ? "border-red-400/20 bg-red-500/[0.05] text-red-400"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-500"
-                }`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${
-                    marketCtx.moodColor === "green" ? "bg-green-400" :
-                    marketCtx.moodColor === "red" ? "bg-red-400" : "bg-zinc-600"
-                  }`} />
-                  <span className="text-[9px] font-black uppercase tracking-[0.18em]">{marketCtx.mood}</span>
-                </div>
-                {[
-                  { label: "SPY", val: marketCtx.spy },
-                  { label: "QQQ", val: marketCtx.qqq },
-                  { label: "IWM", val: marketCtx.iwm },
-                ].map(({ label, val }) => (
-                  <div key={label} className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-black/40 px-3 py-1">
-                    <span className="text-[9px] font-black text-zinc-600">{label}</span>
-                    <span className={`text-[9px] font-black ${val.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {val.change >= 0 ? "+" : ""}{val.change.toFixed(2)}%
-                    </span>
-                  </div>
-                ))}
-                {marketCtx.vix && (
-                  <div className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-black/40 px-3 py-1">
-                    <span className="text-[9px] font-black text-zinc-600">VIX</span>
-                    <span className={`text-[9px] font-black ${
-                      marketCtx.vix.price > 20 ? "text-red-400" :
-                      marketCtx.vix.price > 15 ? "text-orange-400" : "text-green-400"
-                    }`}>{marketCtx.vix.price.toFixed(1)}</span>
-                  </div>
-                )}
-                <div className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-black/40 px-3 py-1">
-                  <span className="text-[9px] font-black text-zinc-600">VOL</span>
-                  <span className={`text-[9px] font-black ${
-                    marketCtx.volumeEnv === "Heavy" ? "text-orange-400" :
-                    marketCtx.volumeEnv === "Normal" ? "text-zinc-400" : "text-zinc-600"
-                  }`}>{marketCtx.volumeEnv}</span>
-                </div>
-                <span className="text-[8px] font-semibold text-zinc-800 ml-1">Market context · refreshes every minute</span>
-              </>
-            ) : (
-              // Loading state — visible while API fetches
-              <div className="flex items-center gap-1.5 animate-pulse" role="status" aria-live="polite" aria-label="Loading market context">
-                {["","","","",""].map((_, i) => (
-                  <div key={i} className="h-5 w-16 rounded-full bg-white/[0.03] border border-white/[0.04]" />
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
         <section id="conviction-engine" className="ht-home-conviction mx-auto max-w-[1488px] px-3 pb-3 pt-3 md:px-6 md:pb-4 md:pt-4" aria-label="Top convictions">
           <motion.div
             initial={false}
@@ -1541,8 +1478,6 @@ export default function HomeClient({
                 // Hero truth source: only the verified backend opportunity may
                 // supply the displayed score and story.
                 const apiHero = apiMomentum && btcTarget?.symbol === apiMomentum.ticker ? apiMomentum : null;
-                const btcScore = Number(apiHero?.opportunityScore ?? 0);
-
                 // One stable first paint: the canonical opportunity feed owns
                 // the loading state. Do not render quote-board stats or any
                 // lower command modules underneath a still-loading decision.
@@ -1561,69 +1496,26 @@ export default function HomeClient({
                       }
 
                       const heroTicker = btcTarget?.symbol || apiHero?.ticker || "—";
-                      const isCatalystPlay = Boolean(
-                        apiHero && (apiHero.catalystScore >= 20 || apiHero.catalystTags.length > 0),
-                      );
-
                       return (
                         <div className="relative overflow-hidden rounded-[1.65rem] border border-violet-400/15 bg-gradient-to-br from-black via-black to-violet-500/[0.03]">
-
-                          {/* Header strip */}
-                          <div className="flex items-center justify-between px-5 pt-4 pb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="flex h-2 w-2 rounded-full bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.9)] animate-pulse" />
-                              <p className="text-[11px] font-black uppercase tracking-[0.28em] text-violet-400">Spot Momentum</p>
-                            </div>
-                            <span className="text-[10px] font-black text-zinc-600">Decision {mounted && canonicalLastUpdated ? canonicalLastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "pending"}</span>
-                          </div>
-
-                          <div className="ht-spot-momentum-columns grid grid-cols-1 divide-y divide-white/[0.06] xl:grid-cols-[0.92fr_0.92fr_1.08fr] xl:divide-x xl:divide-y-0">
-                            {apiHero && (
-                              <OpportunityStory
-                                opportunity={apiHero}
-                                framework={smFramework}
-                                watched={watchlist.includes(apiHero.ticker)}
-                                onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
-                                onWatch={() => toggleWatchlist(apiHero.ticker)}
-                              />
-                            )}
-                            {apiHero && (
-                              <OpportunityScorePanel
-                                opportunity={apiHero}
-                                dualEngine={isDualEngineConfirmation}
-                                trace={smTrace}
-                                narrative={bullBearData?.ticker === heroTicker ? bullBearData.htRead : null}
-                                narrativeLoading={bullBearLoading}
-                              />
-                            )}
-                            <MomentumContenders
-                              candidates={apiMomentumRunnersUp}
-                              onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
-                            />
-                          </div>
                           {apiHero && (
-                            <div className="border-t border-white/[0.06] px-5 py-4">
-                              <HomeTradePlan symbol={apiHero.ticker} />
-                            </div>
+                            <DesktopSpotMomentumWorkspace
+                              opportunity={apiHero}
+                              framework={smFramework}
+                              trace={smTrace}
+                              narrative={bullBearData?.ticker === heroTicker ? bullBearData.htRead : null}
+                              narrativeLoading={bullBearLoading}
+                              dualEngine={isDualEngineConfirmation}
+                              watched={watchlist.includes(apiHero.ticker)}
+                              decisionLabel={mounted && canonicalLastUpdated ? `Decision ${canonicalLastUpdated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Decision pending"}
+                              marketContext={marketCtx}
+                              contenders={apiMomentumRunnersUp}
+                              radarCandidates={apiMomentumRadar}
+                              onOpen={() => setSelectedStock(opportunityToStock(apiHero))}
+                              onWatch={() => toggleWatchlist(apiHero.ticker)}
+                              onSelectContender={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
+                            />
                           )}
-                          <MomentumRadar
-                            candidates={apiMomentumRadar}
-                            onSelect={(opportunity) => setSelectedStock(opportunityToStock(opportunity))}
-                          />
-                          {/* ── Bottom strip — 4 quick stats ── */}
-                          {apiHero && <OpportunityBottomStats opportunity={apiHero} />}
-
-                          {/* ── Catalyst signal footer strip ── */}
-                          <div className="flex items-center justify-between px-5 py-2.5 border-t border-white/8 bg-violet-500/[0.03]">
-                            <div className="flex items-center gap-2">
-                              <span className="text-violet-400 text-sm">⚡</span>
-                              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-400">
-                                {isCatalystPlay ? "Catalyst Signal" : "Momentum Signal"} — Before The Move
-                              </p>
-                            </div>
-                            <p className="font-mono text-lg font-black text-violet-400">{btcScore}</p>
-                          </div>
-
                           {/* ── Bull / Bear — full width below ── */}
                           <BullBearPanel
                             ticker={heroTicker}

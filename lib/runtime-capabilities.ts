@@ -21,6 +21,7 @@ export const HT_REFRESH_RATES_MS = Object.freeze({
   canonicalScan: 120_000,
   proxSensing: 60_000,
   homeDecisions: 30_000,
+  marketContext: 15_000,
   selectedQuotes: 5_000,
   selectedStockCharts: 5_000,
 });
