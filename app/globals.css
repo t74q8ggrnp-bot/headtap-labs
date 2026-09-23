@@ -1100,6 +1100,13 @@ textarea {
   background: var(--ht-color-canvas);
 }
 
+.ht-native-ios,
+.ht-native-ios body,
+.ht-native-ios .ht-responsive-shell {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 .ht-route-content {
   min-width: 0;
 }

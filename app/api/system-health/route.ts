@@ -3551,21 +3551,22 @@ export async function GET(request: Request) {
       research?.version === "ht-agent-target-path-research-v1" &&
       research?.observabilityVersion ===
         "ht-agent-target-research-observability-v1" &&
+      research?.repairVersion === "ht-agent-target-research-repair-v1" &&
       research?.authority === "research_only" &&
       Number(research?.providerRequestsAdded) === 0 &&
       research?.executionAuthority === "none";
     const coverageReady = research?.coverageComplete === true &&
       Number(research?.missingEpisodeCount) === 0 &&
-      Number(research?.seedFailureCount) === 0;
+      Number(research?.postRepairSeedFailureCount) === 0;
     checks.push({
       name: "ht_agent_target_path_research",
       ok: boundaryReady && coverageReady,
       blocking: false,
       message: !boundaryReady
-        ? "Agent target-path research is missing its zero-authority observability boundary; apply migrations 0058 and 0059."
+        ? "Agent target-path research is missing its zero-authority persistence boundary; apply migrations 0058 through 0061."
         : !coverageReady
-          ? `Agent target-path research has ${Number(research?.missingEpisodeCount ?? 0)} missing expected episodes and ${Number(research?.seedFailureCount ?? 0)} seed failures.`
-          : `Agent target-path research is isolated, complete, and prospective: ${Number(research?.measured ?? 0)} measured, ${Number(research?.ambiguous ?? 0)} ambiguous, ${Number(research?.pending ?? 0)} pending.`,
+          ? `Agent target-path research has ${Number(research?.missingEpisodeCount ?? 0)} missing expected episodes; ${Number(research?.seedFailureCount ?? 0)} historical failure receipts remain preserved.`
+          : `Agent target-path research is isolated and complete: ${Number(research?.measured ?? 0)} measured, ${Number(research?.ambiguous ?? 0)} ambiguous, ${Number(research?.pending ?? 0)} pending; ${Number(research?.seedFailureCount ?? 0)} historical failure receipts preserved.`,
       detail: {
         ...research,
         failureReceiptObservability,
@@ -3577,7 +3578,7 @@ export async function GET(request: Request) {
       name: "ht_agent_target_path_research",
       ok: false,
       blocking: false,
-      message: "Agent target-path research is unavailable; apply migrations 0058 and 0059 before deploying the matching worker.",
+      message: "Agent target-path research is unavailable; apply migrations 0058 through 0061 before deploying the matching worker.",
       detail: getErrorMessage(
         err,
         "Agent target-path research health query failed.",

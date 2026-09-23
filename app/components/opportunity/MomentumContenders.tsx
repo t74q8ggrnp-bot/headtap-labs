@@ -1,5 +1,6 @@
 import LiveStockValue from "@/app/components/market/LiveStockValue";
 import type { Opportunity } from "@/lib/opportunity-model";
+import { useId } from "react";
 
 type MomentumContendersProps = {
   candidates: Opportunity[];
@@ -12,10 +13,12 @@ export default function MomentumContenders({
   radarCandidates = [],
   onSelect,
 }: MomentumContendersProps) {
+  const titleId = useId();
+
   return (
-    <section className="flex h-full min-h-full flex-col bg-white/[0.01] p-5" aria-labelledby="momentum-contenders-title">
+    <section className="flex h-full min-h-full flex-col bg-white/[0.01] p-5" aria-labelledby={titleId}>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 id="momentum-contenders-title" className="text-xs font-bold text-zinc-500">
+        <h3 id={titleId} className="text-xs font-bold text-zinc-500">
           Overall Contenders
         </h3>
         {candidates.length > 0 && (

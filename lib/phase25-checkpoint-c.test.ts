@@ -85,6 +85,23 @@ test("shell focus and safe-area rules cover desktop and required mobile edges", 
   assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-skip-link[\s\S]*3\.5rem/);
   assert.match(shell, /window\.visualViewport/);
   assert.match(shell, /removeEventListener\("scroll", updateViewportOrigin\)/);
+  assert.match(shell, /normalizeHorizontalViewport/);
+  assert.match(shell, /document\.documentElement\.scrollLeft = 0/);
+  assert.match(shell, /document\.body\.scrollLeft = 0/);
+  assert.match(shell, /window\.scrollTo\(0, preservedScrollTop\)/);
+  assert.match(shell, /window\.requestAnimationFrame/);
+  assert.match(shell, /window\.clearTimeout\(settleTimer\)/);
+  assert.match(css, /\.ht-native-ios body,[\s\S]*overflow-x: clip/);
+});
+
+test("Home exposes one page heading and repeated contender regions use unique ARIA ids", () => {
+  const home = source("app/HomeClient.tsx");
+  const contenders = source("app/components/opportunity/MomentumContenders.tsx");
+  assert.match(home, /<h1 className="sr-only">HT Labs market intelligence<\/h1>/);
+  assert.match(contenders, /const titleId = useId\(\)/);
+  assert.match(contenders, /aria-labelledby=\{titleId\}/);
+  assert.match(contenders, /id=\{titleId\}/);
+  assert.doesNotMatch(contenders, /id="momentum-contenders-title"/);
 });
 
 test("authentication and failure surfaces are announced and do not expose raw backend messages", () => {

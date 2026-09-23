@@ -40,6 +40,10 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
 
   useEffect(() => {
     const viewport = window.visualViewport;
+    const compactViewport = window.matchMedia("(max-width: 1179px)");
+    let firstFrame = 0;
+    let secondFrame = 0;
+    let settleTimer = 0;
     const updateViewportOrigin = () => {
       const shell = shellRef.current;
       if (!shell) return;
@@ -56,14 +60,48 @@ export default function ResponsiveApplicationShell({ children }: { children: Rea
         `${Math.max(0, viewport?.width ?? window.innerWidth)}px`,
       );
     };
+    const normalizeHorizontalViewport = (preservedScrollTop: number) => {
+      if (!compactViewport.matches) {
+        updateViewportOrigin();
+        return;
+      }
+      const horizontalOffset = Math.max(
+        Math.abs(window.scrollX),
+        Math.abs(viewport?.offsetLeft ?? 0),
+      );
+      if (horizontalOffset > 0.5) {
+        document.documentElement.scrollLeft = 0;
+        document.body.scrollLeft = 0;
+        window.scrollTo(0, preservedScrollTop);
+      }
+      updateViewportOrigin();
+    };
+    const settleOrientation = () => {
+      const preservedScrollTop = window.scrollY;
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      window.clearTimeout(settleTimer);
+      firstFrame = window.requestAnimationFrame(() => {
+        secondFrame = window.requestAnimationFrame(() => {
+          normalizeHorizontalViewport(preservedScrollTop);
+        });
+      });
+      settleTimer = window.setTimeout(
+        () => normalizeHorizontalViewport(preservedScrollTop),
+        300,
+      );
+    };
     updateViewportOrigin();
     viewport?.addEventListener("resize", updateViewportOrigin);
     viewport?.addEventListener("scroll", updateViewportOrigin);
-    window.addEventListener("orientationchange", updateViewportOrigin);
+    window.addEventListener("orientationchange", settleOrientation);
     return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      window.clearTimeout(settleTimer);
       viewport?.removeEventListener("resize", updateViewportOrigin);
       viewport?.removeEventListener("scroll", updateViewportOrigin);
-      window.removeEventListener("orientationchange", updateViewportOrigin);
+      window.removeEventListener("orientationchange", settleOrientation);
     };
   }, []);
 

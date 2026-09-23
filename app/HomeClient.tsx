@@ -1143,6 +1143,7 @@ export default function HomeClient({
 
   return (
     <main className="ht-simplified-ui ht-discovery-home min-h-screen overflow-hidden bg-[#050505] text-white">
+      <h1 className="sr-only">HT Labs market intelligence</h1>
       <style jsx global>{`
         /* HT Labs v69 production hierarchy: live tape, search/auth, top conviction hero, capital, portfolio, score/signals. Legacy OS block removed.
 

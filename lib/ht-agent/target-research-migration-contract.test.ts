@@ -16,6 +16,13 @@ const observabilityMigration = readFileSync(
   ),
   "utf8",
 );
+const repairMigration = readFileSync(
+  new URL(
+    "../../supabase/migrations/0061_target_research_persistence_and_health.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const healthRoute = readFileSync(
   new URL("../../app/api/system-health/route.ts", import.meta.url),
   "utf8",
@@ -145,5 +152,46 @@ test("system health reports missing target-research receipts without making rese
   assert.doesNotMatch(
     healthRoute.slice(healthRoute.indexOf("ht_agent_target_research_health")),
     /canonicalEntryChallengerReady\s*===\s*true/,
+  );
+});
+
+test("0061 fixes the ambiguous session date without rewriting immutable history", () => {
+  assert.match(observabilityMigration, /session_date date;/);
+  assert.match(
+    observabilityMigration,
+    /on conflict\(profile_id,symbol,session_date,canonical_lane,horizon\) do nothing/,
+  );
+  assert.match(repairMigration, /episode_session_date date;/);
+  assert.match(repairMigration, /on conflict do nothing/);
+  assert.doesNotMatch(
+    repairMigration,
+    /on conflict\([^)]*session_date[^)]*\)/,
+  );
+  assert.match(repairMigration, /failure\.error_code='42702'/);
+  assert.doesNotMatch(
+    repairMigration,
+    /(?:delete|update|truncate)\s+(?:table\s+)?public\.ht_agent_target_research_(?:seed_failures|episodes|results)/i,
+  );
+  assert.match(repairMigration, /provider_requests_added integer not null default 0/);
+  assert.match(repairMigration, /check\(provider_requests_added=0\)/);
+});
+
+test("0061 bounded health separates historical failures from current coverage", () => {
+  assert.match(repairMigration, /set statement_timeout='15s'/);
+  assert.match(repairMigration, /with horizons\(horizon\)/);
+  assert.match(repairMigration, /countsByHorizon/);
+  assert.match(repairMigration, /'historicalSeedFailures'/);
+  assert.match(repairMigration, /'coverageComplete',[\s\S]*totals\.missing=0[\s\S]*totals\.post_repair_failed=0/);
+  assert.match(repairMigration, /'authority','research_only'/);
+  assert.match(repairMigration, /'executionAuthority','none'/);
+  assert.doesNotMatch(
+    repairMigration,
+    /update public\.(?:ht_agent_decisions|ht_agent_decision_frames|ht_agent_profiles|prox_|canonical)/i,
+  );
+  assert.match(healthRoute, /repairVersion === "ht-agent-target-research-repair-v1"/);
+  assert.match(healthRoute, /postRepairSeedFailureCount\) === 0/);
+  assert.doesNotMatch(
+    healthRoute.slice(healthRoute.indexOf("const coverageReady")),
+    /seedFailureCount\) === 0/,
   );
 });
