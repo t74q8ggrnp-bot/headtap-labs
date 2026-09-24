@@ -3588,6 +3588,53 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
+    const challengerResult = await supabase.rpc(
+      "ht_agent_entry_target_challenger_health",
+    );
+    if (challengerResult.error) throw challengerResult.error;
+    const challenger = challengerResult.data &&
+        typeof challengerResult.data === "object"
+      ? challengerResult.data as Record<string, unknown>
+      : null;
+    const boundaryReady =
+      challenger?.version === "ht-agent-entry-target-challenger-health-v1" &&
+      challenger?.modelVersion === "ht-agent-entry-target-challenger-v1" &&
+      challenger?.authority === "research_only" &&
+      challenger?.executionAuthority === "none" &&
+      challenger?.primaryProductImpact === false &&
+      challenger?.forwardValidationRequired === true &&
+      challenger?.livePromotionAuthorized === false &&
+      challenger?.canonicalScoringChanged === false &&
+      challenger?.agentRiskChanged === false &&
+      challenger?.paperBehaviorChanged === false &&
+      Number(challenger?.providerRequestsAdded) === 0;
+    const gateMet = challenger?.sampleGateMet === true;
+    checks.push({
+      name: "ht_agent_entry_target_challenger",
+      ok: boundaryReady,
+      blocking: false,
+      message: !boundaryReady
+        ? "The Agent entry-to-target challenger is missing its zero-authority research boundary; apply migration 0064."
+        : gateMet
+          ? `Agent entry-to-target evidence has reached its sample gate with ${Number(challenger?.measured ?? 0)} measured outcomes across ${Number(challenger?.sessions ?? 0)} sessions; forward validation and owner review are still required before any live scoring change.`
+          : `Agent entry-to-target evidence is collecting honestly: ${Number(challenger?.measured ?? 0)} of 500 measured outcomes across ${Number(challenger?.sessions ?? 0)} of 30 required sessions. Live Canonical scoring remains unchanged.`,
+      detail: challenger,
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "ht_agent_entry_target_challenger",
+      ok: false,
+      blocking: false,
+      message: "Agent entry-to-target challenger observability is unavailable; apply migration 0064.",
+      detail: getErrorMessage(
+        err,
+        "Agent entry-to-target challenger health query failed.",
+      ),
+    });
+  }
+
+  try {
+    if (!supabase) throw new Error("Supabase unavailable");
     const marketScoreResult = await supabase.rpc("ht_market_score_beta_health");
     if (marketScoreResult.error) throw marketScoreResult.error;
     const marketScore = marketScoreResult.data && typeof marketScoreResult.data === "object"

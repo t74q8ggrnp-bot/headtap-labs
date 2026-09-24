@@ -306,6 +306,8 @@ export async function GET(request: Request) {
       }
     }
     let targetResearchInserted = 0;
+    let entryTargetChallengerRefreshed = false;
+    let entryTargetChallengerError: string | null = null;
     if (targetResearchResults.length > 0) {
       const targetResearchWrite = await service.rpc(
         "ht_agent_record_target_research_results",
@@ -318,6 +320,16 @@ export async function GET(request: Request) {
         targetResearchInserted = finite(
           (targetResearchWrite.data as { inserted?: unknown } | null)?.inserted,
         );
+      }
+    }
+    if (targetResearchInserted > 0) {
+      const challengerRefresh = await service.rpc(
+        "ht_agent_refresh_entry_target_challenger",
+      );
+      if (challengerRefresh.error) {
+        entryTargetChallengerError = challengerRefresh.error.message;
+      } else {
+        entryTargetChallengerRefreshed = true;
       }
     }
     let visualEvidenceAccepted = 0;
@@ -447,6 +459,9 @@ export async function GET(request: Request) {
         targetResearchProviderRequests: 0,
         targetResearchFailures,
         targetResearchError,
+        entryTargetChallengerRefreshed,
+        entryTargetChallengerProviderRequests: 0,
+        entryTargetChallengerError,
       },
     });
     if (finish.error) throw finish.error;
@@ -474,11 +489,14 @@ export async function GET(request: Request) {
       targetResearchProviderRequests: 0,
       targetResearchFailures,
       targetResearchError,
+      entryTargetChallengerRefreshed,
+      entryTargetChallengerProviderRequests: 0,
+      entryTargetChallengerError,
     }));
     return NextResponse.json({
       ok: pending === 0 && failedSymbols.size === 0,
       authority: "historical_massive_paper_research_only",
-      workerVersion: "ht-agent-outcome-worker-v4-target-research",
+      workerVersion: "ht-agent-outcome-worker-v5-entry-target-scorecard",
       due: rows.length,
       completed: updates.length,
       measured,
@@ -500,6 +518,9 @@ export async function GET(request: Request) {
       targetResearchProviderRequests: 0,
       targetResearchFailures,
       targetResearchError,
+      entryTargetChallengerRefreshed,
+      entryTargetChallengerProviderRequests: 0,
+      entryTargetChallengerError,
       timestamp: observedAt.toISOString(),
     }, { status: pending === 0 && failedSymbols.size === 0 ? 200 : 202 });
   } catch (error) {

@@ -107,6 +107,15 @@ after owner review and forward out-of-sample evaluation; direct feedback from
 Agent-generated targets into the live Canonical score is prohibited as
 circular.
 
+`ht-agent-entry-target-challenger-v1` is the derived scorecard over those
+immutable target-path outcomes. It groups frozen entry-band width, planned
+target margin and planned reward/risk by lane, horizon and market session, and
+reports trigger, target, stop, MFE and MAE rates with explicit sample gates.
+It adds no provider requests and owns no public score. Reaching its 500-outcome
+and 30-session global gate only makes the evidence eligible for a separate
+forward-validation review; it cannot automatically modify Canonical, ProX,
+Agent risk, Paper behavior or execution.
+
 The prospective observability receipt for this ledger proves expected versus
 persisted episode coverage and records seed exceptions. It does not add a new
 score, alter an existing decision, or grant authority. Likewise, paired
