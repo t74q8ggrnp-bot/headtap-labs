@@ -221,6 +221,7 @@ export default function HomeClient({
     spy: { price: number; change: number; rvol: number | null; asOf?: string };
     qqq: { price: number; change: number; rvol: number | null; asOf?: string };
     iwm: { price: number; change: number; rvol: number | null; asOf?: string };
+    quotes?: Record<string, { price: number; change: number; rvol: number | null; asOf?: string }>;
     vix: { price: number; change: number } | null;
     mood: string;
     moodColor: string;

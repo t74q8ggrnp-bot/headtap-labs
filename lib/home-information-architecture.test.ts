@@ -34,13 +34,39 @@ test("market browser names Spot Momentum, Before the Crowd, Watchlist, and Recen
   assert.match(markets, /Open full scanner/);
 });
 
+test("Market separates major-market navigation from Home discovery without adding a browser request", () => {
+  const surface = source("app/components/home/HomeReferenceSurface.tsx");
+  const markets = source("app/components/home/HomeTerminalMarkets.tsx");
+  const context = source("app/api/market-context/route.ts");
+
+  for (const label of ["Core Markets", "Mega Caps", "Bullish Today", "Bearish Today"]) {
+    assert.match(markets, new RegExp(label));
+  }
+  assert.match(surface, /mode=\{experience === "market" \? "market" : "home"\}/);
+  assert.match(markets, /Direction only — not a recommendation/);
+  assert.doesNotMatch(markets, /fetch\(|XMLHttpRequest/);
+  assert.match(context, /providerRequests: 1/);
+  assert.match(context, /unstable_cache/);
+});
+
+test("Market Score presentation is plain-language while retaining the research receipt", () => {
+  const card = source("app/components/agent/AgentMarketAnalysisCard.tsx");
+
+  assert.match(card, /Current structure/);
+  assert.match(card, /mixed: "Neutral"/);
+  assert.match(card, /score\.score\}\/100/);
+  assert.match(card, /Research reading/);
+  assert.match(card, /Live logged/);
+  assert.doesNotMatch(card, />Beta state</);
+});
+
 test("compact Home opens Markets and Intelligence in accessible focus-contained sheets", () => {
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
   const dialog = source("app/components/ui/ApplicationPrimitives.tsx");
   const css = source("app/globals.css");
 
   assert.match(surface, /aria-haspopup="dialog"/);
-  assert.match(surface, /title="Explore markets"/);
+  assert.match(surface, /title=\{experience === "market" \? "Browse markets" : "Explore opportunities"\}/);
   assert.match(surface, /title="HT Intelligence"/);
   assert.match(surface, /presentation="sheet"/);
   assert.match(surface, /className="ht-home-market-browser"/);

@@ -21,6 +21,7 @@ export type HomeMarketContext = {
   spy: { price: number; change: number; rvol: number | null; asOf?: string };
   qqq: { price: number; change: number; rvol: number | null; asOf?: string };
   iwm: { price: number; change: number; rvol: number | null; asOf?: string };
+  quotes?: Record<string, { price: number; change: number; rvol: number | null; asOf?: string }>;
   vix: { price: number; change: number } | null;
   mood: string;
   moodColor: string;
@@ -261,7 +262,9 @@ export default function HomeReferenceSurface({
           <button
             type="button"
             className="ht-home-compact-action ht-home-markets-launcher"
-            aria-label="Explore Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"
+            aria-label={experience === "market"
+              ? "Explore Core Markets, Mega Caps, Bullish Today, Bearish Today, Watchlist, and Recently Viewed"
+              : "Explore Spot Momentum, Before the Crowd, Watchlist, and Recently Viewed"}
             aria-haspopup="dialog"
             aria-expanded={marketBrowserOpen}
             onClick={() => setMarketBrowserOpen(true)}
@@ -324,15 +327,17 @@ export default function HomeReferenceSurface({
       {selectionLoading ? <div className="htb-selection-state" role="status">Loading {symbol} Canonical context…</div> : null}
       {selectionError ? <div className="htb-selection-state htb-selection-state--error" role="status">{selectionError}</div> : null}
       <div data-home-priority="3-chart"><HomeReferenceChart symbol={symbol} presentation={experience} /></div>
-      <button
-        type="button"
-        className="ht-home-discovery-strip"
-        aria-label={`Explore ${spotMomentum.length} Spot Momentum opportunities, ${beforeCrowd.length} Before the Crowd opportunities, Watchlist, and Recently Viewed`}
-        onClick={() => setMarketBrowserOpen(true)}
-      >
-        <span><strong>Spot {spotMomentum.length}</strong><strong>Early {beforeCrowd.length}</strong><span>Watchlist</span></span>
-        <span aria-hidden="true">Explore →</span>
-      </button>
+      {experience === "spot-momentum" ? (
+        <button
+          type="button"
+          className="ht-home-discovery-strip"
+          aria-label={`Explore ${spotMomentum.length} Spot Momentum opportunities, ${beforeCrowd.length} Before the Crowd opportunities, Watchlist, and Recently Viewed`}
+          onClick={() => setMarketBrowserOpen(true)}
+        >
+          <span><strong>Spot {spotMomentum.length}</strong><strong>Early {beforeCrowd.length}</strong><span>Watchlist</span></span>
+          <span aria-hidden="true">Explore →</span>
+        </button>
+      ) : null}
     </>
   );
 
@@ -455,11 +460,13 @@ export default function HomeReferenceSurface({
         )}
         markets={(
           <HomeTerminalMarkets
+            mode={experience === "market" ? "market" : "home"}
             spotMomentum={spotMomentum}
             beforeCrowd={beforeCrowd}
             watchlist={watchlist}
             recents={recents}
             currentSymbol={symbol}
+            marketQuotes={marketContext?.quotes}
             onSelect={onSelect}
             searchEnabled={experience === "market"}
           />
@@ -472,17 +479,21 @@ export default function HomeReferenceSurface({
       <AccessibleDialogSheet
         open={marketBrowserOpen}
         onOpenChange={setMarketBrowserOpen}
-        title="Explore markets"
-        description="Browse real Canonical opportunity lanes and your personal market lists."
+        title={experience === "market" ? "Browse markets" : "Explore opportunities"}
+        description={experience === "market"
+          ? "Browse shared live market snapshots and your personal lists."
+          : "Browse real Canonical opportunity lanes and your personal market lists."}
         presentation="sheet"
         className="ht-home-market-browser"
       >
         <HomeTerminalMarkets
+          mode={experience === "market" ? "market" : "home"}
           spotMomentum={spotMomentum}
           beforeCrowd={beforeCrowd}
           watchlist={watchlist}
           recents={recents}
           currentSymbol={symbol}
+          marketQuotes={marketContext?.quotes}
           onSelect={onSelect}
           onNavigate={() => setMarketBrowserOpen(false)}
           searchEnabled={experience === "market"}

@@ -24,6 +24,14 @@ function relationship(price: number, reference: number | null) {
   return `${difference >= 0 ? "Above" : "Below"} ${Math.abs(difference).toFixed(2)}%`;
 }
 
+const marketStructureLabel = {
+  strong: "Strengthening",
+  constructive: "Constructive",
+  mixed: "Neutral",
+  weakening: "Weakening",
+  weak: "Defensive",
+} as const;
+
 export default function AgentMarketAnalysisCard({
   symbol,
   chart,
@@ -75,18 +83,18 @@ export default function AgentMarketAnalysisCard({
       <p className="ht-agent-market-read__copy">{analysis.explanation}</p>
       {score ? (
         <div className="ht-agent-market-read__score" aria-label={`${symbol} HT Market Score Beta`}>
-          <div>
-            <span>HT Market Score</span>
-            <strong>{score.score}</strong>
+          <div className="ht-agent-market-read__structure">
+            <span>Current structure</span>
+            <strong>{marketStructureLabel[score.state]}</strong>
           </div>
-          <div>
-            <span>Beta state</span>
-            <strong>{score.state}</strong>
+          <div className="ht-agent-market-read__research-score">
+            <strong>{score.score}/100</strong>
+            <span>Research reading</span>
           </div>
-          <p>Live logged · {score.assetKind === "etf" ? "ETF cohort" : score.assetKind === "stock" ? "Stock cohort" : "Classification pending"}</p>
+          <p><span aria-hidden="true" />Live logged · {score.assetKind === "etf" ? "ETF" : score.assetKind === "stock" ? "Stock" : "Classification pending"}</p>
         </div>
       ) : (
-        <p className="ht-agent-market-read__score-pending">HT Market Score Beta · waiting for a persisted server receipt</p>
+        <p className="ht-agent-market-read__score-pending">Current structure · waiting for a persisted research receipt</p>
       )}
       <dl className="ht-agent-market-read__facts">
         <div><dt>VWAP</dt><dd>{analysis.vwap === null ? "Unavailable" : `${formatMarketPrice(analysis.vwap)} · ${relationship(analysis.price, analysis.vwap)}`}</dd></div>

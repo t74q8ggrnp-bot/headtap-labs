@@ -52,7 +52,8 @@ test("Home replaces broad-market context with bounded Pro X support while the sh
   assert.doesNotMatch(intelligence, /Broad market:/);
   assert.match(intelligence, /Pro X pulse/);
   assert.match(intelligence, /Bounded live-tape evidence supports the current Canonical read/);
-  assert.match(route, /tickers", "SPY,QQQ,IWM,VIXY"/);
+  assert.match(route, /MARKET_CONTEXT_PROVIDER_SYMBOLS\.join\(","\)/);
+  assert.match(route, /MARKET_WORKSPACE_SYMBOLS\.flatMap/);
   assert.match(route, /providerRequests: 1/);
   assert.match(route, /revalidate: 15/);
   assert.match(route, /s-maxage=15/);

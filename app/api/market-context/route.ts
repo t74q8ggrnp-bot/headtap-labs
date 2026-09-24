@@ -8,6 +8,10 @@ import {
   resolveSnapshotTimestampMs,
   type PolygonSnapshotRow,
 } from "@/lib/polygon-snapshot";
+import {
+  MARKET_CONTEXT_PROVIDER_SYMBOLS,
+  MARKET_WORKSPACE_SYMBOLS,
+} from "@/lib/market-workspace-universe";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +43,7 @@ async function loadMarketContext() {
   const key = process.env.POLYGON_API_KEY?.trim();
   if (!key) throw new Error("market-data credential unavailable");
   const url = new URL("https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers");
-  url.searchParams.set("tickers", "SPY,QQQ,IWM,VIXY");
+  url.searchParams.set("tickers", MARKET_CONTEXT_PROVIDER_SYMBOLS.join(","));
   const [response, entitlement] = await Promise.all([
     fetch(url, {
       cache: "no-store",
@@ -60,6 +64,12 @@ async function loadMarketContext() {
   const iwm = parseSnapshot(tickerMap, "IWM");
   const vix = parseSnapshot(tickerMap, "VIXY");
   if (!spy || !qqq || !iwm) throw new Error("market-context core snapshot incomplete");
+  const quotes = Object.fromEntries(
+    MARKET_WORKSPACE_SYMBOLS.flatMap((symbol) => {
+      const quote = parseSnapshot(tickerMap, symbol);
+      return quote ? [[symbol, quote] as const] : [];
+    }),
+  );
 
   const averageChange = (spy.change + qqq.change) / 2;
   const mood = averageChange >= 0.5 ? "Risk On" : averageChange <= -0.5 ? "Risk Off" : "Neutral";
@@ -76,6 +86,7 @@ async function loadMarketContext() {
     qqq,
     iwm,
     vix,
+    quotes,
     mood,
     moodColor,
     volumeEnv,
