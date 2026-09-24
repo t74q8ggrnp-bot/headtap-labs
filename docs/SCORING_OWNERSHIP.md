@@ -31,6 +31,28 @@ server pipeline and are transported through `lib/opportunity-model.ts`.
 An unevaluated watchlist ticker is labeled `Not ranked`; the browser must not
 manufacture a score for it.
 
+## Live HT Market Score Beta
+
+The owner approved `ht-market-score-beta-v1` on 2026-09-24 as a separate,
+live-visible market-structure research score for exact stocks and ETFs in the
+Market workspace. It is not the HT opportunity score and may not be displayed
+as a Canonical rank, eligibility opinion, target, entry, stop, or Paper signal.
+
+- `lib/market-score.ts` owns the frozen deterministic formula.
+- The server-side market-chart bootstrap and delta routes are the only public
+  score producers. Browser components only format a persisted receipt.
+- Stocks and ETFs share the initial formula but are logged as separate cohorts.
+- Every public number must have an immutable minute-bucket observation receipt;
+  an unpersisted calculation is not eligible for display.
+- Five-, fifteen-, and sixty-minute outcomes are measured only from later bars
+  already obtained by the existing chart feed. This feature adds no provider
+  polling loop.
+- The score has an all-false Canonical, ProX, Agent-risk, Paper, and execution
+  authority map. Tuning requires a new version; old receipts are never rewritten.
+
+This is a second **research context metric**, not a second public opportunity
+score. Canonical remains the sole owner of opportunity detection and ranking.
+
 ## Crypto display authority
 
 `lib/crypto/decision-authority.ts` owns the backend-ranked crypto hero,

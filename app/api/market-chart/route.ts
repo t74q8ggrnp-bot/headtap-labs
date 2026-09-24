@@ -58,6 +58,7 @@ import {
   providerTimestampCanEnterShortCache,
   type MarketProviderEvidence,
 } from "@/lib/market-provider-cost-guard";
+import { createHtMarketScoreFrame } from "@/lib/market-score-server";
 
 const POLYGON_ORIGIN = "https://api.polygon.io";
 const STOCK_PATTERN = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -589,6 +590,20 @@ export async function GET(request: Request) {
       );
     }
 
+    const marketScore = asset === "stock" && displayQuote
+      ? await createHtMarketScoreFrame({
+          symbol,
+          bars,
+          quote: displayQuote,
+        }).catch((error: unknown) => {
+          console.warn("[ht-market-score] bootstrap unavailable", {
+            symbol,
+            message: error instanceof Error ? error.message : "unknown",
+          });
+          return null;
+        })
+      : null;
+
     const responsePayload: MarketChartResponse | MarketChartBootstrapResponse = {
       success: true,
       asset,
@@ -604,6 +619,7 @@ export async function GET(request: Request) {
       summary,
       bars,
       intervalSeconds,
+      ...(marketScore ? { marketScore } : {}),
       ...(asset === "stock" && stockBootstrap
         ? {
             feedVersion: "market-chart-feed-v1" as const,

@@ -1,5 +1,7 @@
 export type MarketChartAsset = "stock" | "crypto";
 
+import type { HtMarketScoreReceipt } from "./market-score";
+
 export type MarketChartBar = {
   time: number;
   open: number;
@@ -45,6 +47,8 @@ export type MarketChartResponse = {
   summary: MarketChartSummary;
   bars: MarketChartBar[];
   intervalSeconds?: number;
+  /** Server-owned, persisted research receipt. Never a Canonical opportunity score. */
+  marketScore?: HtMarketScoreReceipt;
 };
 
 export type MarketChartTimeSlot = {

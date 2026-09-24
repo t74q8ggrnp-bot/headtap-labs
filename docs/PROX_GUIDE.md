@@ -48,6 +48,17 @@ canonical result.
    ProX components and traces exist for auditability, not as competing user
    percentages.
 
+### Separate live Market Score Beta
+
+On 2026-09-24 the owner approved `ht-market-score-beta-v1` as a live-visible,
+fully logged market-structure research metric for exact stocks and ETFs. It is
+not the ProX Edge Score and is not an HT opportunity score. It consumes only
+the existing server-side verified chart frame, remains outside ProX ranking,
+and carries no Canonical, ProX, Agent-risk, Paper, or execution authority.
+Stocks and ETFs are measured as separate outcome cohorts. This exception does
+not permit the independent ProX Edge Score to become public or competitive
+with the Canonical opportunity score.
+
 ## Authority namespaces
 
 HT Labs currently contains two deliberately separate ProX systems. Their

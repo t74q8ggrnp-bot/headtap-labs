@@ -40,6 +40,7 @@ import {
   providerTimestampCanEnterShortCache,
   type MarketProviderEvidence,
 } from "@/lib/market-provider-cost-guard";
+import { advanceHtMarketScoreFrame } from "@/lib/market-score-server";
 
 export const dynamic = "force-dynamic";
 
@@ -385,6 +386,17 @@ export async function GET(request: Request) {
       throw new Error("Stock chart delta failed shared-price alignment.");
     }
     const latestDelta = mergedBars.at(-1);
+    const marketScore = await advanceHtMarketScoreFrame({
+      symbol,
+      deltaBars: mergedBars,
+      quote: displayQuote,
+    }).catch((error: unknown) => {
+      console.warn("[ht-market-score] delta unavailable", {
+        symbol,
+        message: error instanceof Error ? error.message : "unknown",
+      });
+      return null;
+    });
     const payload: MarketChartDeltaResponse = {
       success: true,
       asset: "stock",
@@ -399,6 +411,7 @@ export async function GET(request: Request) {
       intervalSeconds: 60,
       sessionAuthority: authority,
       instrumentation,
+      ...(marketScore ? { marketScore } : {}),
     };
     console.info("[market-chart-feed] delta", {
       symbol,

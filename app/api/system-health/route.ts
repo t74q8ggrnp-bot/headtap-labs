@@ -3588,6 +3588,44 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
+    const marketScoreResult = await supabase.rpc("ht_market_score_beta_health");
+    if (marketScoreResult.error) throw marketScoreResult.error;
+    const marketScore = marketScoreResult.data && typeof marketScoreResult.data === "object"
+      ? marketScoreResult.data as Record<string, unknown>
+      : null;
+    const boundaryReady =
+      marketScore?.version === "ht-market-score-beta-health-v1" &&
+      marketScore?.modelVersion === "ht-market-score-beta-v1" &&
+      marketScore?.authority === "research_only" &&
+      marketScore?.primaryProductImpact === false &&
+      Number(marketScore?.providerRequestsAdded) === 0;
+    const observationCount = Number(marketScore?.observations ?? 0);
+    checks.push({
+      name: "ht_market_score_beta_research",
+      ok: boundaryReady,
+      blocking: false,
+      message: !boundaryReady
+        ? "HT Market Score Beta is missing its zero-authority research boundary; apply migration 0062."
+        : observationCount > 0
+          ? `HT Market Score Beta is live and logging ${observationCount} immutable research receipts without added provider requests.`
+          : "HT Market Score Beta is ready and awaiting its first verified live chart receipt.",
+      detail: marketScore,
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "ht_market_score_beta_research",
+      ok: false,
+      blocking: false,
+      message: "HT Market Score Beta research observability is unavailable; apply migration 0062.",
+      detail: getErrorMessage(
+        err,
+        "HT Market Score Beta health query failed.",
+      ),
+    });
+  }
+
+  try {
+    if (!supabase) throw new Error("Supabase unavailable");
     const [infrastructureResult, releaseResult, acceptanceResult, workerResult] = await Promise.all([
       supabase.rpc("ht_agent_phase2_visual_plan_infrastructure_health"),
       supabase.rpc("ht_agent_phase2_visual_plan_release_health"),

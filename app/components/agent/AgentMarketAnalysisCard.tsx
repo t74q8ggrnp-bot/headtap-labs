@@ -1,17 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import type { WorkspaceInstrument } from "@/lib/instrument-search";
+import { useMemo } from "react";
 import type { MarketChartDisplayQuote, MarketChartResponse } from "@/lib/market-chart";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import { deriveHtAgentMarketAnalysis } from "@/lib/ht-agent/market-analysis";
-import { readWorkspaceInstrumentSeed } from "@/lib/workspace-instrument-seed";
-
-type InstrumentPayload = {
-  ok?: boolean;
-  instrument?: WorkspaceInstrument;
-};
 
 function formatProviderTime(timestamp: string) {
   const parsed = new Date(timestamp);
@@ -44,36 +37,14 @@ export default function AgentMarketAnalysisCard({
   marketLabel: string;
   planServiceError?: string;
 }) {
-  const [instrument, setInstrument] = useState<WorkspaceInstrument | null>(null);
-
-  useEffect(() => {
-    const seeded = readWorkspaceInstrumentSeed(window.sessionStorage, symbol);
-    if (seeded) {
-      const timer = window.setTimeout(() => setInstrument(seeded), 0);
-      return () => window.clearTimeout(timer);
-    }
-    const controller = new AbortController();
-    void fetch(`/api/instruments/${encodeURIComponent(symbol)}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        const payload = await response.json() as InstrumentPayload;
-        if (response.ok && payload.ok === true && payload.instrument?.workspaceSupported) {
-          setInstrument(payload.instrument);
-        }
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [symbol]);
-
   const analysis = useMemo(() => deriveHtAgentMarketAnalysis({
     bars: chart?.bars ?? [],
     quote,
   }), [chart?.bars, quote]);
-  const assetLabel = instrument?.assetKind === "etf"
+  const score = chart?.marketScore ?? null;
+  const assetLabel = score?.assetKind === "etf"
     ? "ETF Market Context"
-    : instrument?.assetKind === "stock"
+    : score?.assetKind === "stock"
       ? "Equity Market Context"
       : "Exact-Ticker Market Context";
 
@@ -102,6 +73,21 @@ export default function AgentMarketAnalysisCard({
         <span className={`ht-agent-market-read__state is-${analysis.state}`}>{assetLabel}</span>
       </div>
       <p className="ht-agent-market-read__copy">{analysis.explanation}</p>
+      {score ? (
+        <div className="ht-agent-market-read__score" aria-label={`${symbol} HT Market Score Beta`}>
+          <div>
+            <span>HT Market Score</span>
+            <strong>{score.score}</strong>
+          </div>
+          <div>
+            <span>Beta state</span>
+            <strong>{score.state}</strong>
+          </div>
+          <p>Live logged · {score.assetKind === "etf" ? "ETF cohort" : score.assetKind === "stock" ? "Stock cohort" : "Classification pending"}</p>
+        </div>
+      ) : (
+        <p className="ht-agent-market-read__score-pending">HT Market Score Beta · waiting for a persisted server receipt</p>
+      )}
       <dl className="ht-agent-market-read__facts">
         <div><dt>VWAP</dt><dd>{analysis.vwap === null ? "Unavailable" : `${formatMarketPrice(analysis.vwap)} · ${relationship(analysis.price, analysis.vwap)}`}</dd></div>
         <div><dt>EMA 9</dt><dd>{analysis.ema9 === null ? "Unavailable" : `${formatMarketPrice(analysis.ema9)} · ${relationship(analysis.price, analysis.ema9)}`}</dd></div>
@@ -114,7 +100,7 @@ export default function AgentMarketAnalysisCard({
         <span>{analysis.barCount} verified intervals</span>
       </div>
       <p className="ht-agent-market-read__boundary">
-        {instrument?.assetKind === "etf" ? `${symbol} is ETF market context, not a Canonical opportunity. ` : ""}
+        {score?.assetKind === "etf" ? `${symbol} is ETF market context, not a Canonical opportunity. ` : ""}
         No Canonical rank, Agent target, entry, stop, Paper eligibility, or execution authority is implied.
       </p>
       {planServiceError ? <p className="ht-agent-market-read__service-note">Canonical plan check: {planServiceError}</p> : null}

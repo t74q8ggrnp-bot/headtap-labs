@@ -4,6 +4,8 @@ import { easternDateString, mergeMarketBars, summarizeMarketBars, type MarketCha
 import { getStockMarketClock, type StockMarketSession } from "./stock-market-session.ts";
 // @ts-expect-error Node's strip-types runner resolves the TypeScript source.
 import { marketSessionIsDisplayed, mergeSharedDisplayPriceIntoCurrentCandle } from "./market-chart-timeframes.ts";
+// @ts-expect-error Node's strip-types runner resolves the TypeScript source.
+import { validHtMarketScoreReceipt, type HtMarketScoreReceipt } from "./market-score.ts";
 
 export const MARKET_CHART_FEED_VERSION = "market-chart-feed-v1" as const;
 
@@ -84,6 +86,7 @@ export type MarketChartDeltaResponse = {
   sessionAuthority: MarketChartSessionAuthority;
   /** REST polling telemetry. A future authenticated stream may omit it. */
   instrumentation?: MarketChartRequestInstrumentation;
+  marketScore?: HtMarketScoreReceipt;
 };
 
 export type MarketChartFeedFrame = {
@@ -376,7 +379,8 @@ export function validMarketChartDeltaResponse(
       displayQuote: quote,
       sessionAuthority: authority,
     })) &&
-    instrumentationValid;
+    instrumentationValid &&
+    (delta.marketScore === undefined || validHtMarketScoreReceipt(delta.marketScore));
 }
 
 export function marketChartFrameHasSharedPriceInvariant(input: {
@@ -436,7 +440,8 @@ export function validMarketChartBootstrapResponse(
       displayQuote: quote,
       sessionAuthority: authority,
     })) &&
-    instrumentationValid;
+    instrumentationValid &&
+    (bootstrap.marketScore === undefined || validHtMarketScoreReceipt(bootstrap.marketScore));
 }
 
 /**
@@ -476,7 +481,8 @@ export function validCurrentMarketChartFrame(
       bars: current.bars ?? [],
       displayQuote: quote,
       sessionAuthority: authority,
-    }));
+    })) &&
+    (current.marketScore === undefined || validHtMarketScoreReceipt(current.marketScore));
 }
 
 export function createProviderRequestInstrumentation(input: {
@@ -806,6 +812,7 @@ export function mergeMarketChartFeedDelta(
             : delta.displayQuote.changePercent;
         })(),
       },
+      marketScore: delta.marketScore ?? current.chart.marketScore,
     },
     previousClose: current.previousClose,
     receivedAt,
