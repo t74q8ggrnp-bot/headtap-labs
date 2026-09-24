@@ -21,9 +21,11 @@ function directSymbol(value: string) {
 export default function TickerSearchCombobox({
   currentSymbol,
   compact = false,
+  destination = "trade",
 }: {
   currentSymbol: string;
   compact?: boolean;
+  destination?: "market" | "trade";
 }) {
   const router = useRouter();
   const listboxId = useId();
@@ -109,7 +111,9 @@ export default function TickerSearchCombobox({
     setError(null);
     setActiveIndex(-1);
     inputRef.current?.blur();
-    router.push(`/trade/${encodeURIComponent(normalized)}`);
+    router.push(destination === "market"
+      ? `/market?ticker=${encodeURIComponent(normalized)}`
+      : `/trade/${encodeURIComponent(normalized)}`);
   };
 
   const submit = () => {

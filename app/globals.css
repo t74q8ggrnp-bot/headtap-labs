@@ -3315,6 +3315,18 @@ body:has(.ht-dialog-sheet[open]) {
   }
 
   .ht-terminal-markets { min-height: 100%; background: transparent; }
+  .ht-terminal-market-search {
+    position: relative;
+    z-index: 4;
+    padding: 0.45rem 0.45rem 0.35rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
+  .ht-terminal-market-search .ht-workspace-search {
+    min-height: 36px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.34);
+  }
+  .ht-terminal-market-search [role="listbox"] { min-width: 0; }
   .ht-terminal-market-tabs {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3382,6 +3394,12 @@ body:has(.ht-dialog-sheet[open]) {
   .ht-terminal-market-footer:hover { color: #fb923c; }
 
   .ht-terminal-pane--intelligence .htb-intelligence { border: 0; background: transparent; }
+  .ht-terminal-pane--intelligence .htb-agent-primary {
+    padding: 0.55rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
+  .ht-terminal-pane--intelligence .htb-agent-primary > section { margin-top: 0; }
+  .ht-terminal-pane--intelligence .htb-canonical-summary__body { padding: 0; }
   .ht-terminal-pane--intelligence .htb-score-block {
     gap: 0.6rem;
     padding: 0.68rem 0.72rem;

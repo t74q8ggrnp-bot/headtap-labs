@@ -83,3 +83,14 @@ test("terminal controls remain keyboard-visible and reduced-motion aware", () =>
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(css, /\.ht-terminal-resizer:focus-visible::after/);
 });
+
+test("Market exposes visible exact-ticker search without changing the Trade destination", () => {
+  const markets = source("app/components/home/HomeTerminalMarkets.tsx");
+  const search = source("app/components/trade/TickerSearchCombobox.tsx");
+  const surface = source("app/components/home/HomeReferenceSurface.tsx");
+
+  assert.match(markets, /TickerSearchCombobox currentSymbol=\{currentSymbol\} compact destination="market"/);
+  assert.match(search, /destination\?: "market" \| "trade"/);
+  assert.match(search, /destination === "market"[\s\S]*`\/market\?ticker=\$\{encodeURIComponent\(normalized\)\}`[\s\S]*`\/trade\/\$\{encodeURIComponent\(normalized\)\}`/);
+  assert.match(surface, /searchEnabled=\{experience === "market"\}/);
+});

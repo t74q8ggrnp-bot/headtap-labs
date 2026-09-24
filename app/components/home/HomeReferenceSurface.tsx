@@ -343,23 +343,31 @@ export default function HomeReferenceSurface({
     >
       <div className="htb-intelligence">
       <h2 className="sr-only">HT Intelligence</h2>
-      <section className="htb-score-block">
-        <strong className="htb-score ht-tabular-numbers">{canonicalOpportunity ? Math.round(canonicalOpportunity.opportunityScore) : "—"}</strong>
-        <div>
-          <h3>{view?.momentumLabel ?? "No current Canonical decision"}</h3>
-          <p>{canonicalOpportunity?.whyItMatters ?? `${symbol} is available as a universal provider-backed chart, but it is not in the current Canonical opportunity frame.`}</p>
+      <section className="htb-agent-primary" aria-label={`${symbol} HT Agent X setup`}>
+        <HomeTradePlan symbol={symbol} compact />
+      </section>
+      <details className="htb-intel-disclosure htb-canonical-summary">
+        <summary>HT Intelligence</summary>
+        <div className="htb-intel-disclosure__body htb-canonical-summary__body">
+          <section className="htb-score-block">
+            <strong className="htb-score ht-tabular-numbers">{canonicalOpportunity ? Math.round(canonicalOpportunity.opportunityScore) : "—"}</strong>
+            <div>
+              <h3>{view?.momentumLabel ?? "No current Canonical decision"}</h3>
+              <p>{canonicalOpportunity?.whyItMatters ?? `${symbol} is available as a universal provider-backed chart, but it is not in the current Canonical opportunity frame.`}</p>
+            </div>
+          </section>
+          <section className="htb-intel-section htb-intel-section--primary">
+            <h3>Decision</h3>
+            <dl className="htb-facts">
+              <div><dt>Status</dt><dd>{canonicalOpportunity ? eligible ? "Eligible" : "Monitoring only" : "Unavailable"}</dd></div>
+              <div><dt>Setup</dt><dd>{canonicalOpportunity ? readable(canonicalOpportunity.stage) : "No current setup"}</dd></div>
+              <div><dt>Entry</dt><dd>{framework && view ? view.positionLabel : "Withheld"}</dd></div>
+              <div><dt>Risk</dt><dd className={view?.riskLabel === "HIGH" ? "is-negative" : "is-warning"}>{view?.riskLabel ?? "Unmeasured"}</dd></div>
+            </dl>
+            <p className="htb-risk-copy">{canonicalOpportunity?.riskNote ?? `HT Labs will not fabricate a score, setup, entry, or risk level for ${symbol}.`}</p>
+          </section>
         </div>
-      </section>
-      <section className="htb-intel-section htb-intel-section--primary">
-        <h3>Decision</h3>
-        <dl className="htb-facts">
-          <div><dt>Status</dt><dd>{canonicalOpportunity ? eligible ? "Eligible" : "Monitoring only" : "Unavailable"}</dd></div>
-          <div><dt>Setup</dt><dd>{canonicalOpportunity ? readable(canonicalOpportunity.stage) : "No current setup"}</dd></div>
-          <div><dt>Entry</dt><dd>{framework && view ? view.positionLabel : "Withheld"}</dd></div>
-          <div><dt>Risk</dt><dd className={view?.riskLabel === "HIGH" ? "is-negative" : "is-warning"}>{view?.riskLabel ?? "Unmeasured"}</dd></div>
-        </dl>
-        <p className="htb-risk-copy">{canonicalOpportunity?.riskNote ?? `HT Labs will not fabricate a score, setup, entry, or risk level for ${symbol}.`}</p>
-      </section>
+      </details>
       <details className="htb-intel-disclosure">
         <summary>Levels and risk</summary>
         <div className="htb-intel-disclosure__body">
@@ -379,10 +387,6 @@ export default function HomeReferenceSurface({
             <><strong>{readable(prox.pulse?.state ?? prox.status)}</strong><p>{prox.event?.headline ?? "Bounded market evidence is attached to the canonical decision."}</p></>
           ) : <p>No fresh Pro X evidence is attached.</p>}
         </div>
-      </details>
-      <details className="htb-intel-disclosure htb-agent-plan">
-        <summary>Agent X</summary>
-        <div className="htb-intel-disclosure__body"><HomeTradePlan symbol={symbol} compact /></div>
       </details>
       <details className="htb-intel-disclosure htb-evidence">
         <summary>Full evidence</summary>
@@ -448,11 +452,13 @@ export default function HomeReferenceSurface({
             recents={recents}
             currentSymbol={symbol}
             onSelect={onSelect}
+            searchEnabled={experience === "market"}
           />
         )}
         instrumentHeader={instrumentHeader}
         chart={chart}
         intelligence={compactLayout === "desktop" ? intelligence : null}
+        intelligenceTitle={experience === "market" ? "HT Agent X" : "HT Intelligence"}
       />
       <AccessibleDialogSheet
         open={marketBrowserOpen}
@@ -470,6 +476,7 @@ export default function HomeReferenceSurface({
           currentSymbol={symbol}
           onSelect={onSelect}
           onNavigate={() => setMarketBrowserOpen(false)}
+          searchEnabled={experience === "market"}
         />
       </AccessibleDialogSheet>
       <AccessibleDialogSheet

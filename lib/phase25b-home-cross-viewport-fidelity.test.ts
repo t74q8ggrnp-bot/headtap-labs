@@ -31,7 +31,7 @@ test("Home chart exposes one quiet control strip with settings inside Layers", (
   assert.match(chart, />Draw<\/summary>/);
 });
 
-test("Home Intelligence is progressive and compact layouts open it in a sheet", () => {
+test("Market leads with exact-ticker Agent X while intelligence remains progressive", () => {
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
 
   assert.match(surface, /const \[compactIntelligenceOpen, setCompactIntelligenceOpen\] = useState\(false\)/);
@@ -40,7 +40,9 @@ test("Home Intelligence is progressive and compact layouts open it in a sheet", 
   assert.match(surface, /intelligence=\{compactLayout === "desktop" \? intelligence : null\}/);
   assert.match(surface, /<summary>Levels and risk<\/summary>/);
   assert.match(surface, /<summary>Pro X evidence<\/summary>/);
-  assert.match(surface, /<summary>Agent X<\/summary>/);
+  assert.match(surface, /aria-label=\{`\$\{symbol\} HT Agent X setup`\}/);
+  assert.match(surface, /<summary>HT Intelligence<\/summary>/);
+  assert.match(surface, /intelligenceTitle=\{experience === "market" \? "HT Agent X" : "HT Intelligence"\}/);
   assert.match(surface, /<summary>Full evidence<\/summary>/);
   assert.equal(surface.match(/<HomeTradePlan/g)?.length, 1);
 });

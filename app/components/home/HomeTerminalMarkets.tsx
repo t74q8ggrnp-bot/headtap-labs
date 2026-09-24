@@ -5,6 +5,7 @@ import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { Opportunity } from "@/lib/opportunity-model";
 import { formatMarketPrice } from "@/lib/market-price-format";
 import type { HomeOpportunityLane } from "@/lib/market-workspace-route";
+import TickerSearchCombobox from "@/app/components/trade/TickerSearchCombobox";
 
 type MarketTab = "momentum" | "before-crowd" | "watchlist" | "recent";
 
@@ -32,6 +33,7 @@ export default function HomeTerminalMarkets({
   currentSymbol,
   onSelect,
   onNavigate,
+  searchEnabled = false,
 }: {
   spotMomentum: Opportunity[];
   beforeCrowd: Opportunity[];
@@ -40,6 +42,7 @@ export default function HomeTerminalMarkets({
   currentSymbol: string;
   onSelect: (opportunity: Opportunity, lane: HomeOpportunityLane) => void;
   onNavigate?: () => void;
+  searchEnabled?: boolean;
 }) {
   const [tab, setTab] = useState<MarketTab>("momentum");
   const prefix = useId().replaceAll(":", "");
@@ -78,6 +81,11 @@ export default function HomeTerminalMarkets({
 
   return (
     <div className="htb-opportunities ht-terminal-markets">
+      {searchEnabled ? (
+        <div className="ht-terminal-market-search">
+          <TickerSearchCombobox currentSymbol={currentSymbol} compact destination="market" />
+        </div>
+      ) : null}
       <div className="ht-terminal-market-tabs" role="tablist" aria-label="Market lists">
         {tabs.map((candidate) => (
           <button
