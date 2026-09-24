@@ -27,6 +27,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { HT_REFRESH_RATES_MS } from "@/lib/runtime-capabilities";
 import type { AgentXVisualPlanRead } from "@/lib/ht-agent/visual-plan-api";
 import { StatusState } from "@/app/components/ui/ApplicationPrimitives";
+import DesktopTerminalNavigation from "@/app/components/terminal/DesktopTerminalNavigation";
+import { useDesktopTerminalLayout } from "@/app/hooks/useDesktopTerminalLayout";
 
 const money = (value: number | null) => value === null ? "—" : new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -206,6 +208,7 @@ function OrderEstimate({
 }
 
 export default function PaperTradingDashboard() {
+  const { resetLayout } = useDesktopTerminalLayout();
   const searchParams = useSearchParams();
   const initialSymbol = (searchParams.get("symbol") ?? "").toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 10);
   const requestedSource = searchParams.get("source") ?? "manual";
@@ -663,10 +666,13 @@ export default function PaperTradingDashboard() {
 
   return (
     <main className="ht-phase25-route ht-customer-route ht-paper-route min-h-screen bg-[#050707] px-3 pb-28 pt-4 text-white sm:px-6 sm:py-7" data-route-audience="customer">
-      <div className="ht-phase25-frame mx-auto max-w-[1500px] overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#080a0b] shadow-[0_28px_100px_rgba(0,0,0,0.5)]">
-        <header className="flex min-h-20 flex-wrap items-center justify-between gap-4 border-b border-white/8 px-5 py-4 sm:px-7">
-          <div className="flex items-center gap-8">
-            <Link href="/" aria-label="HT Labs home"><Image src="/logo.png" alt="HT Labs" width={2909} height={1959} className="h-9 w-auto" priority /></Link>
+      <div className="ht-phase25-frame ht-paper-terminal-shell mx-auto max-w-[1500px] overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#080a0b] shadow-[0_28px_100px_rgba(0,0,0,0.5)]">
+        <DesktopTerminalNavigation onResetLayout={resetLayout} />
+        <div className="ht-paper-terminal-content">
+        <header className="ht-paper-terminal-header flex min-h-20 flex-wrap items-center justify-between gap-4 border-b border-white/8 px-5 py-4 sm:px-7">
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-orange-300">HT Labs</p>
+            <h1 className="mt-1 text-sm font-black text-white">Paper trading</h1>
           </div>
           <div className="flex items-center gap-2 text-[10px] font-semibold text-zinc-500" role="status" aria-live="polite">
             <span className={`h-2 w-2 rounded-full ${paperAccountStatusDot}`} />
@@ -754,7 +760,7 @@ export default function PaperTradingDashboard() {
                         </Link>
                       </div>
                     </div>
-                    <HeroPriceChart asset="stock" symbol={loadedInstrument.symbol} accent="cyan" height={330} />
+                    <HeroPriceChart asset="stock" symbol={loadedInstrument.symbol} accent="cyan" height="clamp(330px, calc(100dvh - 360px), 660px)" />
                     <div className="mt-4 grid grid-cols-2 gap-y-4 border-t border-white/8 pt-4 sm:grid-cols-4">
                       <AccountMetric label="Open" value={money(loadedInstrument.sessionOpen || null)} />
                       <AccountMetric label="High" value={money(loadedInstrument.sessionHigh || null)} />
@@ -896,6 +902,7 @@ export default function PaperTradingDashboard() {
             <footer className="border-t border-white/8 px-5 py-4 text-[10px] font-semibold leading-5 text-zinc-700 sm:px-7">{dashboard.disclosure} HT Paper is educational simulation software. No order is routed to a live broker.</footer>
           </>
         )}
+        </div>
       </div>
     </main>
   );

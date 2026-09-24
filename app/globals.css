@@ -2347,6 +2347,90 @@ body:has(.ht-dialog-sheet[open]) {
 .ht-paper-route .ht-paper-activity { border-color: var(--ht-divider); }
 .ht-paper-route [class*="shadow-[0_0_28px"] { box-shadow: none !important; }
 
+/* Paper keeps its order engine and account model inside the same desktop
+   terminal shell used by Home and Market. The compact/mobile flow remains in
+   document order beneath the shared application header. */
+@media (min-width: 1180px) {
+  .ht-responsive-shell[data-application-route="paper"] > .ht-desktop-global-header {
+    display: none;
+  }
+  .ht-responsive-shell[data-application-route="paper"],
+  .ht-responsive-shell[data-application-route="paper"] .ht-route-content,
+  .ht-responsive-shell[data-application-route="paper"] .ht-app-content {
+    min-height: 100dvh;
+    background: #07090b;
+  }
+  .ht-responsive-shell[data-application-route="paper"] .ht-paper-route {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+    padding: 0;
+    background:
+      radial-gradient(circle at 0 0, rgba(139, 55, 12, 0.12), transparent 24rem),
+      radial-gradient(circle at 100% 100%, rgba(118, 48, 17, 0.07), transparent 28rem),
+      #07090b;
+    font-family: var(--font-ht-terminal), Arial, Helvetica, sans-serif;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  .ht-paper-terminal-shell {
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    grid-template-columns: 56px minmax(0, 1fr);
+    overflow: hidden;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .ht-paper-terminal-shell > .ht-terminal-nav {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    min-height: 100dvh;
+  }
+  .ht-paper-terminal-content {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    height: 100dvh;
+    overflow: auto;
+    background: rgba(7, 9, 11, 0.96);
+    scrollbar-color: #34383f #080a0d;
+  }
+  .ht-paper-terminal-header {
+    min-height: 48px;
+    padding: 0 0.85rem;
+    background: rgba(8, 10, 13, 0.76);
+  }
+  .ht-paper-terminal-header > div:first-child > p { display: none; }
+  .ht-paper-terminal-header > div:first-child > h1 { margin: 0; font-size: 0.82rem; }
+  .ht-paper-route .ht-paper-workspace {
+    min-height: calc(100dvh - 235px);
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  }
+  .ht-paper-route .ht-paper-workspace > div:first-child {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    padding: 0.8rem;
+  }
+  .ht-paper-route .ht-paper-workspace > div:first-child > div:last-child {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .ht-paper-route .ht-paper-workspace [data-market-chart-canvas="true"] {
+    min-height: 330px;
+  }
+  .ht-paper-route .ht-paper-ticket {
+    border-top: 0;
+    border-left: 1px solid var(--ht-divider);
+    border-radius: 0;
+    padding: 0.9rem;
+  }
+}
+
 .ht-account-route {
   --ht-route-accent: var(--ht-color-text-muted);
   background: linear-gradient(180deg, rgba(161, 161, 170, 0.025), transparent 18rem), var(--ht-color-canvas);
