@@ -36,8 +36,11 @@ import {
 import { getRelativeVolume } from "@/app/lib/legacy-stock-scoring";
 import type { HomeAlert } from "@/lib/home-account";
 import {
+  homeOpportunityHref,
   marketWorkspaceHref,
+  normalizeHomeOpportunityLane,
   normalizeMarketWorkspaceSymbol,
+  type HomeOpportunityLane,
 } from "@/lib/market-workspace-route";
 
 type HomeClientProps = {
@@ -857,6 +860,12 @@ export default function HomeClient({
   const requestedMarketTicker = surface === "market"
     ? normalizeMarketWorkspaceSymbol(searchParams?.get("ticker"))
     : null;
+  const requestedHomeTicker = surface === "intelligence"
+    ? normalizeMarketWorkspaceSymbol(searchParams?.get("ticker"))
+    : null;
+  const requestedHomeLane = surface === "intelligence"
+    ? normalizeHomeOpportunityLane(searchParams?.get("lane"))
+    : null;
 
   // The URL is the universal workspace authority. Re-run on every URL change
   // so refresh and browser Back/Forward cannot retain a different ticker.
@@ -1062,9 +1071,13 @@ export default function HomeClient({
   // Secondary opportunity surfaces consume the canonical feed below; there is
   // intentionally no local fallback selector.
 
+  const requestedHomeOpportunity = requestedHomeTicker && requestedHomeLane
+    ? (requestedHomeLane === "before_the_crowd" ? apiBeforeCrowdList : apiFullRankedList)
+      .find((opportunity) => opportunity.ticker === requestedHomeTicker) ?? null
+    : null;
   const referenceSymbol = surface === "market"
     ? requestedMarketTicker ?? "SPY"
-    : apiMomentum?.ticker ?? "SPY";
+    : requestedHomeOpportunity?.ticker ?? apiMomentum?.ticker ?? "SPY";
   const matchingSelectedOpportunity = selectedOpportunity?.ticker === referenceSymbol
     ? selectedOpportunity
     : null;
@@ -1074,7 +1087,7 @@ export default function HomeClient({
     (opportunity) => opportunity.ticker === referenceSymbol,
   ) ?? null;
   const referenceOpportunity = surface === "intelligence"
-    ? apiMomentum
+    ? requestedHomeOpportunity ?? apiMomentum
     : matchingSelectedOpportunity ?? matchingFrameOpportunity;
   const referenceFramework = tradeFrameworkToDisplay(referenceOpportunity?.tradeFramework);
   const requestedAccountSurface = searchParams?.get("auth") === "signin"
@@ -1090,6 +1103,13 @@ export default function HomeClient({
       setSelectedStock({ symbol: normalized, price: 0, change: 0 });
       recordRecentlyViewed(normalized);
       router.push(href);
+  };
+
+  const selectHomeOpportunity = (opportunity: APIOpportunity, lane: HomeOpportunityLane) => {
+    const href = homeOpportunityHref(opportunity.ticker, lane);
+    if (!href) return;
+    recordRecentlyViewed(opportunity.ticker);
+    router.push(href, { scroll: false });
   };
 
   const terminalSurface = (experience: "market" | "spot-momentum") => (
@@ -1128,7 +1148,7 @@ export default function HomeClient({
           setAlerts((current) => current.map((item) => item.id === alert.id ? { ...item, read: true } : item));
           navigateMarketSymbol(alert.ticker);
         }}
-        onSelect={(opportunity) => navigateMarketSymbol(opportunity.ticker)}
+        onSelect={experience === "spot-momentum" ? selectHomeOpportunity : (opportunity) => navigateMarketSymbol(opportunity.ticker)}
         onToggleWatchlist={() => {
           if (referenceSymbol) void toggleWatchlistSymbol(referenceSymbol);
         }}

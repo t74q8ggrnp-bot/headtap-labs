@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import type { Opportunity } from "@/lib/opportunity-model";
 import { formatMarketPrice } from "@/lib/market-price-format";
+import type { HomeOpportunityLane } from "@/lib/market-workspace-route";
 
 type MarketTab = "momentum" | "before-crowd" | "watchlist" | "recent";
 
@@ -37,7 +38,7 @@ export default function HomeTerminalMarkets({
   watchlist: string[];
   recents: string[];
   currentSymbol: string;
-  onSelect: (opportunity: Opportunity) => void;
+  onSelect: (opportunity: Opportunity, lane: HomeOpportunityLane) => void;
   onNavigate?: () => void;
 }) {
   const [tab, setTab] = useState<MarketTab>("momentum");
@@ -49,10 +50,17 @@ export default function HomeTerminalMarkets({
     [beforeCrowd, spotMomentum],
   );
   const rows = useMemo(() => {
-    if (tab === "momentum") return spotMomentum.slice(0, 15).map((opportunity) => ({ symbol: opportunity.ticker, opportunity }));
-    if (tab === "before-crowd") return beforeCrowd.slice(0, 15).map((opportunity) => ({ symbol: opportunity.ticker, opportunity }));
+    if (tab === "momentum") return spotMomentum.slice(0, 15).map((opportunity) => ({ symbol: opportunity.ticker, opportunity, lane: "spot_momentum" as const }));
+    if (tab === "before-crowd") return beforeCrowd.slice(0, 15).map((opportunity) => ({ symbol: opportunity.ticker, opportunity, lane: "before_the_crowd" as const }));
     const symbols = tab === "watchlist" ? watchlist : recents;
-    return symbols.slice(0, 15).map((symbol) => ({ symbol, opportunity: bySymbol.get(symbol) ?? null }));
+    return symbols.slice(0, 15).map((symbol) => {
+      const opportunity = bySymbol.get(symbol) ?? null;
+      return {
+        symbol,
+        opportunity,
+        lane: opportunity?.strategy === "before_the_crowd" ? "before_the_crowd" as const : "spot_momentum" as const,
+      };
+    });
   }, [beforeCrowd, bySymbol, recents, spotMomentum, tab, watchlist]);
 
   const moveTab = (event: KeyboardEvent<HTMLButtonElement>, current: MarketTab) => {
@@ -111,7 +119,7 @@ export default function HomeTerminalMarkets({
               <tr><th>Symbol</th><th>Last</th><th>Chg</th><th>RVOL</th><th>HT</th></tr>
             </thead>
             <tbody>
-              {rows.map(({ symbol, opportunity }) => {
+              {rows.map(({ symbol, opportunity, lane }) => {
                 const active = symbol === currentSymbol;
                 return (
                   <tr key={`${tab}-${symbol}`} data-active={active ? "true" : "false"}>
@@ -121,7 +129,7 @@ export default function HomeTerminalMarkets({
                           type="button"
                           aria-pressed={active}
                           onClick={() => {
-                            onSelect(opportunity);
+                            onSelect(opportunity, lane);
                             onNavigate?.();
                           }}
                         >

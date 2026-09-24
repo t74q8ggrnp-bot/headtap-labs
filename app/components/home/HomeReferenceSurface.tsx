@@ -9,6 +9,7 @@ import { AccessibleDialogSheet } from "@/app/components/ui/ApplicationPrimitives
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
 import { getSafeAccountIdentity, type HomeAlert } from "@/lib/home-account";
 import { formatMarketPrice } from "@/lib/market-price-format";
+import type { HomeOpportunityLane } from "@/lib/market-workspace-route";
 import { getOpportunityPresentation, type Opportunity } from "@/lib/opportunity-model";
 import { HomeAccountSurface, HomeAlertsSurface } from "./HomeAccountAlerts";
 import HomeReferenceChart from "./HomeReferenceChart";
@@ -60,7 +61,7 @@ type Props = {
   onAuthenticate: (mode: "signin" | "signup") => void;
   onSignOut: () => void;
   onSelectAlert: (alert: HomeAlert) => void;
-  onSelect: (opportunity: Opportunity) => void;
+  onSelect: (opportunity: Opportunity, lane: HomeOpportunityLane) => void;
   onToggleWatchlist: () => void;
 };
 
@@ -201,6 +202,9 @@ export default function HomeReferenceSurface({
   );
 
   const canonicalOpportunity = opportunity?.ticker === symbol ? opportunity : null;
+  const homeLaneLabel = canonicalOpportunity?.strategy === "before_the_crowd"
+    ? "Before the Crowd"
+    : "Spot Momentum";
   const view = canonicalOpportunity
     ? getOpportunityPresentation(canonicalOpportunity)
     : null;
@@ -393,6 +397,7 @@ export default function HomeReferenceSurface({
   );
   const intelligence = experience === "spot-momentum" && canonicalOpportunity ? (
     <HomeSpotMomentumIntelligence
+      key={`${canonicalOpportunity.strategy ?? "spot_momentum"}:${canonicalOpportunity.ticker}`}
       opportunity={canonicalOpportunity}
       framework={framework}
       displayPrice={displayPrice}
@@ -407,8 +412,9 @@ export default function HomeReferenceSurface({
   return (
     <main
       className="htb-home ht-home-terminal-surface"
-      aria-label={experience === "spot-momentum" ? "HT Labs Spot Momentum workspace" : "HT Labs Market workspace"}
+      aria-label={experience === "spot-momentum" ? `HT Labs ${homeLaneLabel} workspace` : "HT Labs Market workspace"}
       data-workspace-symbol={symbol}
+      data-opportunity-lane={experience === "spot-momentum" ? canonicalOpportunity?.strategy ?? "spot_momentum" : undefined}
     >
       <DesktopTerminalFrame
         navigationUtilities={(

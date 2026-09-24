@@ -37,6 +37,7 @@ export default function HomeSpotMomentumIntelligence({
   const [plan, setPlan] = useState<HtTradePlan | null>(null);
   const [planState, setPlanState] = useState<HomeTradePlanState>("loading");
   const view = getOpportunityPresentation(opportunity);
+  const laneLabel = opportunity.strategy === "before_the_crowd" ? "Before the Crowd" : "Spot Momentum";
   const prox = opportunity.proxIntelligence;
   const proxState = prox && prox.status !== "unavailable"
     ? (prox.pulse?.state ?? prox.status).replaceAll("_", " ")
@@ -47,7 +48,7 @@ export default function HomeSpotMomentumIntelligence({
   return (
     <section className="ht-home-spot-intelligence" aria-labelledby="ht-home-spot-title">
       <header className="ht-home-spot-intelligence__header">
-        <p id="ht-home-spot-title">Spot Momentum</p>
+        <p id="ht-home-spot-title">{laneLabel}</p>
         <span>{opportunity.scannedAt ? `Decision ${new Date(opportunity.scannedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Canonical decision"}</span>
       </header>
 
