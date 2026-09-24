@@ -3677,7 +3677,7 @@ export async function GET(request: Request) {
       supabase.rpc("ht_session_continuity_health"),
       supabase
         .from("ht_session_continuity_runs")
-        .select("observation_minute,error_receipts")
+        .select("observation_minute,completed_at,expected_episode_count,persisted_episode_count,failed_episode_count,reconciled_episode_count,provider_request_count,error_receipts")
         .order("observation_minute", { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -3695,7 +3695,22 @@ export async function GET(request: Request) {
     const runs = continuity?.runs && typeof continuity.runs === "object"
       ? continuity.runs as Record<string, unknown>
       : {};
-    const failed = Number(runs.failed ?? 0);
+    const historicalFailed = Number(runs.failed ?? 0);
+    const latestRun = continuityRunResult.data
+      ? {
+          observationMinute: continuityRunResult.data.observation_minute,
+          completedAt: continuityRunResult.data.completed_at,
+          expected: Number(continuityRunResult.data.expected_episode_count ?? 0),
+          persisted: Number(continuityRunResult.data.persisted_episode_count ?? 0),
+          failed: Number(continuityRunResult.data.failed_episode_count ?? 0),
+          reconciled: Number(continuityRunResult.data.reconciled_episode_count ?? 0),
+          providerRequestsAdded: Number(continuityRunResult.data.provider_request_count ?? 0),
+        }
+      : null;
+    const latestRunHealthy = Boolean(latestRun) &&
+      latestRun?.failed === 0 &&
+      latestRun?.persisted === latestRun?.expected &&
+      latestRun?.providerRequestsAdded === 0;
     const latestFailureReceipts = continuityRunResult.error
       ? [{
           ticker: "*",
@@ -3709,15 +3724,19 @@ export async function GET(request: Request) {
         : [];
     checks.push({
       name: "session_continuity_research",
-      ok: boundaryReady && failed === 0,
+      ok: boundaryReady && latestRunHealthy,
       blocking: false,
       message: !boundaryReady
         ? "Session Continuity is missing its zero-authority research boundary; apply migration 0063."
-        : failed > 0
-          ? `Session Continuity preserved ${failed} failed persistence receipts for review.`
-          : `Session Continuity is logging Before the Crowd graduation outcomes at 15m, 30m, 45m, 60m, market open, and open +30m with zero added provider requests.`,
+        : !latestRunHealthy
+          ? "The latest Session Continuity persistence run is incomplete; historical failure receipts remain preserved for diagnosis."
+          : historicalFailed > 0
+            ? `Session Continuity recovered on its latest run; ${historicalFailed} historical failure receipts remain preserved.`
+            : `Session Continuity is logging Before the Crowd graduation outcomes at 15m, 30m, 45m, 60m, market open, and open +30m with zero added provider requests.`,
       detail: {
         ...continuity,
+        latestRun,
+        historicalFailedPersistenceCount: historicalFailed,
         latestFailureReceipts,
       },
     });

@@ -48,5 +48,8 @@ test("research health exposes preserved persistence failures for diagnosis", () 
   assert.match(healthRoute, /ht_session_continuity_runs/);
   assert.match(healthRoute, /error_receipts/);
   assert.match(healthRoute, /latestFailureReceipts/);
+  assert.match(healthRoute, /historicalFailedPersistenceCount/);
+  assert.match(healthRoute, /latestRunHealthy/);
+  assert.match(healthRoute, /recovered on its latest run/);
   assert.match(healthRoute, /blocking: false/);
 });
