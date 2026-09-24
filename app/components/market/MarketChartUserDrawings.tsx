@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { IChartApi, Time, UTCTimestamp } from "lightweight-charts";
@@ -40,12 +41,14 @@ type Props = {
   renderVersion: number;
   onSelect: (id: string | null) => void;
   onCommit: (drawings: MarketChartUserDrawing[]) => void;
+  onDelete: (id: string) => void;
   onToolComplete: () => void;
 };
 
 type DragState = {
   drawing: MarketChartUserDrawing;
-  pointIndex: number;
+  pointIndex: number | null;
+  anchor: MarketChartUserDrawingPoint;
   pointerId: number;
 };
 
@@ -66,6 +69,17 @@ function drawingLabel(drawing: MarketChartUserDrawing) {
   return `Price range ${change >= 0 ? "+" : ""}${change.toFixed(2)}%`;
 }
 
+function measurementLabel(drawing: MarketChartUserDrawing) {
+  const first = drawing.points[0];
+  const second = drawing.points[1];
+  if (!first || !second) return "Price range";
+  const difference = second.price - first.price;
+  const percentage = first.price === 0 ? 0 : (difference / first.price) * 100;
+  const durationMinutes = Math.round(Math.abs(second.time - first.time) / 60);
+  const precision = Math.max(first.price, second.price) < 1 ? 4 : 2;
+  return `${difference >= 0 ? "+" : ""}$${difference.toFixed(precision)} · ${percentage >= 0 ? "+" : ""}${percentage.toFixed(2)}% · ${durationMinutes}m`;
+}
+
 export function MarketChartUserDrawingLayer({
   chart,
   series,
@@ -75,6 +89,7 @@ export function MarketChartUserDrawingLayer({
   renderVersion,
   onSelect,
   onCommit,
+  onDelete,
   onToolComplete,
 }: Props) {
   const overlayRef = useRef<SVGSVGElement | null>(null);
@@ -105,6 +120,10 @@ export function MarketChartUserDrawingLayer({
   };
 
   const createDrawing = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (tool === "select" && event.target === event.currentTarget) {
+      onSelect(null);
+      return;
+    }
     if (!series || !chart || (tool !== "horizontal" && tool !== "trend" && tool !== "measure")) return;
     const point = pointFromEvent(event);
     if (!point) return;
@@ -138,13 +157,15 @@ export function MarketChartUserDrawingLayer({
   const beginDrag = (
     event: ReactPointerEvent<SVGCircleElement | SVGLineElement>,
     drawing: MarketChartUserDrawing,
-    pointIndex: number,
+    pointIndex: number | null,
   ) => {
     if (tool !== "select") return;
+    const anchor = pointFromEvent(event);
+    if (!anchor) return;
     event.preventDefault();
     event.stopPropagation();
     onSelect(drawing.id);
-    dragRef.current = { drawing, pointIndex, pointerId: event.pointerId };
+    dragRef.current = { drawing, pointIndex, anchor, pointerId: event.pointerId };
     setDraft(drawing);
     draftRef.current = drawing;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -156,9 +177,19 @@ export function MarketChartUserDrawingLayer({
     const point = pointFromEvent(event);
     if (!point) return;
     event.preventDefault();
-    const points = [...drag.drawing.points];
-    if (drag.drawing.kind === "horizontal") points[0] = { ...points[0], price: point.price };
-    else points[drag.pointIndex] = point;
+    let points = [...drag.drawing.points];
+    if (drag.pointIndex === null) {
+      const timeDelta = point.time - drag.anchor.time;
+      const priceDelta = point.price - drag.anchor.price;
+      points = drag.drawing.points.map((drawingPoint) => ({
+        time: drawingPoint.time + timeDelta,
+        price: drawingPoint.price + priceDelta,
+      }));
+    } else if (drag.drawing.kind === "horizontal") {
+      points[0] = { ...points[0], price: point.price };
+    } else {
+      points[drag.pointIndex] = point;
+    }
     const nextDraft = { ...drag.drawing, points };
     draftRef.current = nextDraft;
     setDraft(nextDraft);
@@ -186,11 +217,27 @@ export function MarketChartUserDrawingLayer({
 
   const pendingCoordinate = pendingPoint ? coordinateForPoint(pendingPoint) : null;
   const creating = tool === "horizontal" || tool === "trend" || tool === "measure";
+  const selecting = tool === "select";
+
+  const handleDrawingKeyDown = (
+    event: ReactKeyboardEvent<SVGGElement>,
+    drawing: MarketChartUserDrawing,
+  ) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(drawing.id);
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      event.stopPropagation();
+      onDelete(drawing.id);
+    }
+  };
 
   return (
     <svg
       ref={overlayRef}
-      className={`ht-chart-user-drawings ${creating ? "is-creating" : ""}`}
+      className={`ht-chart-user-drawings ${creating ? "is-creating" : ""} ${selecting ? "is-selecting" : ""}`}
       aria-label="User drawing layer"
       data-user-drawing-tool={tool}
       data-user-drawing-count={drawings.length}
@@ -213,11 +260,17 @@ export function MarketChartUserDrawingLayer({
         const x1 = drawing.kind === "horizontal" ? 0 : first.x;
         const x2 = drawing.kind === "horizontal" ? "100%" : second?.x;
         const y2 = drawing.kind === "horizontal" ? first.y : second?.y;
-        const firstPrice = drawing.points[0]?.price ?? 0;
-        const secondPrice = drawing.points[1]?.price ?? firstPrice;
-        const measurement = firstPrice === 0 ? 0 : ((secondPrice - firstPrice) / firstPrice) * 100;
         return (
-          <g key={drawing.id} data-user-drawing-id={drawing.id}>
+          <g
+            key={drawing.id}
+            data-user-drawing-id={drawing.id}
+            role="button"
+            tabIndex={selecting ? 0 : -1}
+            aria-label={drawingLabel(drawing)}
+            aria-pressed={selected}
+            onFocus={() => onSelect(drawing.id)}
+            onKeyDown={(event) => handleDrawingKeyDown(event, drawing)}
+          >
             {drawing.kind === "measure" && second ? (
               <rect
                 x={Math.min(first.x, second.x)}
@@ -234,14 +287,14 @@ export function MarketChartUserDrawingLayer({
               y2={y2}
               className={`ht-chart-user-drawings__line ${selected ? "is-selected" : ""}`}
               aria-label={drawingLabel(drawing)}
-              onPointerDown={(event) => beginDrag(event, drawing, 0)}
+              onPointerDown={(event) => beginDrag(event, drawing, null)}
               onPointerMove={moveDrag}
               onPointerUp={finishDrag}
               onLostPointerCapture={finishDrag}
             />
             {drawing.kind === "measure" && second ? (
               <text x={(first.x + second.x) / 2} y={Math.min(first.y, second.y) - 8} textAnchor="middle" className="ht-chart-user-drawings__label">
-                {measurement >= 0 ? "+" : ""}{measurement.toFixed(2)}%
+                {measurementLabel(drawing)}
               </text>
             ) : null}
             {selected ? drawing.points.map((point, index) => {

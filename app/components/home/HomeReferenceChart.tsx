@@ -57,6 +57,19 @@ type DrawingHistory = {
 
 const EMPTY_DRAWING_HISTORY: DrawingHistory = { past: [], present: [], future: [] };
 
+const DRAWING_TOOLS = [
+  { id: "pan", label: "Pan chart", shortLabel: "Pan", glyph: "↔" },
+  { id: "select", label: "Select and move drawing", shortLabel: "Select", glyph: "↖" },
+  { id: "horizontal", label: "Draw horizontal level", shortLabel: "Horizontal", glyph: "—" },
+  { id: "trend", label: "Draw trendline", shortLabel: "Trendline", glyph: "╱" },
+  { id: "measure", label: "Measure price range", shortLabel: "Price range", glyph: "↕" },
+] as const satisfies ReadonlyArray<{
+  id: MarketChartUserDrawingTool;
+  label: string;
+  shortLabel: string;
+  glyph: string;
+}>;
+
 function validStoredDrawings(value: unknown): MarketChartUserDrawing[] {
   if (!Array.isArray(value)) return [];
   return value.filter((drawing): drawing is MarketChartUserDrawing => {
@@ -89,6 +102,8 @@ export default function HomeReferenceChart({
   const [drawingHistory, setDrawingHistory] = useState<DrawingHistory>(EMPTY_DRAWING_HISTORY);
   const [drawingTool, setDrawingTool] = useState<MarketChartUserDrawingTool>("pan");
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [drawPaletteOpen, setDrawPaletteOpen] = useState(false);
+  const [drawingsVisible, setDrawingsVisible] = useState(true);
   const rangeInitializedRef = useRef(false);
   const loadedDrawingSymbolRef = useRef<string | null>(null);
   const drawMenuRef = useRef<HTMLDetailsElement | null>(null);
@@ -143,6 +158,8 @@ export default function HomeReferenceChart({
       setDrawingHistory({ past: [], present: drawings, future: [] });
       setSelectedDrawingId(null);
       setDrawingTool("pan");
+      setDrawPaletteOpen(false);
+      setDrawingsVisible(true);
     }, 0);
     return () => window.clearTimeout(syncTimer);
   }, [symbol]);
@@ -192,15 +209,15 @@ export default function HomeReferenceChart({
     setVisibleRange(range);
   };
 
-  const commitDrawings = (next: MarketChartUserDrawing[]) => {
+  const commitDrawings = useCallback((next: MarketChartUserDrawing[]) => {
     setDrawingHistory((current) => ({
       past: [...current.past, current.present].slice(-50),
       present: next,
       future: [],
     }));
-  };
+  }, []);
 
-  const undoDrawing = () => {
+  const undoDrawing = useCallback(() => {
     setDrawingHistory((current) => {
       const previous = current.past.at(-1);
       if (!previous) return current;
@@ -211,9 +228,9 @@ export default function HomeReferenceChart({
       };
     });
     setSelectedDrawingId(null);
-  };
+  }, []);
 
-  const redoDrawing = () => {
+  const redoDrawing = useCallback(() => {
     setDrawingHistory((current) => {
       const next = current.future[0];
       if (!next) return current;
@@ -224,18 +241,62 @@ export default function HomeReferenceChart({
       };
     });
     setSelectedDrawingId(null);
-  };
+  }, []);
 
-  const deleteSelectedDrawing = () => {
-    if (!selectedDrawingId) return;
-    commitDrawings(drawingHistory.present.filter((drawing) => drawing.id !== selectedDrawingId));
-    setSelectedDrawingId(null);
-  };
+  const deleteDrawing = useCallback((id: string) => {
+    setDrawingHistory((current) => {
+      const next = current.present.filter((drawing) => drawing.id !== id);
+      if (next.length === current.present.length) return current;
+      return {
+        past: [...current.past, current.present].slice(-50),
+        present: next,
+        future: [],
+      };
+    });
+    setSelectedDrawingId((current) => current === id ? null : current);
+  }, []);
 
-  const chooseDrawingTool = (tool: MarketChartUserDrawingTool) => {
+  const deleteSelectedDrawing = useCallback(() => {
+    if (selectedDrawingId) deleteDrawing(selectedDrawingId);
+  }, [deleteDrawing, selectedDrawingId]);
+
+  const chooseDrawingTool = useCallback((tool: MarketChartUserDrawingTool) => {
     setDrawingTool(tool);
     drawMenuRef.current?.removeAttribute("open");
-  };
+    setDrawPaletteOpen(tool !== "pan");
+  }, []);
+
+  const toggleDrawingsVisible = useCallback(() => {
+    if (drawingsVisible) setSelectedDrawingId(null);
+    setDrawingsVisible((current) => !current);
+  }, [drawingsVisible]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+      const modifier = event.metaKey || event.ctrlKey;
+      if (modifier && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoDrawing();
+        else undoDrawing();
+        return;
+      }
+      if (event.key === "Escape") {
+        setDrawingTool("pan");
+        setSelectedDrawingId(null);
+        setDrawPaletteOpen(false);
+        drawMenuRef.current?.removeAttribute("open");
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedDrawingId) {
+        event.preventDefault();
+        deleteDrawing(selectedDrawingId);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [deleteDrawing, redoDrawing, selectedDrawingId, undoDrawing]);
 
   return (
     <section
@@ -275,15 +336,60 @@ export default function HomeReferenceChart({
             visibleRange={visibleRange}
             latestResetToken={latestResetToken}
             onVisibleCoverageChange={handleVisibleCoverageChange}
-            userDrawings={drawingHistory.present}
+            userDrawings={drawingsVisible ? drawingHistory.present : []}
             userDrawingTool={drawingTool}
             selectedUserDrawingId={selectedDrawingId}
             onSelectUserDrawing={setSelectedDrawingId}
             onCommitUserDrawings={commitDrawings}
+            onDeleteUserDrawing={deleteDrawing}
             onUserDrawingToolComplete={() => setDrawingTool("select")}
           />
         </div>
       )}
+
+      {drawPaletteOpen ? (
+        <div className="htb-chart__drawing-rail" role="toolbar" aria-label="Chart drawing tools">
+          {DRAWING_TOOLS.map((tool) => (
+            <button
+              key={tool.id}
+              type="button"
+              aria-label={tool.label}
+              title={tool.label}
+              aria-pressed={drawingTool === tool.id}
+              onClick={() => chooseDrawingTool(tool.id)}
+            >
+              <span aria-hidden="true">{tool.glyph}</span>
+              <span className="sr-only">{tool.shortLabel}</span>
+            </button>
+          ))}
+          <span className="htb-chart__drawing-rail-separator" aria-hidden="true" />
+          <button
+            type="button"
+            aria-label={drawingsVisible ? "Hide saved drawings" : "Show saved drawings"}
+            title={drawingsVisible ? "Hide saved drawings" : "Show saved drawings"}
+            aria-pressed={!drawingsVisible}
+            onClick={toggleDrawingsVisible}
+          >
+            <span aria-hidden="true">{drawingsVisible ? "◉" : "○"}</span>
+          </button>
+          <button type="button" aria-label="Undo drawing" title="Undo drawing" disabled={drawingHistory.past.length === 0} onClick={undoDrawing}>↶</button>
+          <button type="button" aria-label="Redo drawing" title="Redo drawing" disabled={drawingHistory.future.length === 0} onClick={redoDrawing}>↷</button>
+          <button type="button" aria-label="Delete selected drawing" title="Delete selected drawing" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}>⌫</button>
+          <button
+            type="button"
+            className="htb-chart__drawing-rail-done"
+            aria-label="Close drawing tools and return to chart pan"
+            title="Done drawing"
+            onClick={() => {
+              setDrawingTool("pan");
+              setSelectedDrawingId(null);
+              setDrawPaletteOpen(false);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
 
       {visibleCoverage ? (
         <output className="sr-only" aria-label="Visible chart coverage">
@@ -346,24 +452,25 @@ export default function HomeReferenceChart({
             </div>
           </div>
         </details>
-        <details ref={drawMenuRef} className="htb-chart__draw-menu">
+        <details
+          ref={drawMenuRef}
+          className="htb-chart__draw-menu"
+          onToggle={(event) => {
+            if (event.currentTarget.open) setDrawPaletteOpen(true);
+          }}
+        >
           <summary aria-label={`Drawing tools${drawingHistory.present.length ? `, ${drawingHistory.present.length} saved` : ""}`}>Draw</summary>
           <div className="htb-chart__draw-panel">
             <div role="group" aria-label="Drawing mode">
-              {([
-                ["pan", "Pan"],
-                ["select", "Select"],
-                ["horizontal", "Horizontal"],
-                ["trend", "Trendline"],
-                ["measure", "Price range"],
-              ] as const).map(([tool, label]) => (
-                <button key={tool} type="button" aria-pressed={drawingTool === tool} onClick={() => chooseDrawingTool(tool)}>{label}</button>
+              {DRAWING_TOOLS.map((tool) => (
+                <button key={tool.id} type="button" aria-pressed={drawingTool === tool.id} onClick={() => chooseDrawingTool(tool.id)}>{tool.shortLabel}</button>
               ))}
             </div>
             <div className="htb-chart__draw-history" role="group" aria-label="Drawing history">
               <button type="button" disabled={drawingHistory.past.length === 0} onClick={undoDrawing}>Undo</button>
               <button type="button" disabled={drawingHistory.future.length === 0} onClick={redoDrawing}>Redo</button>
               <button type="button" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}>Delete selected</button>
+              <button type="button" aria-pressed={!drawingsVisible} onClick={toggleDrawingsVisible}>{drawingsVisible ? "Hide drawings" : "Show drawings"}</button>
             </div>
             <p>{drawingHistory.present.length} saved on this device for {symbol}.</p>
           </div>

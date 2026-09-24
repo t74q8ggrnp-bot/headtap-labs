@@ -13,6 +13,7 @@ import {
   AreaSeries,
   CandlestickSeries,
   ColorType,
+  CrosshairMode,
   HistogramSeries,
   LineSeries,
   TickMarkType,
@@ -99,6 +100,7 @@ export type MarketChartCanvasProps = {
   selectedUserDrawingId?: string | null;
   onSelectUserDrawing?: (id: string | null) => void;
   onCommitUserDrawings?: (drawings: MarketChartUserDrawing[]) => void;
+  onDeleteUserDrawing?: (id: string) => void;
   onUserDrawingToolComplete?: () => void;
   /** @deprecated Prefer layerHost. Kept as a compatibility alias. */
   layerSlots?: ChartLayerSlots;
@@ -465,6 +467,7 @@ export function MarketChartCanvas({
   selectedUserDrawingId = null,
   onSelectUserDrawing,
   onCommitUserDrawings,
+  onDeleteUserDrawing,
   onUserDrawingToolComplete,
   className = "",
 }: MarketChartCanvasProps) {
@@ -557,25 +560,40 @@ export function MarketChartCanvas({
       height: Math.max(1, container.clientHeight),
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#71717a",
+        textColor: candlePresentation === "refined" ? "#9297a1" : "#71717a",
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        fontSize: tightPriceScale ? 9 : 10,
+        fontSize: tightPriceScale ? 9 : candlePresentation === "refined" ? 11 : 10,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "rgba(255,255,255,0.035)" },
-        horzLines: { color: "rgba(255,255,255,0.035)" },
+        vertLines: { color: candlePresentation === "refined" ? "rgba(255,255,255,0.045)" : "rgba(255,255,255,0.035)" },
+        horzLines: { color: candlePresentation === "refined" ? "rgba(255,255,255,0.045)" : "rgba(255,255,255,0.035)" },
       },
+      crosshair: candlePresentation === "refined" ? {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: "rgba(249,115,22,0.42)",
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: "#b94f0b",
+        },
+        horzLine: {
+          color: "rgba(255,255,255,0.22)",
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: "#25282e",
+        },
+      } : undefined,
       rightPriceScale: {
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: candlePresentation === "refined" ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.08)",
         minimumWidth: 0,
         scaleMargins: { top: 0.08, bottom: 0.28 },
       },
       timeScale: {
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: candlePresentation === "refined" ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.08)",
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 2,
+        rightOffset: candlePresentation === "refined" ? 5 : 2,
         tickMarkFormatter: (chartTime: Time, tickMarkType: TickMarkType) =>
           formatChartTick(
             chartTime,
@@ -983,6 +1001,7 @@ export function MarketChartCanvas({
       data-chart-interval-seconds={resolvedIntervalSeconds}
       data-chart-visible-range={visibleRange ?? "automatic"}
       data-chart-latest-reset-token={latestResetToken}
+      data-chart-presentation={candlePresentation}
       style={{ height }}
     >
       <div ref={containerRef} className="h-full w-full" data-market-chart-container="true" />
@@ -997,7 +1016,7 @@ export function MarketChartCanvas({
         data-chart-watermark="ht-labs"
       />
       <ChartLayerHost slots={layerHost ?? layerSlots} nativeLayerRef={nativeLayerRef} />
-      {onCommitUserDrawings && onSelectUserDrawing && onUserDrawingToolComplete ? (
+      {onCommitUserDrawings && onSelectUserDrawing && onDeleteUserDrawing && onUserDrawingToolComplete ? (
         <MarketChartUserDrawingLayer
           chart={drawingRuntime.chart}
           series={drawingRuntime.series}
@@ -1007,6 +1026,7 @@ export function MarketChartCanvas({
           renderVersion={drawingRenderVersion}
           onSelect={onSelectUserDrawing}
           onCommit={onCommitUserDrawings}
+          onDelete={onDeleteUserDrawing}
           onToolComplete={onUserDrawingToolComplete}
         />
       ) : null}
