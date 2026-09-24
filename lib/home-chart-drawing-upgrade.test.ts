@@ -37,3 +37,20 @@ test("drawing workspace supports touch, keyboard, whole-object movement, and non
   assert.equal(chart.match(/useLiveMarketView\(/g)?.length, 1);
   assert.doesNotMatch(chart, /fetch\(|XMLHttpRequest/);
 });
+
+test("candles and close line are independent local layers on one loaded chart frame", () => {
+  const chart = source("app/components/home/HomeReferenceChart.tsx");
+  const canvas = source("app/components/market/MarketChartCanvas.tsx");
+
+  assert.match(chart, /useState\(\{ candles: true, line: false \}\)/);
+  assert.match(chart, /aria-label="Price display layers"/);
+  assert.match(chart, /showCandles=\{priceLayers\.candles\}/);
+  assert.match(chart, /showLine=\{priceLayers\.line\}/);
+  assert.match(canvas, /const candlesVisible = showCandles \?\? mode === "candles"/);
+  assert.match(canvas, /const lineVisible = showLine \?\? mode === "graph"/);
+  assert.match(canvas, /topColor: candlesVisible \? `\$\{palette\.line\}00`/);
+  assert.match(canvas, /lastValueVisible: lineVisible && !candlesVisible/);
+  assert.match(chart, /data-chart-provider-requests-on-switch="0"/);
+  assert.match(chart, /preserveEngineOnLocalControls/);
+  assert.doesNotMatch(chart, /fetch\(|XMLHttpRequest/);
+});

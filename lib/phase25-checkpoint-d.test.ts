@@ -29,8 +29,10 @@ test("trade chart controls update one mounted chart engine locally", () => {
   assert.match(chart, /dataset\.chartInitializationCount/);
   assert.match(chart, /const candleSeries = chart\.addSeries\(CandlestickSeries/);
   assert.match(chart, /const graphSeries = chart\.addSeries\(AreaSeries/);
-  assert.match(chart, /visible: mode === "graph"/);
-  assert.match(chart, /visible: mode === "candles"/);
+  assert.match(chart, /visible: lineVisible/);
+  assert.match(chart, /visible: candlesVisible/);
+  assert.match(chart, /showCandles \?\? mode === "candles"/);
+  assert.match(chart, /showLine \?\? mode === "graph"/);
   assert.match(chart, /applyOptions\(\{ visible: showVwap, lastValueVisible: showVwap \}\)/);
   assert.match(chart, /applyOptions\(\{ visible: showVolume \}\)/);
   assert.match(workspaceChart, /data-chart-provider-requests-on-switch="0"/);

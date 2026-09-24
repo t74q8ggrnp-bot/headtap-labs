@@ -11,7 +11,9 @@ test("new chart users start with candles and volume while stored layer preferenc
 
   assert.match(preferences, /vwap: false,[\s\S]*ema9: false,[\s\S]*ema20: false,[\s\S]*volume: true/);
   assert.match(preferences, /setPreferences\(\{ \.\.\.DEFAULTS, \.\.\.stored \}\)/);
-  assert.match(homeChart, /useState<MarketChartMode>\("candles"\)/);
+  assert.match(homeChart, /useState\(\{ candles: true, line: false \}\)/);
+  assert.match(homeChart, /showCandles=\{priceLayers\.candles\}/);
+  assert.match(homeChart, /showLine=\{priceLayers\.line\}/);
   assert.match(homeChart, /const chartLayers = useChartLayerPreferences\(\)/);
   assert.match(homeChart, /onClick=\{\(\) => chartLayers\.toggle\(layer\)\}/);
   assert.match(workspace, /const chartLayers = useChartLayerPreferences\(\)/);
@@ -22,10 +24,9 @@ test("current price keeps its axis value without a full-width guide", () => {
   const candleOptions = canvas.match(/const candleSeries =[\s\S]*?\n    \}\);/)?.[0] ?? "";
   const graphOptions = canvas.match(/const graphSeries =[\s\S]*?\n    \}\);/)?.[0] ?? "";
 
-  for (const options of [candleOptions, graphOptions]) {
-    assert.match(options, /priceLineVisible: false/);
-    assert.match(options, /lastValueVisible: true/);
-  }
+  for (const options of [candleOptions, graphOptions]) assert.match(options, /priceLineVisible: false/);
+  assert.match(candleOptions, /lastValueVisible: candlesVisible/);
+  assert.match(graphOptions, /lastValueVisible: lineVisible && !candlesVisible/);
   assert.doesNotMatch(canvas, /priceLineVisible: true/);
 });
 

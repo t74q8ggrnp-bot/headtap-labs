@@ -80,6 +80,8 @@ export type MarketChartCanvasProps = {
   bars: readonly MarketChartBar[];
   intervalSeconds: number;
   mode: MarketChartMode;
+  showCandles?: boolean;
+  showLine?: boolean;
   accent?: MarketChartAccent;
   height: number | string;
   compact?: boolean;
@@ -446,6 +448,8 @@ export function MarketChartCanvas({
   bars,
   intervalSeconds,
   mode,
+  showCandles,
+  showLine,
   accent = "violet",
   height,
   compact = false,
@@ -498,6 +502,8 @@ export function MarketChartCanvas({
   const [drawingRuntime, setDrawingRuntime] = useState<DrawingRuntime>({ chart: null, series: null });
   const palette = MARKET_CHART_ACCENTS[accent];
   const candlePalette = MARKET_CHART_CANDLE_PALETTES[candlePresentation];
+  const candlesVisible = showCandles ?? mode === "candles";
+  const lineVisible = showLine ?? mode === "graph";
   const resolvedTimeZone = timeZone || "America/New_York";
   const resolvedIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0
     ? intervalSeconds
@@ -642,20 +648,20 @@ export function MarketChartCanvas({
       wickDownColor: candlePalette.wickDown,
       priceLineVisible: false,
       priceLineColor: `${palette.line}66`,
-      lastValueVisible: true,
+      lastValueVisible: candlesVisible,
       priceFormat,
-      visible: mode === "candles",
+      visible: candlesVisible,
     });
     const graphSeries = chart.addSeries(AreaSeries, {
       lineColor: palette.line,
-      topColor: `${palette.line}38`,
+      topColor: candlesVisible ? `${palette.line}00` : `${palette.line}38`,
       bottomColor: `${palette.line}00`,
       lineWidth: 2,
       priceLineVisible: false,
       priceLineColor: `${palette.line}66`,
-      lastValueVisible: true,
+      lastValueVisible: lineVisible && !candlesVisible,
       priceFormat,
-      visible: mode === "graph",
+      visible: lineVisible,
     });
     const priceSeries: PriceSeriesRegistry = {
       graph: graphSeries,
@@ -804,12 +810,13 @@ export function MarketChartCanvas({
     };
     priceSeriesRef.current?.graph.applyOptions({
       lineColor: palette.line,
-      topColor: `${palette.line}38`,
+      topColor: candlesVisible ? `${palette.line}00` : `${palette.line}38`,
       bottomColor: `${palette.line}00`,
       priceLineColor: `${palette.line}66`,
       priceLineVisible: false,
+      lastValueVisible: lineVisible && !candlesVisible,
       priceFormat,
-      visible: mode === "graph",
+      visible: lineVisible,
     });
     priceSeriesRef.current?.candles.applyOptions({
       upColor: candlePalette.up,
@@ -820,18 +827,24 @@ export function MarketChartCanvas({
       wickDownColor: candlePalette.wickDown,
       priceLineColor: `${palette.line}66`,
       priceLineVisible: false,
+      lastValueVisible: candlesVisible,
       priceFormat,
-      visible: mode === "candles",
+      visible: candlesVisible,
     });
     const drawingModeFrame = window.requestAnimationFrame(() => {
-      setDrawingRuntime({ chart: chartRef.current, series: priceSeriesRef.current?.[mode] ?? null });
+      const drawingSeries = candlesVisible
+        ? priceSeriesRef.current?.candles
+        : lineVisible
+          ? priceSeriesRef.current?.graph
+          : priceSeriesRef.current?.candles;
+      setDrawingRuntime({ chart: chartRef.current, series: drawingSeries ?? null });
       setDrawingRenderVersion((version) => version + 1);
     });
     for (const series of indicatorSeriesRef.current.values()) {
       series.applyOptions({ priceFormat });
     }
     return () => window.cancelAnimationFrame(drawingModeFrame);
-  }, [candlePalette.down, candlePalette.up, candlePalette.wickDown, candlePalette.wickUp, mode, palette.line, priceResolution.minMove, tightPriceScale]);
+  }, [candlePalette.down, candlePalette.up, candlePalette.wickDown, candlePalette.wickUp, candlesVisible, lineVisible, palette.line, priceResolution.minMove, tightPriceScale]);
 
   useEffect(() => {
     const locale = navigator.language || "en-US";
@@ -998,6 +1011,8 @@ export function MarketChartCanvas({
       className={`relative w-full ${className}`.trim()}
       data-market-chart-canvas="true"
       data-chart-mode={mode}
+      data-chart-candles-visible={candlesVisible}
+      data-chart-line-visible={lineVisible}
       data-chart-interval-seconds={resolvedIntervalSeconds}
       data-chart-visible-range={visibleRange ?? "automatic"}
       data-chart-latest-reset-token={latestResetToken}

@@ -24,7 +24,7 @@ test("Home chart exposes one quiet control strip with settings inside Layers", (
   assert.equal(chart.match(/className="htb-chart__toolbar"/g)?.length, 1);
   assert.equal(chart.match(/aria-label="Visible chart range"/g)?.length, 1);
   assert.equal(chart.match(/<summary>Layers<\/summary>/g)?.length, 1);
-  assert.match(chart, /aria-label="Chart style"/);
+  assert.match(chart, /aria-label="Price display layers"/);
   assert.match(chart, /Chart layers/);
   assert.match(chart, />\s*Latest\s*</);
   assert.match(chart, /<summary aria-label=\{`Drawing tools/);

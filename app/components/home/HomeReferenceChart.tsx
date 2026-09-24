@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MarketChartCanvas, {
   type ChartLayerSlots,
   type MarketChartIndicatorOverlays,
-  type MarketChartMode,
 } from "@/app/components/market/MarketChartCanvas";
 import type {
   MarketChartUserDrawing,
@@ -94,7 +93,7 @@ export default function HomeReferenceChart({
   const defaultVisibleRange: MarketChartVisibleRange = presentation === "spot-momentum" ? "90m" : "2h";
   const visibleRanges = presentation === "spot-momentum" ? spotMomentumVisibleRanges : standardVisibleRanges;
   const [timeframe, setTimeframe] = useState<MarketChartTimeframe>("1m");
-  const [mode, setMode] = useState<MarketChartMode>("candles");
+  const [priceLayers, setPriceLayers] = useState({ candles: true, line: false });
   const [height, setHeight] = useState(500);
   const [visibleRange, setVisibleRange] = useState<MarketChartVisibleRange>(defaultVisibleRange);
   const [latestResetToken, setLatestResetToken] = useState(0);
@@ -322,7 +321,9 @@ export default function HomeReferenceChart({
           <MarketChartCanvas
             bars={bars}
             intervalSeconds={intervalSeconds}
-            mode={mode}
+            mode={priceLayers.candles ? "candles" : "graph"}
+            showCandles={priceLayers.candles}
+            showLine={priceLayers.line}
             accent="orange"
             height={height}
             compact={height < 400}
@@ -424,13 +425,16 @@ export default function HomeReferenceChart({
         <details className="htb-chart__layers-menu">
           <summary>Layers</summary>
           <div className="htb-chart__layers-panel">
-            <div className="htb-chart__layers-mode" role="group" aria-label="Chart style">
-              {(["candles", "graph"] as const).map((option) => (
+            <div className="htb-chart__layers-mode" role="group" aria-label="Price display layers">
+              {(["candles", "line"] as const).map((option) => (
                 <button
                   key={option}
                   type="button"
-                  aria-pressed={mode === option}
-                  onClick={() => setMode(option)}
+                  aria-pressed={priceLayers[option]}
+                  onClick={() => setPriceLayers((current) => ({
+                    ...current,
+                    [option]: !current[option],
+                  }))}
                 >
                   {option === "candles" ? "Candles" : "Line"}
                 </button>
