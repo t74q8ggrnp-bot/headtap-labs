@@ -61,7 +61,7 @@ test("desktop chart controls render below the chart and expose only functional D
   assert.match(chart, /Price range/);
   assert.match(chart, /mobileQuery\.matches \? "1h" : defaultVisibleRange/);
   assert.match(chart, /presentation === "spot-momentum" \? "90m" : "2h"/);
-  assert.match(chart, /terminalQuery\.matches[\s\S]*terminalChartHeight[\s\S]*terminalChromeHeight/);
+  assert.match(chart, /terminalQuery\.matches[\s\S]*viewportHeight - 125/);
   assert.equal(chart.match(/aria-label="Visible chart range"/g)?.length, 1);
   assert.equal(chart.match(/<summary>Layers<\/summary>/g)?.length, 1);
   assert.match(chart, /Candles/);

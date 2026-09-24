@@ -110,7 +110,6 @@ export default function HomeReferenceChart({
   const rangeInitializedRef = useRef(false);
   const loadedDrawingSymbolRef = useRef<string | null>(null);
   const drawMenuRef = useRef<HTMLDetailsElement | null>(null);
-  const chartSectionRef = useRef<HTMLElement | null>(null);
   const chartLayers = useChartLayerPreferences();
   const layers = chartLayers.preferences;
   const continuityFallback = useMemo(() => ({
@@ -144,10 +143,6 @@ export default function HomeReferenceChart({
     const landscapeQuery = window.matchMedia("(min-width: 768px) and (max-width: 1179px) and (orientation: landscape)");
     const apply = () => {
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-      const terminalChartHeight = chartSectionRef.current?.parentElement?.clientHeight ?? 0;
-      const terminalChromeHeight = 43 + 24
-        + (marketChartCoverageIsSparse(visibleCoverage) ? 34 : 0)
-        + (priceAlerts.latestTriggered ? 32 : 0);
       setHeight(
         embedded
           ? Math.max(360, Math.min(540, viewportHeight - 260))
@@ -156,7 +151,7 @@ export default function HomeReferenceChart({
           : mobileQuery.matches
           ? Math.min(620, Math.max(330, viewportHeight - 302))
           : terminalQuery.matches
-            ? Math.max(360, (terminalChartHeight || viewportHeight - 48) - terminalChromeHeight)
+            ? Math.max(620, viewportHeight - 125)
             : 500,
       );
       if (!rangeInitializedRef.current) {
@@ -170,20 +165,14 @@ export default function HomeReferenceChart({
     landscapeQuery.addEventListener("change", apply);
     window.addEventListener("resize", apply);
     window.visualViewport?.addEventListener("resize", apply);
-    const terminalChart = chartSectionRef.current?.parentElement;
-    const resizeObserver = terminalChart && typeof ResizeObserver !== "undefined"
-      ? new ResizeObserver(apply)
-      : null;
-    if (terminalChart) resizeObserver?.observe(terminalChart);
     return () => {
       mobileQuery.removeEventListener("change", apply);
       terminalQuery.removeEventListener("change", apply);
       landscapeQuery.removeEventListener("change", apply);
       window.removeEventListener("resize", apply);
       window.visualViewport?.removeEventListener("resize", apply);
-      resizeObserver?.disconnect();
     };
-  }, [defaultVisibleRange, embedded, priceAlerts.latestTriggered, visibleCoverage]);
+  }, [defaultVisibleRange, embedded]);
 
   useEffect(() => {
     const storageKey = `htlabs:user-drawings:v1:${symbol}`;
@@ -344,7 +333,6 @@ export default function HomeReferenceChart({
 
   return (
     <section
-      ref={chartSectionRef}
       className="htb-chart"
       aria-label={`${symbol} verified market chart`}
       data-chart-symbol={symbol}

@@ -53,8 +53,6 @@ test("Home, Market, and Paper share the chart, drawings, viewport, and zero-requ
 
   assert.match(chart, /useTerminalWorkspacePreferences/);
   assert.match(chart, /workspacePreferences\.hydrated/);
-  assert.match(chart, /new ResizeObserver\(apply\)/);
-  assert.match(chart, /terminalChartHeight/);
   assert.match(chart, /useTerminalPriceAlerts/);
   assert.match(chart, /viewportKey={`ht-terminal:/);
   assert.match(chart, /data-chart-provider-requests-on-switch="0"/);
