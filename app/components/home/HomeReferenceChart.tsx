@@ -140,14 +140,14 @@ export default function HomeReferenceChart({
   useEffect(() => {
     const mobileQuery = window.matchMedia("(max-width: 767px)");
     const terminalQuery = window.matchMedia("(min-width: 1180px)");
-    const landscapeQuery = window.matchMedia("(min-width: 768px) and (max-width: 1179px) and (orientation: landscape)");
+    const landscapeQuery = window.matchMedia("(orientation: landscape) and (max-height: 600px) and (max-width: 1179px)");
     const apply = () => {
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
       setHeight(
         embedded
           ? Math.max(360, Math.min(540, viewportHeight - 260))
           : landscapeQuery.matches
-          ? Math.max(180, viewportHeight - 164)
+          ? Math.max(220, viewportHeight - 92)
           : mobileQuery.matches
           ? Math.min(620, Math.max(330, viewportHeight - 302))
           : terminalQuery.matches

@@ -4323,3 +4323,233 @@ body:has(.ht-dialog-sheet[open]) {
   .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) svg { width: 17px; height: 17px; }
   .ht-mobile-global-nav:is([data-application-route="home"], [data-application-route="discovery"]) :is(a, button) span:last-child { font-size: 0.54rem; }
 }
+
+/* Final cascade for the mobile alignment pass. These rules intentionally live
+   after the legacy mobile recovery styles so only phone compositions change. */
+.ht-mobile-spot-quick-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0.55rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ht-mobile-spot-quick-facts div { min-width: 0; }
+.ht-mobile-spot-quick-facts dt {
+  color: #777c85;
+  font-size: 0.56rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ht-mobile-spot-quick-facts dd {
+  overflow: hidden;
+  margin: 0.2rem 0 0;
+  color: #f4f4f5;
+  font-size: 0.68rem;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) and (orientation: portrait) {
+  .ht-mobile-home-experience .ht-mobile-home-card--edge {
+    --ht-mobile-spot-chart-height: max(430px, calc(100dvh - 119px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    overflow: visible;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-chart {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border: 0;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-summary {
+    position: absolute;
+    z-index: 28;
+    top: 0.55rem;
+    left: max(0.55rem, env(safe-area-inset-left, 0px));
+    width: min(276px, calc(100% - 1.1rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 10px;
+    background: rgba(6, 8, 10, 0.9);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-summary > div:first-child { padding: 0.48rem 0.6rem 0.12rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary > [data-home-priority="1-ticker-price"] {
+    border: 0;
+    padding: 0.3rem 0.6rem 0.58rem;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-summary > [data-home-priority="1-ticker-price"] > div:first-child {
+    grid-template-columns: minmax(0, 0.78fr) minmax(116px, 1fr);
+    gap: 0.55rem;
+  }
+  .ht-mobile-home-experience .ht-mobile-spot-summary h2 { font-size: 1.65rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary h2 + p { margin-top: 0.3rem; font-size: 0.84rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary [aria-label="HT Agent X modeled targets"] { padding-left: 0.52rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary [aria-label="HT Agent X modeled targets"] > p:last-child,
+  .ht-mobile-home-experience .ht-mobile-spot-badges { display: none; }
+  .ht-mobile-home-experience .ht-mobile-spot-summary [aria-label="HT Agent X modeled targets"] strong { font-size: 0.62rem; }
+  .ht-mobile-home-experience .ht-mobile-spot-details {
+    display: block;
+    grid-column: 1;
+    grid-row: 2;
+    background: #000;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1179px) {
+  :root { --ht-phone-landscape-rail: 48px; }
+  html,
+  body { width: 100%; max-width: 100%; overflow: hidden; }
+  .ht-responsive-shell {
+    width: 100dvw;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0 env(safe-area-inset-right, 0px) 0 0;
+  }
+  .ht-responsive-shell > .ht-desktop-global-header { display: none !important; }
+  .ht-responsive-shell .ht-route-content,
+  .ht-responsive-shell .ht-app-content {
+    width: calc(100dvw - var(--ht-phone-landscape-rail) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    height: 100dvh;
+    min-height: 0;
+    margin-left: calc(var(--ht-phone-landscape-rail) + env(safe-area-inset-left, 0px));
+    overflow: hidden;
+    padding: 0;
+  }
+  .ht-mobile-global-nav {
+    top: 0;
+    right: auto;
+    bottom: 0;
+    left: 0;
+    width: calc(var(--ht-phone-landscape-rail) + env(safe-area-inset-left, 0px));
+    min-height: 100dvh !important;
+    align-items: stretch;
+    border-top: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.09);
+    padding: 0 0 0 env(safe-area-inset-left, 0px);
+    background: #080a0c;
+  }
+  .ht-mobile-global-nav > div,
+  .ht-mobile-global-nav > div > div { width: 100%; height: 100%; min-height: 0; }
+  .ht-mobile-global-nav > div > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: repeat(5, minmax(0, 1fr));
+    padding: 0 !important;
+  }
+  .ht-mobile-global-nav :is(a, button) {
+    width: 100%;
+    min-height: 0 !important;
+    gap: 0 !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+  }
+  .ht-mobile-global-nav :is(a, button) svg { width: 18px; height: 18px; }
+  .ht-mobile-global-nav :is(a, button) span:last-child { display: none; }
+  .ht-mobile-global-nav [aria-current="page"] > span:first-child {
+    top: 50%;
+    left: 0;
+    width: 2px;
+    height: 22px;
+    transform: translateY(-50%);
+  }
+  .ht-responsive-shell:is([data-application-route="home"], [data-application-route="discovery"]) .htb-home,
+  .ht-home-terminal-surface {
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+  }
+  .ht-home-terminal-surface .ht-terminal {
+    --ht-terminal-pane-seam: rgba(148, 163, 184, 0.13);
+    display: grid !important;
+    width: 100%;
+    height: 100dvh;
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) clamp(200px, 30vw, 260px) !important;
+    overflow: hidden;
+    background: #07090b;
+  }
+  .ht-home-terminal-surface .ht-terminal-nav,
+  .ht-home-terminal-surface .ht-terminal-pane--markets,
+  .ht-home-terminal-surface .ht-terminal-pane-handle,
+  .ht-home-terminal-surface .ht-terminal-resizer { display: none !important; }
+  .ht-home-terminal-surface .ht-terminal-workspace {
+    grid-column: 1;
+    grid-row: 1;
+    display: grid !important;
+    width: auto;
+    height: 100dvh;
+    min-width: 0;
+    min-height: 0;
+    grid-template-rows: 48px minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .ht-home-terminal-surface .ht-terminal-instrument,
+  .ht-home-terminal-surface .ht-terminal-chart { display: block !important; min-width: 0; min-height: 0; }
+  .ht-home-terminal-surface .ht-terminal-chart { overflow: hidden; }
+  .ht-responsive-shell[data-application-route="home"] .ht-home-terminal-surface .ht-terminal-pane--intelligence,
+  .ht-responsive-shell[data-application-route="discovery"] .ht-home-terminal-surface .ht-terminal-pane--intelligence {
+    grid-column: 2;
+    grid-row: 1;
+    display: grid !important;
+    width: auto;
+    height: 100dvh;
+    min-width: 0;
+    min-height: 0;
+    grid-template-rows: 42px minmax(0, 1fr);
+    overflow: hidden;
+    border-left: 1px solid var(--ht-terminal-pane-seam);
+    background: #0a0d10;
+  }
+  .ht-responsive-shell:is([data-application-route="home"], [data-application-route="discovery"]) .ht-home-terminal-surface .ht-terminal-pane__header {
+    display: flex !important;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 0.58rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  }
+  .ht-home-terminal-surface .ht-terminal-pane__header h2 { overflow: hidden; font-size: 0.7rem; font-weight: 780; text-overflow: ellipsis; white-space: nowrap; }
+  .ht-home-terminal-surface .ht-terminal-pane__header button { display: none; }
+  .ht-home-terminal-surface .ht-terminal-pane__body {
+    display: block !important;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .ht-home-terminal-surface .ht-terminal-pane__body::-webkit-scrollbar { display: none; }
+  .ht-home-terminal-surface .ht-home-markets-launcher { display: inline-flex !important; }
+  .ht-home-terminal-surface .ht-home-intelligence-launcher { display: none !important; }
+  .ht-home-terminal-surface .htb-chart__toolbar { min-height: 42px; height: 42px; padding-block: 0; }
+  .ht-home-terminal-surface .htb-chart button,
+  .ht-home-terminal-surface .htb-chart__range,
+  .ht-home-terminal-surface .htb-chart__range select,
+  .ht-home-terminal-surface .htb-chart__layers-menu > summary { min-height: 38px; }
+  .ht-home-terminal-surface .ht-home-spot-intelligence { min-height: 0; padding: 0.62rem 0.58rem 1rem; }
+  .ht-home-terminal-surface .ht-home-spot-intelligence__quote h2 { font-size: 1.85rem; }
+}
+
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 720px) {
+  .ht-home-terminal-surface .ht-terminal { grid-template-columns: minmax(0, 1fr) 190px !important; }
+  .ht-home-terminal-surface .ht-terminal-home-instrument { padding-inline: 0.45rem; }
+  .ht-home-terminal-surface .ht-terminal-home-instrument .htb-symbol-line { gap: 0.36rem; }
+  .ht-home-terminal-surface .ht-terminal-home-instrument .htb-symbol-line h1 { font-size: 1.15rem; }
+  .ht-home-terminal-surface .ht-home-spot-intelligence__read,
+  .ht-home-terminal-surface .ht-home-spot-prox-pulse p { display: none; }
+}

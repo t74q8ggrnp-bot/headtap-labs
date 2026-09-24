@@ -835,7 +835,10 @@ export default function HomeClient({
 
   useEffect(() => {
     if (surface !== "intelligence") return;
-    const query = window.matchMedia("(min-width: 1180px)");
+    const query = window.matchMedia([
+      "(min-width: 1180px)",
+      "((orientation: landscape) and (max-height: 600px) and (max-width: 1179px))",
+    ].join(", "));
     const apply = () => setHomeComposition(query.matches ? "desktop" : "compact");
     apply();
     query.addEventListener("change", apply);

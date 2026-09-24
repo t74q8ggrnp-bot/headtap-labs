@@ -38,7 +38,7 @@ test("Market leads with exact-ticker Agent X while intelligence remains progress
   assert.match(surface, /const \[compactIntelligenceOpen, setCompactIntelligenceOpen\] = useState\(false\)/);
   assert.match(surface, /title="HT Intelligence"/);
   assert.match(surface, /open=\{compactLayout === "compact" && compactIntelligenceOpen\}/);
-  assert.match(surface, /intelligence=\{compactLayout === "desktop" \? intelligence : null\}/);
+  assert.match(surface, /intelligence=\{compactLayout === "desktop" \|\| compactLayout === "landscape" \? intelligence : null\}/);
   assert.match(surface, /<summary>Levels and risk<\/summary>/);
   assert.match(surface, /<summary>Pro X evidence<\/summary>/);
   assert.match(surface, /aria-label=\{`\$\{symbol\} HT Agent X setup`\}/);
@@ -90,7 +90,7 @@ test("compact portrait and landscape keep content inside the visual viewport", (
   const css = source("app/globals.css");
 
   assert.match(chart, /const viewportHeight = window\.visualViewport\?\.height \?\? window\.innerHeight/);
-  assert.match(chart, /landscapeQuery\.matches[\s\S]*viewportHeight - 164[\s\S]*mobileQuery\.matches[\s\S]*viewportHeight - 302/);
+  assert.match(chart, /landscapeQuery\.matches[\s\S]*viewportHeight - 92[\s\S]*mobileQuery\.matches[\s\S]*viewportHeight - 302/);
   assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1179px\) and \(orientation: landscape\)[\s\S]*\.ht-home-terminal-surface \{ height: 100dvh; min-height: 0; overflow: hidden; \}/);
   assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.ht-terminal-pane--intelligence[\s\S]*display: none/);
   assert.match(css, /\.ht-home-intelligence-dialog \.ht-dialog-sheet__content \{ min-height: 0; overflow-y: auto;/);

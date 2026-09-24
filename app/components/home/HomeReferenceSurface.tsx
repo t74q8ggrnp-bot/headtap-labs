@@ -114,7 +114,7 @@ export default function HomeReferenceSurface({
   onSelect,
   onToggleWatchlist,
 }: Props) {
-  const [compactLayout, setCompactLayout] = useState<"pending" | "compact" | "desktop">("pending");
+  const [compactLayout, setCompactLayout] = useState<"pending" | "compact" | "landscape" | "desktop">("pending");
   const [compactIntelligenceOpen, setCompactIntelligenceOpen] = useState(false);
   const [marketBrowserOpen, setMarketBrowserOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -123,15 +123,24 @@ export default function HomeReferenceSurface({
   const marketView = useLiveMarketView(symbol);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 1179px)");
+    const desktopQuery = window.matchMedia("(min-width: 1180px)");
+    const landscapeQuery = window.matchMedia("(orientation: landscape) and (max-height: 600px) and (max-width: 1179px)");
     const apply = () => {
-      const next = query.matches ? "compact" : "desktop";
+      const next = desktopQuery.matches
+        ? "desktop"
+        : landscapeQuery.matches
+          ? "landscape"
+          : "compact";
       setCompactLayout(next);
-      if (next === "desktop") setCompactIntelligenceOpen(false);
+      if (next !== "compact") setCompactIntelligenceOpen(false);
     };
     apply();
-    query.addEventListener("change", apply);
-    return () => query.removeEventListener("change", apply);
+    desktopQuery.addEventListener("change", apply);
+    landscapeQuery.addEventListener("change", apply);
+    return () => {
+      desktopQuery.removeEventListener("change", apply);
+      landscapeQuery.removeEventListener("change", apply);
+    };
   }, []);
 
   useEffect(() => {
@@ -473,7 +482,7 @@ export default function HomeReferenceSurface({
         )}
         instrumentHeader={instrumentHeader}
         chart={chart}
-        intelligence={compactLayout === "desktop" ? intelligence : null}
+        intelligence={compactLayout === "desktop" || compactLayout === "landscape" ? intelligence : null}
         intelligenceTitle={experience === "market" ? "HT Agent X" : "HT Intelligence"}
       />
       <AccessibleDialogSheet

@@ -14,32 +14,30 @@ test("portrait Home reserves the first screen for the compact header, chart, con
   assert.match(css, /env\(safe-area-inset-bottom/);
 });
 
-test("landscape Home uses the chart workspace without a permanent Intelligence rail", () => {
+test("landscape Home uses the chart workspace with the approved compact Intelligence rail", () => {
   const css = source("app/globals.css");
 
-  assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1179px\) and \(orientation: landscape\)[\s\S]*grid-template-columns: 52px minmax\(0, 1fr\)/);
-  assert.match(css, /@media \(max-width: 1179px\)[\s\S]*\.ht-home-terminal-surface \.ht-terminal-pane--intelligence[\s\S]*display: none/);
-  assert.match(css, /\.ht-home-intelligence-dialog\[data-presentation="sheet"\][\s\S]*width: min\(390px, 46vw\)/);
+  const landscape = css.slice(css.indexOf("Final cascade for the mobile alignment pass"));
+  assert.match(landscape, /@media \(orientation: landscape\) and \(max-height: 600px\) and \(max-width: 1179px\)/);
+  assert.match(landscape, /grid-template-columns: minmax\(0, 1fr\) clamp\(200px, 30vw, 260px\)/);
+  assert.match(landscape, /\.ht-terminal-pane--intelligence \{[\s\S]*display: grid !important/);
+  assert.match(landscape, /\.ht-terminal-pane__body \{[\s\S]*overflow-y: auto/);
 });
 
-test("short landscape uses the mobile Home without relying on fragile pointer detection", () => {
+test("short landscape uses the terminal Home without relying on fragile pointer detection", () => {
   const css = source("app/globals.css");
-  const mobile = source("app/components/mobile/MobileExperience.tsx");
-  const card = source("app/components/opportunity/MobileSpotMomentumCard.tsx");
-  const landscape = css.slice(css.indexOf("Home uses the mobile composition on short, touch-first landscape viewports"));
+  const home = source("app/HomeClient.tsx");
+  const surface = source("app/components/home/HomeReferenceSurface.tsx");
+  const landscape = css.slice(css.indexOf("Final cascade for the mobile alignment pass"));
 
-  assert.match(mobile, /ht-mobile-home-experience/);
-  assert.doesNotMatch(mobile, /ht-mobile-home-experience[^\n]*md:hidden/);
   assert.match(landscape, /\(max-height: 600px\)/);
   assert.match(landscape, /\(orientation: landscape\)/);
   assert.doesNotMatch(landscape, /\(hover: none\)|\(pointer: coarse\)/);
-  assert.match(landscape, /\.ht-desktop-global-header,[\s\S]*\.ht-simplified-ui > \.relative\.z-10[\s\S]*display: none/);
-  assert.match(landscape, /\.ht-mobile-home-experience \{[\s\S]*display: flex/);
-  assert.match(landscape, /grid-template-columns: clamp\(240px, 31vw, 272px\) minmax\(0, 1fr\)/);
-  assert.match(landscape, /--ht-mobile-spot-chart-height: 100%/);
-  assert.match(card, /className="ht-mobile-spot-summary"/);
-  assert.match(card, /className="ht-mobile-spot-chart/);
-  assert.equal(card.match(/<HeroPriceChart/g)?.length, 1);
+  assert.match(home, /\(orientation: landscape\) and \(max-height: 600px\) and \(max-width: 1179px\)/);
+  assert.match(surface, /compactLayout === "landscape"/);
+  assert.match(landscape, /--ht-phone-landscape-rail: 48px/);
+  assert.match(landscape, /grid-template-rows: repeat\(5, minmax\(0, 1fr\)\)/);
+  assert.match(landscape, /height: 100dvh/);
 });
 
 test("rotation resizes the existing chart without changing the selected visible range", () => {

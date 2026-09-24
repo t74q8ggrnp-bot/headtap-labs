@@ -86,7 +86,7 @@ test("Home keeps one chart and removes inline mobile discovery and intelligence 
   assert.equal(surface.match(/<HomeReferenceChart/g)?.length, 1);
   assert.equal(chart.match(/<MarketChartCanvas/g)?.length, 1);
   assert.doesNotMatch(surface, /ht-home-market-launcher--flow/);
-  assert.match(surface, /intelligence=\{compactLayout === "desktop" \? intelligence : null\}/);
+  assert.match(surface, /intelligence=\{compactLayout === "desktop" \|\| compactLayout === "landscape" \? intelligence : null\}/);
 });
 
 test("Home discloses sparse one-minute tape from the existing chart frame", () => {

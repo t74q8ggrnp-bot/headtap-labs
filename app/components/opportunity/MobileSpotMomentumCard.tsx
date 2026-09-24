@@ -119,7 +119,17 @@ export default function MobileSpotMomentumCard({
               {displayQuote ? marketView.label : opportunity.freshnessLabel}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-2">
+          <dl className="ht-mobile-spot-quick-facts" aria-label={`${opportunity.ticker} opportunity summary`}>
+            <div>
+              <dt>HT score</dt>
+              <dd>{Math.round(opportunity.opportunityScore)}</dd>
+            </div>
+            <div>
+              <dt>Setup</dt>
+              <dd>{opportunity.stage}</dd>
+            </div>
+          </dl>
+          <div className="ht-mobile-spot-badges flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-black text-zinc-400">{opportunity.stage}</span>
             <span className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black ${view.positionLabel === "EARLY" ? "border-green-400/20 bg-green-500/[0.06] text-green-400" : "border-zinc-700 text-zinc-600"}`}>
               {view.positionLabel}
