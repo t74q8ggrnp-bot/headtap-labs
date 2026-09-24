@@ -326,24 +326,6 @@ body {
 .ht-home-spot-targets p span { color: #747984; font-size: 0.58rem; font-weight: 690; }
 .ht-home-spot-targets p strong { color: #ff8a16; font-size: 0.86rem; font-weight: 820; }
 .ht-home-spot-targets > small { display: block; margin-top: 0.5rem; color: #6f747e; font-size: 0.59rem; font-weight: 620; line-height: 1.35; }
-.ht-home-spot-targets > .ht-home-spot-targets__meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.7rem;
-  margin-top: 0.55rem;
-  color: #747984;
-  font-size: 0.56rem;
-  font-weight: 680;
-}
-.ht-home-spot-targets__meta button {
-  min-height: 28px;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: #fb923c;
-  font: 760 0.57rem/28px var(--font-ht-terminal), sans-serif;
-}
 .ht-home-spot-intelligence__read,
 .ht-home-spot-intelligence__withheld { margin: 0 0 0.85rem; color: #8f949e; font-size: 0.67rem; font-weight: 620; line-height: 1.55; }
 .ht-home-spot-intelligence__withheld { color: #777c85; }
