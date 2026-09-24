@@ -15,7 +15,7 @@ test("Market URL state is the exact ticker authority without a Canonical hero fa
   assert.doesNotMatch(home, /selectedOpportunity\s*\?\?\s*apiMomentum/);
   assert.match(surface, /opportunity\?\.ticker === symbol/);
   assert.match(surface, /<HomeReferenceChart symbol=\{symbol\}/);
-  assert.match(surface, /<HomeTradePlan symbol=\{symbol\}/);
+  assert.match(surface, /<HomeTradePlan[\s\S]*?symbol=\{symbol\}/);
   assert.match(surface, /href=\{`\/paper\?symbol=\$\{encodeURIComponent\(symbol\)\}`\}/);
   assert.match(surface, /data-workspace-symbol=\{symbol\}/);
 });

@@ -33,6 +33,7 @@ test("Home chart exposes one quiet control strip with settings inside Layers", (
 
 test("Market leads with exact-ticker Agent X while intelligence remains progressive", () => {
   const surface = source("app/components/home/HomeReferenceSurface.tsx");
+  const marketAnalysis = source("app/components/agent/AgentMarketAnalysisCard.tsx");
 
   assert.match(surface, /const \[compactIntelligenceOpen, setCompactIntelligenceOpen\] = useState\(false\)/);
   assert.match(surface, /title="HT Intelligence"/);
@@ -41,6 +42,10 @@ test("Market leads with exact-ticker Agent X while intelligence remains progress
   assert.match(surface, /<summary>Levels and risk<\/summary>/);
   assert.match(surface, /<summary>Pro X evidence<\/summary>/);
   assert.match(surface, /aria-label=\{`\$\{symbol\} HT Agent X setup`\}/);
+  assert.match(surface, /marketAnalysis=\{experience === "market"/);
+  assert.doesNotMatch(marketAnalysis, /\/api\/market-chart|useLiveMarketView/);
+  assert.match(marketAnalysis, /shared provider-backed chart frame/);
+  assert.match(marketAnalysis, /No Canonical rank, Agent target, entry, stop, Paper eligibility, or execution authority is implied/);
   assert.match(surface, /<summary>HT Intelligence<\/summary>/);
   assert.match(surface, /intelligenceTitle=\{experience === "market" \? "HT Agent X" : "HT Intelligence"\}/);
   assert.match(surface, /<summary>Full evidence<\/summary>/);

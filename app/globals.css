@@ -3417,6 +3417,76 @@ body:has(.ht-dialog-sheet[open]) {
   .ht-terminal-pane--intelligence .htb-evidence summary { padding: 0.68rem 0.72rem; font-size: 0.66rem; }
 }
 
+.ht-agent-market-read {
+  display: grid;
+  gap: 0.62rem;
+  border: 1px solid rgba(96, 165, 250, 0.16);
+  border-radius: 10px;
+  padding: 0.82rem;
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.07), rgba(124, 58, 237, 0.035) 58%, rgba(0, 0, 0, 0));
+}
+.ht-agent-market-read__heading,
+.ht-agent-market-read__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+.ht-agent-market-read__eyebrow {
+  color: #67e8f9;
+  font-size: 0.56rem;
+  font-weight: 850;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.ht-agent-market-read h3 {
+  margin-top: 0.24rem;
+  color: #e9e7ff;
+  font-size: 0.82rem;
+  font-weight: 830;
+  line-height: 1.28;
+}
+.ht-agent-market-read__state,
+.ht-agent-market-read__title-row > span {
+  flex: 0 0 auto;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 999px;
+  padding: 0.24rem 0.4rem;
+  color: #93c5fd;
+  font-size: 0.5rem;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  text-transform: uppercase;
+}
+.ht-agent-market-read__state.is-strengthening { border-color: rgba(52, 211, 153, 0.24); color: #34d399; }
+.ht-agent-market-read__state.is-weakening { border-color: rgba(251, 113, 133, 0.24); color: #fb7185; }
+.ht-agent-market-read__state.is-limited { border-color: rgba(251, 146, 60, 0.24); color: #fb923c; }
+.ht-agent-market-read__copy {
+  color: #b5b7bf;
+  font-size: 0.66rem;
+  font-weight: 620;
+  line-height: 1.46;
+}
+.ht-agent-market-read__facts { display: grid; gap: 0.34rem; }
+.ht-agent-market-read__facts > div { display: flex; justify-content: space-between; gap: 0.6rem; }
+.ht-agent-market-read__facts dt { color: #858a94; font-size: 0.6rem; }
+.ht-agent-market-read__facts dd { color: #e7e8eb; font-size: 0.61rem; font-weight: 760; text-align: right; }
+.ht-agent-market-read__receipt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  padding-top: 0.48rem;
+  color: #747984;
+  font-size: 0.53rem;
+  font-weight: 650;
+}
+.ht-agent-market-read__boundary,
+.ht-agent-market-read__service-note { color: #9a9da5; font-size: 0.58rem; font-weight: 620; line-height: 1.42; }
+.ht-agent-market-read__service-note { color: #f59e8b; }
+.ht-agent-market-read__link { color: #fb923c; font-size: 0.61rem; font-weight: 800; }
+
 @media (prefers-reduced-motion: reduce) {
   .ht-terminal *,
   .ht-terminal *::before,

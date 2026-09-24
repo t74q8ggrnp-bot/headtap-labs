@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import type { HtAgentTargetCalibrationSummary, HtTradePlan } from "@/lib/ht-agent/contracts";
+import type { MarketChartDisplayQuote, MarketChartResponse } from "@/lib/market-chart";
+import AgentMarketAnalysisCard from "./AgentMarketAnalysisCard";
 import HtTradePlanCard from "./HtTradePlanCard";
 
 type TradePlanFeed = {
@@ -30,12 +32,18 @@ export default function HomeTradePlan({
   onPlanChange,
   onPlanStateChange,
   showCard = true,
+  marketAnalysis,
 }: {
   symbol: string;
   compact?: boolean;
   onPlanChange?: (plan: HtTradePlan | null) => void;
   onPlanStateChange?: (state: HomeTradePlanState) => void;
   showCard?: boolean;
+  marketAnalysis?: {
+    chart: MarketChartResponse | null;
+    quote: MarketChartDisplayQuote | null;
+    label: string;
+  };
 }) {
   const [feed, setFeed] = useState<TradePlanFeed | null>(null);
   const [signedIn, setSignedIn] = useState(false);
@@ -109,19 +117,37 @@ export default function HomeTradePlan({
 
   if (selected) return <HtTradePlanCard plan={selected.plan} current={selected.current} compact={compact} calibration={feed?.targetCalibration ?? null} />;
 
+  if (marketAnalysis && planState !== "loading") {
+    return (
+      <AgentMarketAnalysisCard
+        symbol={symbol}
+        chart={marketAnalysis.chart}
+        quote={marketAnalysis.quote}
+        marketLabel={marketAnalysis.label}
+        planServiceError={planState === "error" ? error : ""}
+      />
+    );
+  }
+
   return (
     <section className="rounded-2xl border border-violet-400/15 bg-violet-500/[0.035] px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[8px] font-black uppercase tracking-[0.22em] text-cyan-300">HT Agent X Setup Forming</p>
-          <p className="mt-1 text-sm font-black text-violet-300">ANALYSIS FORMING</p>
+          <p className="text-[8px] font-black uppercase tracking-[0.22em] text-cyan-300">
+            {marketAnalysis ? "HT Agent X Plan Check" : "HT Agent X Setup Forming"}
+          </p>
+          <p className="mt-1 text-sm font-black text-violet-300">
+            {marketAnalysis ? "CHECKING CANONICAL PLAN" : "ANALYSIS FORMING"}
+          </p>
         </div>
         <Link href="/agent" className="rounded-lg border border-violet-400/20 px-3 py-2 text-[9px] font-black text-violet-300">Open HT Agent</Link>
       </div>
       <p className="mt-2 text-[10px] font-semibold leading-4 text-zinc-500">
         {!signedIn
           ? "Sign in to create your isolated paper-only decision profile."
-          : error || `HT Agent has not persisted a current aligned plan for ${symbol}. The page will not invent one.`}
+          : error || (marketAnalysis
+            ? `Checking for a current aligned Canonical Agent plan for ${symbol}.`
+            : `HT Agent has not persisted a current aligned plan for ${symbol}. The page will not invent one.`)}
       </p>
     </section>
   );

@@ -344,7 +344,16 @@ export default function HomeReferenceSurface({
       <div className="htb-intelligence">
       <h2 className="sr-only">HT Intelligence</h2>
       <section className="htb-agent-primary" aria-label={`${symbol} HT Agent X setup`}>
-        <HomeTradePlan symbol={symbol} compact />
+        <HomeTradePlan
+          symbol={symbol}
+          key={symbol}
+          compact
+          marketAnalysis={experience === "market" ? {
+            chart: marketView.chart,
+            quote: marketView.quote,
+            label: marketView.label,
+          } : undefined}
+        />
       </section>
       <details className="htb-intel-disclosure htb-canonical-summary">
         <summary>HT Intelligence</summary>
