@@ -319,6 +319,9 @@ body {
 .ht-home-spot-targets h3 { color: #777c86; font-size: 0.58rem; font-weight: 780; letter-spacing: 0.12em; text-transform: uppercase; }
 .ht-home-spot-intelligence__facts dd { margin: 0.25rem 0 0; color: #e4e4e7; font-size: 0.76rem; font-weight: 760; text-transform: capitalize; }
 .ht-home-spot-intelligence__facts div:first-child dd { color: #b59cff; font-size: 1.35rem; font-weight: 830; }
+.ht-home-spot-continuity { display: grid; gap: 0.2rem; margin: 0; padding: 0.65rem 0 0; }
+.ht-home-spot-continuity strong { color: #d8dde5; font-size: 0.61rem; font-weight: 780; }
+.ht-home-spot-continuity span { color: #777d87; font-size: 0.58rem; font-weight: 640; line-height: 1.4; }
 .ht-home-spot-targets { padding: 0.9rem 0; }
 .ht-home-spot-targets h3 { margin: 0; color: #79b5ff; }
 .ht-home-spot-targets > div { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-top: 0.55rem; }

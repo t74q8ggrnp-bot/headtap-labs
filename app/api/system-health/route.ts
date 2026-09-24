@@ -3626,6 +3626,47 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
+    const continuityResult = await supabase.rpc("ht_session_continuity_health");
+    if (continuityResult.error) throw continuityResult.error;
+    const continuity = continuityResult.data && typeof continuityResult.data === "object"
+      ? continuityResult.data as Record<string, unknown>
+      : null;
+    const boundaryReady =
+      continuity?.version === "ht-session-continuity-health-v1" &&
+      continuity?.modelVersion === "ht-session-continuity-shadow-v1" &&
+      continuity?.authority === "research_only" &&
+      continuity?.primaryProductImpact === false &&
+      Number(continuity?.providerRequestsAdded) === 0;
+    const runs = continuity?.runs && typeof continuity.runs === "object"
+      ? continuity.runs as Record<string, unknown>
+      : {};
+    const failed = Number(runs.failed ?? 0);
+    checks.push({
+      name: "session_continuity_research",
+      ok: boundaryReady && failed === 0,
+      blocking: false,
+      message: !boundaryReady
+        ? "Session Continuity is missing its zero-authority research boundary; apply migration 0063."
+        : failed > 0
+          ? `Session Continuity preserved ${failed} failed persistence receipts for review.`
+          : `Session Continuity is logging Before the Crowd graduation outcomes at 15m, 30m, 45m, 60m, market open, and open +30m with zero added provider requests.`,
+      detail: continuity,
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "session_continuity_research",
+      ok: false,
+      blocking: false,
+      message: "Session Continuity research observability is unavailable; apply migration 0063.",
+      detail: getErrorMessage(
+        err,
+        "Session Continuity health query failed.",
+      ),
+    });
+  }
+
+  try {
+    if (!supabase) throw new Error("Supabase unavailable");
     const [infrastructureResult, releaseResult, acceptanceResult, workerResult] = await Promise.all([
       supabase.rpc("ht_agent_phase2_visual_plan_infrastructure_health"),
       supabase.rpc("ht_agent_phase2_visual_plan_release_health"),

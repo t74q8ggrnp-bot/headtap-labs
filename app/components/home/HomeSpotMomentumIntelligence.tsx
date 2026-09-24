@@ -24,6 +24,11 @@ const targetPrice = (value: number | null | undefined) =>
 
 const percentChange = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 
+const entryPrice = (plan: HtTradePlan | null) =>
+  plan?.entryZone
+    ? `${formatMarketPrice(plan.entryZone.low)}–${formatMarketPrice(plan.entryZone.high)}`
+    : "Forming";
+
 export default function HomeSpotMomentumIntelligence({
   opportunity,
   framework,
@@ -43,6 +48,7 @@ export default function HomeSpotMomentumIntelligence({
     ? (prox.pulse?.state ?? prox.status).replaceAll("_", " ")
     : "Unavailable";
   const evidence = opportunity.signals.slice(0, 5);
+  const continuity = opportunity.sessionContinuity;
   const riskMeasured = framework !== null || opportunity.explosionAssessment?.scenarioBands?.structuralRisk !== null;
   const distance = (target: number | null | undefined) => (
     typeof target === "number" && displayPrice !== null && displayPrice > 0
@@ -71,11 +77,24 @@ export default function HomeSpotMomentumIntelligence({
         <div><dt>Setup</dt><dd>{opportunity.stage.replaceAll("_", " ")}</dd></div>
       </dl>
 
-      <section className="ht-home-spot-targets" aria-label="HT Agent X targets">
-        <h3>HT Agent X targets</h3>
+      {continuity ? (
+        <p className="ht-home-spot-continuity">
+          <strong>Session continuity · {continuity.label}</strong>
+          <span>
+            {continuity.previousClose === null
+              ? continuity.summary
+              : `Prev close ${formatMarketPrice(continuity.previousClose)}${continuity.gapPercent === null ? "" : ` · Gap ${percentChange(continuity.gapPercent)}`}${continuity.gapRetentionPercent === null ? "" : ` · ${continuity.gapRetentionPercent.toFixed(0)}% retained`}`}
+          </span>
+        </p>
+      ) : null}
+
+      <section className="ht-home-spot-targets" aria-label="HT Agent X plan">
+        <h3>HT Agent X plan</h3>
         <div>
+          <p><span>Entry zone</span><strong className="ht-tabular-numbers">{entryPrice(plan)}</strong></p>
           <p><span>Target 1 {distance(plan?.targetOne) ? `· ${distance(plan?.targetOne)}` : ""}</span><strong className="ht-tabular-numbers">{targetPrice(plan?.targetOne)}</strong></p>
           <p><span>Target 2 {distance(plan?.targetTwo) ? `· ${distance(plan?.targetTwo)}` : ""}</span><strong className="ht-tabular-numbers">{targetPrice(plan?.targetTwo)}</strong></p>
+          <p><span>Invalidation</span><strong className="ht-tabular-numbers">{targetPrice(plan?.invalidation)}</strong></p>
         </div>
         {planState === "available" ? null : (
           <small>

@@ -6,6 +6,7 @@ import {
   MOMENTUM_RADAR_COUNT,
   MOMENTUM_RUNNER_UP_COUNT,
 } from "@/lib/opportunity-model";
+import type { SessionContinuityReceipt } from "@/lib/session-continuity";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -54,6 +55,7 @@ type OpportunitySnapshot = {
     scores?: { marketConfirmation?: unknown } | null;
   } | null;
   proxChallenger?: unknown;
+  sessionContinuity?: SessionContinuityReceipt | null;
 };
 type DisplayedOpportunity = {
   ticker: string;
@@ -67,6 +69,7 @@ type DisplayedOpportunity = {
   engineVersion: string | null;
   proxState: string | null;
   proxConfirmation: number | null;
+  sessionContinuity: SessionContinuityReceipt | null;
   decisionSnapshot: Record<string, unknown>;
 };
 type DecisionFrameSnapshot = {
@@ -192,6 +195,7 @@ function compactDecisionSnapshot(opportunity: OpportunitySnapshot) {
         }
       : null,
     proxChallenger: opportunity.proxChallenger ?? null,
+    sessionContinuity: opportunity.sessionContinuity ?? null,
   };
 }
 
@@ -228,6 +232,7 @@ function mapDisplayed(
     proxConfirmation: finiteNumber(
       opportunity.proxIntelligence?.scores?.marketConfirmation,
     ),
+    sessionContinuity: opportunity.sessionContinuity ?? null,
     decisionSnapshot: {
       ...compactDecisionSnapshot(opportunity),
       decisionFrame,
@@ -376,6 +381,11 @@ async function collect() {
   let inserted = 0;
   let roleTransitions = 0;
   const observations: Array<Record<string, unknown>> = [];
+  const continuityCandidates: Array<{
+    ticker: string;
+    ledgerId: string;
+    receipt: Record<string, unknown>;
+  }> = [];
 
   for (const item of displayed) {
     const existing = existingByTicker.get(
@@ -518,6 +528,25 @@ async function collect() {
       prox_confirmation: item.proxConfirmation,
       decision_snapshot: item.decisionSnapshot,
     });
+    if (
+      item.strategy === "before_the_crowd" &&
+      item.sessionContinuity &&
+      item.sessionContinuity.state !== "unavailable" &&
+      item.sessionContinuity.previousClose !== null
+    ) {
+      const snapshot = item.decisionSnapshot;
+      continuityCandidates.push({
+        ticker: item.ticker,
+        ledgerId,
+        receipt: {
+          ...item.sessionContinuity,
+          sessionOpenPrice: snapshot.sessionOpenPrice ?? null,
+          sessionHighPrice: snapshot.sessionHighPrice ?? null,
+          momentumScore: snapshot.momentumScore ?? null,
+          proxState: item.proxState,
+        },
+      });
+    }
   }
 
   if (observations.length > 0) {
@@ -574,6 +603,60 @@ async function collect() {
       `Opportunity collection receipt failed: ${collectionRunError.message}`,
     );
   }
+
+  let continuityPersisted = 0;
+  let continuityReconciled = 0;
+  const continuityErrors: Array<Record<string, string>> = [];
+  for (const candidate of continuityCandidates) {
+    const { error } = await supabase.rpc(
+      "ht_record_session_continuity_episode",
+      {
+        p_trading_date: tradingDate,
+        p_ticker: candidate.ticker,
+        p_source_before_crowd_ledger_id: candidate.ledgerId,
+        p_receipt: candidate.receipt,
+      },
+    );
+    if (error) {
+      continuityErrors.push({
+        ticker: candidate.ticker,
+        message: error.message,
+      });
+    } else {
+      continuityPersisted++;
+    }
+  }
+  const continuityReconcile = await supabase.rpc(
+    "ht_reconcile_session_continuity_outcomes",
+    { p_trading_date: tradingDate, p_evaluated_at: observedAt },
+  );
+  if (continuityReconcile.error) {
+    continuityErrors.push({
+      ticker: "*",
+      message: continuityReconcile.error.message,
+    });
+  } else if (
+    continuityReconcile.data &&
+    typeof continuityReconcile.data === "object"
+  ) {
+    continuityReconciled = Number(
+      (continuityReconcile.data as Record<string, unknown>)
+        .reconciledEpisodes ?? 0,
+    );
+  }
+  const continuityRunReceipt = await supabase.rpc(
+    "ht_record_session_continuity_run",
+    {
+      p_observation_minute: observationMinute,
+      p_trading_date: tradingDate,
+      p_expected: continuityCandidates.length,
+      p_persisted: continuityPersisted,
+      p_failed: continuityCandidates.length - continuityPersisted,
+      p_reconciled: continuityReconciled,
+      p_errors: continuityErrors,
+    },
+  );
+  const continuityResearchAvailable = !continuityRunReceipt.error;
 
   const { data: activeRows, error: activeError } = await supabase
     .from("ht_opportunity_ledger")
@@ -668,6 +751,17 @@ async function collect() {
     observationsPersisted: observedCount,
     outcomesUpdated,
     barsUnavailable,
+    sessionContinuity: {
+      modelVersion: "ht-session-continuity-shadow-v1",
+      authority: "research_only",
+      expected: continuityCandidates.length,
+      persisted: continuityPersisted,
+      failed: continuityCandidates.length - continuityPersisted,
+      reconciled: continuityReconciled,
+      providerRequestsAdded: 0,
+      available: continuityResearchAvailable,
+      errors: continuityErrors,
+    },
     timestamp: observedAt,
   };
 }

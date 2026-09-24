@@ -143,6 +143,28 @@ only while the stock clock is closed. This does not authorize Agent entries,
 rehabilitate misaligned ProX evidence, or modify any ranking/eligibility formula.
 Desktop/mobile consumers must not interpret a new `presentedAt` as market freshness.
 
+## Session Continuity shadow evaluator
+
+`lib/session-continuity.ts` owns the research-only
+`ht-session-continuity-shadow-v1` receipt. It freezes the provider-aligned
+previous close, current-session open/high, gap retention, relative volume, and
+bounded public ProX pulse state already present in the Canonical frame. It does
+not fetch market data, create a browser poll, select a ticker, change a score,
+or alter opportunity eligibility.
+
+Migration `0063_session_continuity_shadow.sql` records the first eligible
+Before the Crowd episode and reconciles whether that same ticker later appears
+in the immutable Spot Momentum ledger within 15, 30, 45, and 60 minutes. A
+premarket episode is additionally measured at the regular open and open plus
+30 minutes. Tickers already present in Spot Momentum at or before the first
+Before the Crowd receipt are marked unavailable for graduation analysis so the
+research label cannot leak its answer into its inputs.
+
+The continuity label may be shown as explanatory trader context. Its authority
+map is permanently false for Canonical, ProX, Agent risk, Paper, and execution.
+Any future use in ranking requires a new version, owner approval, fixed
+out-of-sample evidence, and a separate regression-protected promotion change.
+
 ## Legacy local intelligence still in `app/page.tsx`
 
 The remaining local helpers support secondary legacy surfaces such as older

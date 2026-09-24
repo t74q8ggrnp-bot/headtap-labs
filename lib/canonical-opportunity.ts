@@ -19,6 +19,7 @@ import {
   buildPriceDiscoveryScenario,
   type PriceDiscoveryScenarioBands,
 } from "@/lib/price-discovery-scenarios";
+import { evaluateSessionContinuity } from "@/lib/session-continuity";
 
 export { getCanonicalMomentumMagnitude } from "@/lib/canonical-momentum";
 
@@ -858,6 +859,20 @@ export function evaluateCanonicalOpportunity(
           : tier === "watch"
             ? "👀"
             : "🔎";
+  const sessionContinuity = evaluateSessionContinuity({
+    price: candidate.price,
+    previousCloseChangePercent: candidate.change,
+    sessionOpenPrice: candidate.sessionOpenPrice,
+    changeFromOpenPercent: candidate.changeFromOpenPercent,
+    sessionHighPrice: candidate.sessionHighPrice,
+    pullbackFromSessionHighPercent:
+      candidate.pullbackFromSessionHighPercent,
+    relativeVolume: candidate.relativeVolume,
+    momentumScore: candidate.momentumScore,
+    scanSession: candidate.scanSession,
+    providerAsOf: decisionMarketDataAsOf,
+    proxState: proxIntelligence?.pulse?.state ?? null,
+  });
 
   return {
     ...candidate,
@@ -895,6 +910,7 @@ export function evaluateCanonicalOpportunity(
     engineVersion: CANONICAL_OPPORTUNITY_VERSION,
     sourceRunId,
     proxIntelligence,
+    sessionContinuity,
     proxChallenger,
     setupType: sessionReclaim ? "session_reclaim" : "standard",
     displayChange: momentumReferenceChange,

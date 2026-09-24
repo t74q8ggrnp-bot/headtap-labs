@@ -129,6 +129,14 @@ export default function MobileSpotMomentumCard({
               <dd>{opportunity.stage}</dd>
             </div>
           </dl>
+          {opportunity.sessionContinuity ? (
+            <p className="mt-2 text-[8px] font-bold leading-4 text-zinc-500">
+              Session continuity · <span className="text-zinc-300">{opportunity.sessionContinuity.label}</span>
+              {opportunity.sessionContinuity.gapRetentionPercent === null
+                ? ""
+                : ` · ${opportunity.sessionContinuity.gapRetentionPercent.toFixed(0)}% retained`}
+            </p>
+          ) : null}
           <div className="ht-mobile-spot-badges flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-black text-zinc-400">{opportunity.stage}</span>
             <span className={`rounded-full border px-2.5 py-0.5 text-[9px] font-black ${view.positionLabel === "EARLY" ? "border-green-400/20 bg-green-500/[0.06] text-green-400" : "border-zinc-700 text-zinc-600"}`}>

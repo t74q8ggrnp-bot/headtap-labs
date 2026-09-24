@@ -437,6 +437,12 @@ minutes. Frozen ProX evidence is explanatory segmentation only: the ledger
 cannot change ProX scoring or cadence, and ProX conclusions cannot be treated
 as independent labels for training Canonical.
 
+Session Continuity research may freeze the already-bounded public ProX pulse
+state as explanatory segmentation beside previous-close and current-session
+facts. It may not consume the independent ProX Edge Score, change ProX cadence,
+write back into ProX, or treat the pulse as a ground-truth outcome. Graduation
+is measured only from the later immutable Canonical lane receipt.
+
 ## Promotion ladder
 
 ProX authority expands only through explicit, measured stages:

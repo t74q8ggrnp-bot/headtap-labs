@@ -3,6 +3,7 @@ import type { ExplosionAssessment } from "@/lib/canonical-opportunity";
 import type { MarketStock, TradeFrameworkDisplay } from "@/lib/contracts/market";
 import type { ProxIntelligencePacket } from "@/lib/prox/intelligence";
 import type { ProxShadowChallenger } from "@/lib/prox/challenger-score";
+import type { SessionContinuityReceipt } from "@/lib/session-continuity";
 
 export type OpportunityStrategy = "spot_momentum" | "before_the_crowd";
 export type OpportunityTier = "scanner" | "watch" | "feature" | "hero";
@@ -54,6 +55,7 @@ export type Opportunity = {
   explosionAssessment?: ExplosionAssessment | null;
   proxIntelligence?: ProxIntelligencePacket | null;
   proxChallenger?: ProxShadowChallenger | null;
+  sessionContinuity?: SessionContinuityReceipt | null;
   strategy?: OpportunityStrategy;
   signalStrength?: number;
   strategyScore?: number;
@@ -242,6 +244,8 @@ export function normalizeOpportunity(raw: unknown): Opportunity {
       null) as ProxIntelligencePacket | null,
     proxChallenger: (source.proxChallenger ??
       null) as ProxShadowChallenger | null,
+    sessionContinuity: (source.sessionContinuity ??
+      null) as SessionContinuityReceipt | null,
     strategy: source.strategy as OpportunityStrategy | undefined,
     signalStrength: numberValue(source.signalStrength),
     strategyScore: numberValue(source.strategyScore ?? source.opportunityScore),

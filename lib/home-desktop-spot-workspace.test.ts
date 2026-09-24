@@ -14,7 +14,9 @@ test("desktop Home reuses the Market terminal shell with a Canonical Spot Moment
   assert.match(home, /terminalSurface\("spot-momentum"\)/);
   assert.match(surface, /experience === "spot-momentum"/);
   assert.equal(surface.match(/<HomeReferenceChart/g)?.length, 1);
-  assert.match(intelligence, /HT Agent X targets/);
+  assert.match(intelligence, /HT Agent X plan/);
+  assert.match(intelligence, /Session continuity/);
+  assert.match(intelligence, /Entry zone/);
   assert.match(intelligence, /Pro X evidence/);
   assert.match(intelligence, /Risk and R\/R are withheld until verified support/);
   assert.match(css, /data-application-route="discovery"[^\n]*> \.ht-desktop-global-header/);
