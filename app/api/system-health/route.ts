@@ -3673,7 +3673,15 @@ export async function GET(request: Request) {
 
   try {
     if (!supabase) throw new Error("Supabase unavailable");
-    const continuityResult = await supabase.rpc("ht_session_continuity_health");
+    const [continuityResult, continuityRunResult] = await Promise.all([
+      supabase.rpc("ht_session_continuity_health"),
+      supabase
+        .from("ht_session_continuity_runs")
+        .select("observation_minute,error_receipts")
+        .order("observation_minute", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
     if (continuityResult.error) throw continuityResult.error;
     const continuity = continuityResult.data && typeof continuityResult.data === "object"
       ? continuityResult.data as Record<string, unknown>
@@ -3688,6 +3696,17 @@ export async function GET(request: Request) {
       ? continuity.runs as Record<string, unknown>
       : {};
     const failed = Number(runs.failed ?? 0);
+    const latestFailureReceipts = continuityRunResult.error
+      ? [{
+          ticker: "*",
+          message: getErrorMessage(
+            continuityRunResult.error,
+            "Session Continuity failure receipts are unavailable.",
+          ),
+        }]
+      : Array.isArray(continuityRunResult.data?.error_receipts)
+        ? continuityRunResult.data.error_receipts.slice(0, 20)
+        : [];
     checks.push({
       name: "session_continuity_research",
       ok: boundaryReady && failed === 0,
@@ -3697,7 +3716,10 @@ export async function GET(request: Request) {
         : failed > 0
           ? `Session Continuity preserved ${failed} failed persistence receipts for review.`
           : `Session Continuity is logging Before the Crowd graduation outcomes at 15m, 30m, 45m, 60m, market open, and open +30m with zero added provider requests.`,
-      detail: continuity,
+      detail: {
+        ...continuity,
+        latestFailureReceipts,
+      },
     });
   } catch (err: unknown) {
     checks.push({

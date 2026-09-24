@@ -10,6 +10,10 @@ const collector = readFileSync(
   new URL("../app/api/opportunity-ledger/route.ts", import.meta.url),
   "utf8",
 );
+const healthRoute = readFileSync(
+  new URL("../app/api/system-health/route.ts", import.meta.url),
+  "utf8",
+);
 
 test("0063 installs immutable deduplicated continuity episodes with no authority", () => {
   assert.match(migration, /unique \(trading_date, ticker, model_version\)/);
@@ -38,4 +42,11 @@ test("the existing opportunity collector owns persistence without adding a provi
   assert.match(collector, /ht_reconcile_session_continuity_outcomes/);
   assert.match(collector, /providerRequestsAdded: 0/);
   assert.equal(collector.match(/fetchMinuteBars\(/g)?.length, 2);
+});
+
+test("research health exposes preserved persistence failures for diagnosis", () => {
+  assert.match(healthRoute, /ht_session_continuity_runs/);
+  assert.match(healthRoute, /error_receipts/);
+  assert.match(healthRoute, /latestFailureReceipts/);
+  assert.match(healthRoute, /blocking: false/);
 });
