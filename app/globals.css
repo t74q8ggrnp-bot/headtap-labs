@@ -2361,6 +2361,7 @@ body:has(.ht-dialog-sheet[open]) {
     background: #07090b;
   }
   .ht-responsive-shell[data-application-route="paper"] .ht-paper-route {
+    --ht-paper-chart-height: clamp(330px, calc(100dvh - 360px), 660px);
     height: 100dvh;
     min-height: 100dvh;
     overflow: hidden;

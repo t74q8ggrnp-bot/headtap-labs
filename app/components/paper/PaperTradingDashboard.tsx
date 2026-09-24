@@ -760,7 +760,7 @@ export default function PaperTradingDashboard() {
                         </Link>
                       </div>
                     </div>
-                    <HeroPriceChart asset="stock" symbol={loadedInstrument.symbol} accent="cyan" height="clamp(330px, calc(100dvh - 360px), 660px)" />
+                    <HeroPriceChart asset="stock" symbol={loadedInstrument.symbol} accent="cyan" height="var(--ht-paper-chart-height, 330px)" />
                     <div className="mt-4 grid grid-cols-2 gap-y-4 border-t border-white/8 pt-4 sm:grid-cols-4">
                       <AccountMetric label="Open" value={money(loadedInstrument.sessionOpen || null)} />
                       <AccountMetric label="High" value={money(loadedInstrument.sessionHigh || null)} />
