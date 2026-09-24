@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useTerminalPriceAlerts } from "@/app/hooks/useTerminalPriceAlerts";
 import HomeTradePlan, { type HomeTradePlanState } from "@/app/components/agent/HomeTradePlan";
 import type { TradeFrameworkDisplay } from "@/lib/contracts/market";
 import type { HtTradePlan } from "@/lib/ht-agent/contracts";
@@ -44,6 +45,12 @@ export default function HomeSpotMomentumIntelligence({
     : "Unavailable";
   const evidence = opportunity.signals.slice(0, 5);
   const riskMeasured = framework !== null || opportunity.explosionAssessment?.scenarioBands?.structuralRisk !== null;
+  const targetAlerts = useTerminalPriceAlerts(opportunity.ticker, displayPrice);
+  const distance = (target: number | null | undefined) => (
+    typeof target === "number" && displayPrice !== null && displayPrice > 0
+      ? `${target >= displayPrice ? "+" : ""}${((target / displayPrice - 1) * 100).toFixed(1)}%`
+      : null
+  );
 
   return (
     <section className="ht-home-spot-intelligence" aria-labelledby="ht-home-spot-title">
@@ -69,8 +76,8 @@ export default function HomeSpotMomentumIntelligence({
       <section className="ht-home-spot-targets" aria-label="HT Agent X targets">
         <h3>HT Agent X targets</h3>
         <div>
-          <p><span>Target 1</span><strong className="ht-tabular-numbers">{targetPrice(plan?.targetOne)}</strong></p>
-          <p><span>Target 2</span><strong className="ht-tabular-numbers">{targetPrice(plan?.targetTwo)}</strong></p>
+          <p><span>Target 1 {distance(plan?.targetOne) ? `· ${distance(plan?.targetOne)}` : ""}</span><strong className="ht-tabular-numbers">{targetPrice(plan?.targetOne)}</strong></p>
+          <p><span>Target 2 {distance(plan?.targetTwo) ? `· ${distance(plan?.targetTwo)}` : ""}</span><strong className="ht-tabular-numbers">{targetPrice(plan?.targetTwo)}</strong></p>
         </div>
         <small>
           {planState === "available"
@@ -81,6 +88,14 @@ export default function HomeSpotMomentumIntelligence({
                 ? "Checking the aligned Agent X plan…"
                 : "No aligned Agent X targets are currently formed."}
         </small>
+        {plan ? (
+          <div className="ht-home-spot-targets__meta">
+            <span>Invalidation {targetPrice(plan.invalidation)}</span>
+            <span>{Number.isFinite(Date.parse(plan.evidenceAsOf)) ? `Evidence ${new Date(plan.evidenceAsOf).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}` : "Evidence time unavailable"}</span>
+            {plan.targetOne !== null ? <button type="button" onClick={() => targetAlerts.addAlert({ price: plan.targetOne!, label: "Target 1", source: "agent_target", direction: "at_or_above" })}>Alert T1</button> : null}
+            {plan.targetTwo !== null ? <button type="button" onClick={() => targetAlerts.addAlert({ price: plan.targetTwo!, label: "Target 2", source: "agent_target", direction: "at_or_above" })}>Alert T2</button> : null}
+          </div>
+        ) : null}
         <HomeTradePlan
           symbol={opportunity.ticker}
           showCard={false}

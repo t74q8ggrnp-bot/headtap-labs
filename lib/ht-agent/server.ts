@@ -32,6 +32,7 @@ import {
   type HtAgentDecisionFrame,
   type HtAgentMode,
   type HtAgentProxEvidence,
+  type HtAgentTargetCalibrationSummary,
   type HtTradePlan,
 } from "./contracts";
 import { buildHtAgentCohorts, decideHtAgentAction } from "./decision";
@@ -1259,6 +1260,79 @@ export async function loadHtAgentTradePlans(
       plan,
     }];
   });
+  let targetCalibration: HtAgentTargetCalibrationSummary | null = null;
+  if (requestedSymbol) {
+    try {
+      const currentEpisode = await context.service
+        .from("ht_agent_target_research_episodes")
+        .select("canonical_lane")
+        .eq("profile_id", profile.id)
+        .eq("symbol", requestedSymbol)
+        .order("provider_timestamp", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (currentEpisode.error) throw currentEpisode.error;
+      const lane = currentEpisode.data?.canonical_lane;
+      if (lane === "momentum" || lane === "before_crowd") {
+        const episodeRead = await context.service
+          .from("ht_agent_target_research_episodes")
+          .select("id,horizon")
+          .eq("profile_id", profile.id)
+          .eq("canonical_lane", lane)
+          .order("provider_timestamp", { ascending: false })
+          .limit(300);
+        if (episodeRead.error) throw episodeRead.error;
+        const episodes = (episodeRead.data ?? []) as Array<{ id: string; horizon: "15m" | "60m" | "session" }>;
+        const resultRead = episodes.length > 0
+          ? await context.service
+              .from("ht_agent_target_research_results")
+              .select("episode_id,resolution_state,outcome_code")
+              .in("episode_id", episodes.map((episode) => episode.id))
+          : { data: [], error: null };
+        if (resultRead.error) throw resultRead.error;
+        const resultByEpisode = new Map(
+          ((resultRead.data ?? []) as Array<{ episode_id: string; resolution_state: string; outcome_code: string }>)
+            .map((result) => [result.episode_id, result]),
+        );
+        const horizons = (["15m", "60m", "session"] as const).map((horizon) => {
+          const cohort = episodes.filter((episode) => episode.horizon === horizon);
+          const results = cohort.flatMap((episode) => {
+            const result = resultByEpisode.get(episode.id);
+            return result ? [result] : [];
+          });
+          const measured = results.filter((result) => result.resolution_state === "measured");
+          const targetOneReached = measured.filter((result) => [
+            "target_two_before_stop",
+            "target_one_before_stop",
+            "target_one_then_stop",
+          ].includes(result.outcome_code)).length;
+          return {
+            horizon,
+            expected: cohort.length,
+            persisted: results.length,
+            measured: measured.length,
+            unavailable: results.filter((result) => result.resolution_state === "unavailable").length,
+            pending: Math.max(0, cohort.length - results.length),
+            targetOneReached,
+            targetOneReachRatePercent: measured.length > 0
+              ? Number((targetOneReached / measured.length * 100).toFixed(1))
+              : null,
+          };
+        });
+        const measuredCount = horizons.reduce((sum, horizon) => sum + horizon.measured, 0);
+        targetCalibration = {
+          version: "ht-agent-target-calibration-summary-v1",
+          authority: "research_only",
+          lane,
+          readiness: measuredCount >= 50 ? "calibrated" : measuredCount >= 20 ? "emerging" : "collecting",
+          horizons,
+          note: "Read-only historical target evidence for the same Canonical lane. It does not change live targets, scoring, risk, or Paper authority.",
+        };
+      }
+    } catch (error) {
+      console.warn("[ht-agent] optional target calibration unavailable", error);
+    }
+  }
   return {
     generatedAt: new Date().toISOString(),
     marketSession: activeSession,
@@ -1268,6 +1342,7 @@ export async function loadHtAgentTradePlans(
       mode: profile.mode,
     },
     plans,
+    targetCalibration,
     authority: {
       detection: "canonical",
       research: "independent_prox",

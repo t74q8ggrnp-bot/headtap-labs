@@ -353,6 +353,11 @@ type SavedViewport = {
   range: { from: number; to: number };
 };
 
+// Preserve the user's inspected position while the shared terminal chart moves
+// between Home, Market, and Paper during the same browser session. This holds
+// no market data and never causes a provider request.
+const retainedTerminalViewports = new Map<string, SavedViewport>();
+
 function chartTimeToDate(time: Time) {
   if (typeof time === "number") return new Date(time * 1_000);
   if (typeof time === "string") return new Date(`${time}T00:00:00.000Z`);
@@ -509,6 +514,10 @@ export function MarketChartCanvas({
     ? intervalSeconds
     : 60;
   const resolvedViewportKey = `${viewportKey}:${compact ? "compact" : "full"}`;
+
+  if (savedViewportRef.current === null) {
+    savedViewportRef.current = retainedTerminalViewports.get(resolvedViewportKey) ?? null;
+  }
   const showVwap = Boolean(indicators?.vwap);
   const showEma9 = Boolean(indicators?.ema9);
   const showEma20 = Boolean(indicators?.ema20);
@@ -749,6 +758,7 @@ export function MarketChartCanvas({
         pointCount: slotCountRef.current,
         range,
       };
+      retainedTerminalViewports.set(activeViewportKeyRef.current, savedViewportRef.current);
       visibleCoverageCallbackRef.current?.(
         resolveMarketChartVisibleCoverage(
           latestFrameRef.current?.slots ?? [],
@@ -999,6 +1009,7 @@ export function MarketChartCanvas({
         pointCount: frame.slots.length,
         range,
       };
+      retainedTerminalViewports.set(resolvedViewportKey, savedViewportRef.current);
     }
     visibleCoverageCallbackRef.current?.(
       resolveMarketChartVisibleCoverage(frame.slots, range),

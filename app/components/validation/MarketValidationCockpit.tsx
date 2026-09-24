@@ -37,6 +37,20 @@ type ValidationPayload = {
   coverage?: { expected: number; persisted: number; complete: boolean };
   marketClock?: { session: string; active: boolean };
   rows?: ValidationRow[];
+  operatorTelemetry?: {
+    window: string;
+    receiptCount: number;
+    providerRequestCount: number;
+    failureReceiptCount: number;
+    latestReceiptAt: string | null;
+    byProvider: Array<{ provider: string; requestCount: number }>;
+  } | null;
+  researchContracts?: {
+    pairedScorecard: string;
+    missPatterns: string;
+    authority: string;
+    providerRequestsAdded: number;
+  };
 };
 
 type HealthPayload = {
@@ -211,6 +225,24 @@ export default function MarketValidationCockpit() {
               </table>
             </div>
           )}
+        </section>
+
+        <section className="grid border-t border-white/8 sm:grid-cols-2 xl:grid-cols-5" aria-label="Provider efficiency and research contracts">
+          {[
+            ["Telemetry window", payload?.operatorTelemetry?.window ?? "Unavailable"],
+            ["Provider requests", payload?.operatorTelemetry ? String(payload.operatorTelemetry.providerRequestCount) : "—"],
+            ["Request receipts", payload?.operatorTelemetry ? String(payload.operatorTelemetry.receiptCount) : "—"],
+            ["Failure receipts", payload?.operatorTelemetry ? String(payload.operatorTelemetry.failureReceiptCount) : "—"],
+            ["Research authority", payload?.researchContracts?.authority?.replaceAll("_", " ") ?? "Read-only research"],
+          ].map(([label, value]) => (
+            <div key={label} className="border-b border-white/8 px-5 py-4 sm:border-r xl:border-b-0">
+              <p className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-600">{label}</p>
+              <p className="mt-2 text-sm font-black capitalize text-zinc-200">{value}</p>
+            </div>
+          ))}
+          <p className="px-5 py-3 text-[9px] font-semibold leading-4 text-zinc-600 sm:col-span-2 xl:col-span-5">
+            Paired scorecard and miss-pattern diagnostics remain research-only and add {payload?.researchContracts?.providerRequestsAdded ?? 0} provider requests. Request receipts are durable server telemetry, not browser endpoint counts.
+          </p>
         </section>
       </div>
     </main>

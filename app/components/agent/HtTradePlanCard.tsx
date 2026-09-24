@@ -1,5 +1,8 @@
+"use client";
+
 import Image from "next/image";
-import type { HtTradePlan } from "@/lib/ht-agent/contracts";
+import { useTerminalPriceAlerts } from "@/app/hooks/useTerminalPriceAlerts";
+import type { HtAgentTargetCalibrationSummary, HtTradePlan } from "@/lib/ht-agent/contracts";
 
 const money = (value: number | null) => value === null
   ? "Not formed"
@@ -42,10 +45,12 @@ export default function HtTradePlanCard({
   plan,
   current = true,
   compact = false,
+  calibration = null,
 }: {
   plan: HtTradePlan;
   current?: boolean;
   compact?: boolean;
+  calibration?: HtAgentTargetCalibrationSummary | null;
 }) {
   const entry = plan.entryZone
     ? `${money(plan.entryZone.low)}–${money(plan.entryZone.high)}`
@@ -53,6 +58,20 @@ export default function HtTradePlanCard({
   const target = plan.targetTwo !== null
     ? `${money(plan.targetOne)} / ${money(plan.targetTwo)}`
     : money(plan.targetOne);
+  const alerts = useTerminalPriceAlerts(plan.symbol, plan.currentPrice);
+  const targetDistance = (value: number | null) => value === null || plan.currentPrice <= 0
+    ? "—"
+    : `${value >= plan.currentPrice ? "+" : ""}${((value / plan.currentPrice - 1) * 100).toFixed(1)}%`;
+  const evidenceTime = Number.isFinite(Date.parse(plan.evidenceAsOf))
+    ? new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZoneName: "short",
+      }).format(new Date(plan.evidenceAsOf))
+    : "Unavailable";
+  const calibrationHorizon = calibration?.horizons.find((item) => item.horizon === "60m") ?? null;
 
   return (
     <section className={`overflow-hidden rounded-2xl border ${tone(plan.status)}`}>
@@ -104,6 +123,33 @@ export default function HtTradePlanCard({
               <p className="mt-1 font-mono text-[10px] font-black text-zinc-300">{value}</p>
             </div>
           ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[9px] font-bold text-zinc-500">
+          <span>Evidence {evidenceTime}</span>
+          <span>Invalidation {money(plan.invalidation)}</span>
+          <span>Calibration {calibration?.readiness ?? "collecting"}</span>
+          {calibrationHorizon?.targetOneReachRatePercent !== null && calibrationHorizon?.targetOneReachRatePercent !== undefined ? (
+            <span>Same-lane 60m T1 reach {calibrationHorizon.targetOneReachRatePercent.toFixed(1)}% · n={calibrationHorizon.measured}</span>
+          ) : <span>Same-lane reach rate forming</span>}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2" aria-label="Agent target alerts">
+          {([[
+            "Target 1",
+            plan.targetOne,
+          ], [
+            "Target 2",
+            plan.targetTwo,
+          ]] as const).map(([label, value]) => value === null ? null : (
+            <button
+              key={label}
+              type="button"
+              className="rounded-lg border border-orange-400/15 px-3 py-2 text-[9px] font-black text-orange-300 transition hover:border-orange-400/35"
+              onClick={() => alerts.addAlert({ price: value, label, source: "agent_target", direction: "at_or_above" })}
+            >
+              Alert {label} · {targetDistance(value)}
+            </button>
+          ))}
+          {alerts.active.length > 0 ? <span className="self-center text-[8px] font-bold text-zinc-600">{alerts.active.length} active on this device</span> : null}
         </div>
         <details className="group mt-3 rounded-xl border border-white/8 bg-black/20">
           <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500 marker:hidden">

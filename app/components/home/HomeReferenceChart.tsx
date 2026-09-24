@@ -11,6 +11,8 @@ import type {
 } from "@/app/components/market/MarketChartUserDrawings";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import { useChartLayerPreferences } from "@/app/hooks/useChartLayerPreferences";
+import { useTerminalWorkspacePreferences } from "@/app/hooks/useTerminalWorkspacePreferences";
+import { useTerminalPriceAlerts } from "@/app/hooks/useTerminalPriceAlerts";
 import { calculateMarketIndicators } from "@/lib/market-indicators";
 import {
   deriveMarketChartTimeframeBars,
@@ -85,9 +87,11 @@ function validStoredDrawings(value: unknown): MarketChartUserDrawing[] {
 export default function HomeReferenceChart({
   symbol,
   presentation = "market",
+  embedded = false,
 }: {
   symbol: string;
   presentation?: "market" | "spot-momentum";
+  embedded?: boolean;
 }) {
   const marketView = useLiveMarketView(symbol, { chart: true });
   const defaultVisibleRange: MarketChartVisibleRange = presentation === "spot-momentum" ? "90m" : "2h";
@@ -108,6 +112,30 @@ export default function HomeReferenceChart({
   const drawMenuRef = useRef<HTMLDetailsElement | null>(null);
   const chartLayers = useChartLayerPreferences();
   const layers = chartLayers.preferences;
+  const continuityFallback = useMemo(() => ({
+    symbol,
+    timeframe: "1m" as const,
+    visibleRange: defaultVisibleRange,
+    priceLayers: { candles: true, line: false },
+  }), [defaultVisibleRange, symbol]);
+  const workspacePreferences = useTerminalWorkspacePreferences(continuityFallback);
+  const updateWorkspacePreferences = workspacePreferences.update;
+  const priceAlerts = useTerminalPriceAlerts(symbol, marketView.quote?.price ?? null);
+
+  useEffect(() => {
+    const preferences = workspacePreferences.preferences;
+    const timer = window.setTimeout(() => {
+      setTimeframe(preferences.timeframe);
+      setVisibleRange(preferences.visibleRange);
+      setPriceLayers(preferences.priceLayers);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [workspacePreferences.preferences]);
+
+  useEffect(() => {
+    if (!workspacePreferences.hydrated) return;
+    updateWorkspacePreferences({ symbol });
+  }, [symbol, updateWorkspacePreferences, workspacePreferences.hydrated]);
 
   useEffect(() => {
     const mobileQuery = window.matchMedia("(max-width: 767px)");
@@ -116,7 +144,9 @@ export default function HomeReferenceChart({
     const apply = () => {
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
       setHeight(
-        landscapeQuery.matches
+        embedded
+          ? Math.max(360, Math.min(540, viewportHeight - 260))
+          : landscapeQuery.matches
           ? Math.max(180, viewportHeight - 164)
           : mobileQuery.matches
           ? Math.min(620, Math.max(330, viewportHeight - 302))
@@ -142,7 +172,7 @@ export default function HomeReferenceChart({
       window.removeEventListener("resize", apply);
       window.visualViewport?.removeEventListener("resize", apply);
     };
-  }, [defaultVisibleRange]);
+  }, [defaultVisibleRange, embedded]);
 
   useEffect(() => {
     const storageKey = `htlabs:user-drawings:v1:${symbol}`;
@@ -203,9 +233,13 @@ export default function HomeReferenceChart({
     marketChartCoverageIsSparse(visibleCoverage)
     ? visibleCoverage
     : null;
+  const selectedHorizontalDrawing = drawingHistory.present.find((drawing) =>
+    drawing.id === selectedDrawingId && drawing.kind === "horizontal") ?? null;
+  const selectedAlertPrice = selectedHorizontalDrawing?.points[0]?.price ?? null;
 
   const selectVisibleRange = (range: MarketChartVisibleRange) => {
     setVisibleRange(range);
+    updateWorkspacePreferences({ visibleRange: range });
   };
 
   const commitDrawings = useCallback((next: MarketChartUserDrawing[]) => {
@@ -328,7 +362,7 @@ export default function HomeReferenceChart({
             height={height}
             compact={height < 400}
             timeZone="America/New_York"
-            viewportKey={`home-reference:${symbol}:${timeframe}`}
+            viewportKey={`ht-terminal:${symbol}:${timeframe}`}
             indicators={indicators}
             showVolume={layers.volume}
             layerHost={EMPTY_LAYER_HOST}
@@ -405,7 +439,10 @@ export default function HomeReferenceChart({
               key={option.id}
               type="button"
               aria-pressed={timeframe === option.id}
-              onClick={() => setTimeframe(option.id)}
+              onClick={() => {
+                setTimeframe(option.id);
+                updateWorkspacePreferences({ timeframe: option.id });
+              }}
             >
               {option.label}
             </button>
@@ -431,10 +468,12 @@ export default function HomeReferenceChart({
                   key={option}
                   type="button"
                   aria-pressed={priceLayers[option]}
-                  onClick={() => setPriceLayers((current) => ({
-                    ...current,
-                    [option]: !current[option],
-                  }))}
+                  onClick={() => setPriceLayers((current) => {
+                    const next = { ...current, [option]: !current[option] };
+                    const safe = next.candles || next.line ? next : current;
+                    updateWorkspacePreferences({ priceLayers: safe });
+                    return safe;
+                  })}
                 >
                   {option === "candles" ? "Candles" : "Line"}
                 </button>
@@ -475,8 +514,22 @@ export default function HomeReferenceChart({
               <button type="button" disabled={drawingHistory.future.length === 0} onClick={redoDrawing}>Redo</button>
               <button type="button" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}>Delete selected</button>
               <button type="button" aria-pressed={!drawingsVisible} onClick={toggleDrawingsVisible}>{drawingsVisible ? "Hide drawings" : "Show drawings"}</button>
+              <button
+                type="button"
+                disabled={selectedAlertPrice === null}
+                onClick={() => {
+                  if (selectedAlertPrice === null) return;
+                  priceAlerts.addAlert({
+                    price: selectedAlertPrice,
+                    source: "drawing",
+                    label: "Chart level",
+                  });
+                }}
+              >
+                Alert at selected level
+              </button>
             </div>
-            <p>{drawingHistory.present.length} saved on this device for {symbol}.</p>
+            <p>{drawingHistory.present.length} drawings · {priceAlerts.active.length} active alerts on this device for {symbol}.</p>
           </div>
         </details>
         <button
@@ -488,6 +541,12 @@ export default function HomeReferenceChart({
           Latest
         </button>
       </div>
+
+      {priceAlerts.latestTriggered ? (
+        <p className="htb-chart__local-alert" role="status" aria-live="polite">
+          Alert reached · {priceAlerts.latestTriggered.label} at {priceAlerts.latestTriggered.price.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 })}
+        </p>
+      ) : null}
 
       {sparseCoverage ? (
         <details

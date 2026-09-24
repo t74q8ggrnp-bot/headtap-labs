@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import HomeClient from "../HomeClient";
 import { normalizeMarketWorkspaceSymbol } from "@/lib/market-workspace-route";
+import TerminalRouteLoading from "@/app/components/ui/TerminalRouteLoading";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export default async function MarketPage({
     notFound();
   }
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<TerminalRouteLoading label="Opening the market terminal" />}>
       <HomeClient
         surface="market"
         initialMomentumPayload={null}

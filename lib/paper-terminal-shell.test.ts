@@ -11,7 +11,8 @@ test("Paper uses the shared terminal navigation without duplicating the legacy b
   assert.match(paper, /ht-paper-terminal-shell/);
   assert.match(paper, /ht-paper-terminal-content/);
   assert.doesNotMatch(paper, /<Link href="\/" aria-label="HT Labs home"><Image/);
-  assert.equal(paper.match(/<HeroPriceChart/g)?.length, 1);
+  assert.equal(paper.match(/<HomeReferenceChart/g)?.length, 1);
+  assert.doesNotMatch(paper, /<HeroPriceChart/);
 });
 
 test("Paper terminal keeps the existing order and account authority inside the shared shell", () => {

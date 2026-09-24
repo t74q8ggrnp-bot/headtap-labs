@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import type { HtTradePlan } from "@/lib/ht-agent/contracts";
+import type { HtAgentTargetCalibrationSummary, HtTradePlan } from "@/lib/ht-agent/contracts";
 import HtTradePlanCard from "./HtTradePlanCard";
 
 type TradePlanFeed = {
@@ -14,6 +14,7 @@ type TradePlanFeed = {
     ageSeconds: number | null;
     plan: HtTradePlan;
   }>;
+  targetCalibration?: HtAgentTargetCalibrationSummary | null;
 };
 
 export type HomeTradePlanState =
@@ -106,7 +107,7 @@ export default function HomeTradePlan({
   // the chart, where Pro X evidence now has the immediate context position.
   if (!showCard) return null;
 
-  if (selected) return <HtTradePlanCard plan={selected.plan} current={selected.current} compact={compact} />;
+  if (selected) return <HtTradePlanCard plan={selected.plan} current={selected.current} compact={compact} calibration={feed?.targetCalibration ?? null} />;
 
   return (
     <section className="rounded-2xl border border-violet-400/15 bg-violet-500/[0.035] px-4 py-3">

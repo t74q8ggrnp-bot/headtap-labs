@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { resolvePaperAccountStatus } from "@/lib/checkpoint-a-ui-state";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import HeroPriceChart from "@/app/components/market/HeroPriceChart";
+import HomeReferenceChart from "@/app/components/home/HomeReferenceChart";
 import { useLiveMarketView } from "@/app/hooks/useLiveMarketView";
 import type {
   PaperApiResponse,
@@ -753,14 +753,14 @@ export default function PaperTradingDashboard() {
                         <span className="rounded-full bg-cyan-500/[0.07] px-3 py-1.5 capitalize text-cyan-300">{loadedInstrument.marketSession.replace("_", " ")}</span>
                         <span className="text-zinc-700">{marketView.label}</span>
                         <Link
-                          href={`/trade/${encodeURIComponent(loadedInstrument.symbol)}`}
+                          href={`/market?ticker=${encodeURIComponent(loadedInstrument.symbol)}`}
                           className="rounded-full border border-white/10 px-3 py-1.5 font-black text-zinc-400 transition hover:border-cyan-400/30 hover:text-cyan-300"
                         >
                           Open workspace ↗
                         </Link>
                       </div>
                     </div>
-                    <HeroPriceChart asset="stock" symbol={loadedInstrument.symbol} accent="cyan" height="var(--ht-paper-chart-height, 330px)" />
+                    <HomeReferenceChart symbol={loadedInstrument.symbol} embedded />
                     <div className="mt-4 grid grid-cols-2 gap-y-4 border-t border-white/8 pt-4 sm:grid-cols-4">
                       <AccountMetric label="Open" value={money(loadedInstrument.sessionOpen || null)} />
                       <AccountMetric label="High" value={money(loadedInstrument.sessionHigh || null)} />

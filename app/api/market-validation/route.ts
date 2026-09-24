@@ -213,6 +213,41 @@ export async function GET(request: Request) {
       };
     });
 
+    let operatorTelemetry: Record<string, unknown> | null = null;
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+      const telemetryRead = await context.service
+        .from("ht_external_request_telemetry")
+        .select("provider,endpoint,request_count,outcome,recorded_at")
+        .gte("recorded_at", since)
+        .order("recorded_at", { ascending: false })
+        .limit(2_000);
+      if (telemetryRead.error) throw telemetryRead.error;
+      const telemetryRows = (telemetryRead.data ?? []) as Array<{
+        provider: string;
+        endpoint: string;
+        request_count: number;
+        outcome: string;
+        recorded_at: string;
+      }>;
+      const byProvider = new Map<string, number>();
+      for (const row of telemetryRows) {
+        byProvider.set(row.provider, (byProvider.get(row.provider) ?? 0) + Number(row.request_count));
+      }
+      operatorTelemetry = {
+        window: "24h",
+        receiptCount: telemetryRows.length,
+        providerRequestCount: telemetryRows.reduce((sum, row) => sum + Number(row.request_count), 0),
+        failureReceiptCount: telemetryRows.filter((row) => row.outcome === "error" || row.outcome === "unavailable").length,
+        latestReceiptAt: telemetryRows[0]?.recorded_at ?? null,
+        byProvider: [...byProvider.entries()].sort((left, right) => right[1] - left[1]).map(([provider, requestCount]) => ({ provider, requestCount })),
+      };
+    } catch (error) {
+      console.warn("[market-validation] optional request telemetry unavailable", {
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       status: "ready",
@@ -226,6 +261,13 @@ export async function GET(request: Request) {
       },
       marketClock: getStockMarketClock(),
       rows,
+      operatorTelemetry,
+      researchContracts: {
+        pairedScorecard: "prox-canonical-paired-scorecard-v1",
+        missPatterns: "prox-canonical-miss-patterns-v1",
+        authority: "read_only_research",
+        providerRequestsAdded: 0,
+      },
       generatedAt: new Date().toISOString(),
     }, { headers });
   } catch (error) {

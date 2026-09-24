@@ -219,3 +219,23 @@ export type HtTradePlan = {
   whyCouldLose: string;
   evidenceAsOf: string;
 };
+
+export type HtAgentTargetCalibrationHorizon = {
+  horizon: "15m" | "60m" | "session";
+  expected: number;
+  persisted: number;
+  measured: number;
+  unavailable: number;
+  pending: number;
+  targetOneReached: number;
+  targetOneReachRatePercent: number | null;
+};
+
+export type HtAgentTargetCalibrationSummary = {
+  version: "ht-agent-target-calibration-summary-v1";
+  authority: "research_only";
+  lane: "momentum" | "before_crowd";
+  readiness: "collecting" | "emerging" | "calibrated";
+  horizons: HtAgentTargetCalibrationHorizon[];
+  note: string;
+};
